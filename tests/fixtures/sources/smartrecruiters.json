@@ -1,0 +1,104 @@
+{
+ "offset": 0,
+ "limit": 100,
+ "totalFound": 64,
+ "content": [
+  {
+   "id": "744000153279439",
+   "name": "ANALISTA MARKETING PRODUTO JR ou PL -  36087",
+   "uuid": "6a551411-2bf6-442d-aef8-5d48f6986bbb",
+   "jobAdId": "888334b9-83d3-48f2-bb86-50021a6699ee",
+   "defaultJobAd": true,
+   "refNumber": "REF297658U",
+   "company": {
+    "identifier": "BoschGroup",
+    "name": "Bosch Group"
+   },
+   "releasedDate": "2026-10-02T22:35:26.714Z",
+   "location": {
+    "city": "Campinas",
+    "region": "SP",
+    "country": "br",
+    "address": "Avenida Robert Bosch",
+    "postalCode": "13064-765",
+    "remote": true,
+    "hybrid": false,
+    "latitude": "-22.8992722",
+    "longitude": "-47.1170748",
+    "fullLocation": "Campinas, SP, Brazil"
+   },
+   "industry": {
+    "id": "automotive",
+    "label": "Automotive"
+   },
+   "department": {},
+   "function": {
+    "id": "marketing",
+    "label": "Marketing"
+   },
+   "typeOfEmployment": {
+    "id": "permanent",
+    "label": "Full-time"
+   },
+   "experienceLevel": {
+    "id": "not_applicable",
+    "label": "Not Applicable"
+   },
+   "visibility": "PUBLIC",
+   "ref": "https://api.smartrecruiters.com/v1/companies/BoschGroup/postings/744000153279439",
+   "language": {
+    "code": "pt-BR",
+    "label": "Portuguese (Brazil)",
+    "labelNative": "português (Brasil)"
+   }
+  },
+  {
+   "id": "744000153258680",
+   "name": "Workshop Sales Representative",
+   "uuid": "80433c16-f1ed-46c8-a497-404a65b1f939",
+   "jobAdId": "f5dbfa47-ebae-44d6-a09e-c8f10214e231",
+   "defaultJobAd": true,
+   "refNumber": "REF297114V",
+   "company": {
+    "identifier": "BoschGroup",
+    "name": "Bosch Group"
+   },
+   "releasedDate": "2026-10-02T19:24:00.185Z",
+   "location": {
+    "city": "Oak Brook",
+    "region": "IL",
+    "country": "us",
+    "address": "Oakbrook Terrace",
+    "remote": true,
+    "hybrid": false,
+    "latitude": "41.8446393",
+    "longitude": "-87.9855459",
+    "fullLocation": "Oak Brook, IL, United States"
+   },
+   "industry": {
+    "id": "mechanical_engineering",
+    "label": "Mechanical Or Industrial Engineering"
+   },
+   "department": {},
+   "function": {
+    "id": "marketing",
+    "label": "Marketing"
+   },
+   "typeOfEmployment": {
+    "id": "permanent",
+    "label": "Full-time"
+   },
+   "experienceLevel": {
+    "id": "associate",
+    "label": "Associate"
+   },
+   "visibility": "PUBLIC",
+   "ref": "https://api.smartrecruiters.com/v1/companies/BoschGroup/postings/744000153258680",
+   "language": {
+    "code": "en",
+    "label": "English",
+    "labelNative": "English (US)"
+   }
+  }
+ ]
+}

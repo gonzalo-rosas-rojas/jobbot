@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Apply - honeypots (test fixture)</title>
+<style>
+  /* The tricks boards use to catch bots: fields a person can never see or reach. They sit in the
+     page layout (they have an offsetParent) and are named like the real fields, so a scan that
+     only asks "is it laid out" fills them and the board drops the application. */
+  .hp-opacity { opacity: 0; position: absolute; top: 0; left: 0; }
+  .hp-hidden { visibility: hidden; }
+  .hp-offscreen { position: absolute; left: -9999px; top: -9999px; }
+  .hp-above { position: absolute; top: -5000px; left: 20px; }
+  .hp-tiny { width: 1px; height: 1px; border: 0; padding: 0; }
+  .hp-zero { width: 0; height: 0; border: 0; padding: 0; }
+  .hp-clipped { height: 0; overflow: hidden; }
+  .hp-parent-opacity { opacity: 0; }
+  .vh { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .small { width: 44px; }
+</style>
+</head>
+<body>
+<!-- Nothing here submits anything. The real, visible fields come first; the honeypots follow. -->
+<h1>Apply for Senior AI Engineer</h1>
+<form id="app">
+  <div><label for="first_name">First name *</label> <input id="first_name" name="first_name" type="text" required></div>
+  <div><label for="real_email">Email *</label> <input id="real_email" name="email_address" type="email" required></div>
+  <div><label for="real_phone">Phone</label> <input id="real_phone" name="phone_number" type="tel"></div>
+  <!-- A small but visible box with its own label: still a question. -->
+  <div><label for="zip">ZIP</label> <input id="zip" class="small" name="zip" type="text" style="height: 22px"></div>
+  <!-- Visible, no label at all: its placeholder and, last, its name still say what it is. -->
+  <div><input id="nick" name="nickname" placeholder="Nickname" type="text"></div>
+  <div><input id="company_box" name="company" type="text"></div>
+  <div><label for="resume">Resume/CV *</label> <input id="resume" name="resume" type="file" required></div>
+
+  <!-- Honeypots, one trick each. -->
+  <input id="hp_opacity" class="hp-opacity" name="email" type="text" placeholder="Email" autocomplete="off">
+  <input id="hp_visibility" class="hp-hidden" name="phone" type="text" placeholder="Phone">
+  <div class="hp-offscreen"><input id="hp_left" name="name" type="text" placeholder="Name"></div>
+  <input id="hp_top" class="hp-above" name="email" type="text" placeholder="Email">
+  <input id="hp_tiny" class="hp-tiny" name="phone" type="text" placeholder="Phone">
+  <input id="hp_zero" class="hp-zero" name="name" type="text" placeholder="Name">
+  <div class="hp-clipped"><input id="hp_clipped" name="email" type="text" placeholder="Email"></div>
+  <div aria-hidden="true"><input id="hp_aria" name="phone" type="text" placeholder="Phone"></div>
+  <div class="hp-parent-opacity"><input id="hp_parent_opacity" name="name" type="text" placeholder="Name"></div>
+  <!-- On screen, normal size, but out of the tab order and with no label: bots only. -->
+  <div><input id="hp_tabindex" name="email" type="text" tabindex="-1" autocomplete="off"></div>
+  <!-- A hidden file input named like the resume, with no label: not a second CV slot. -->
+  <input id="hp_file" class="vh" name="resume" type="file">
+</form>
+</body>
+</html>

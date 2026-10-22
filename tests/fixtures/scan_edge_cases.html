@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Field scan edge cases (test fixture)</title></head>
+<body>
+<!-- Shapes the scan must not over-group or mislabel. Nothing here submits anything. -->
+<form>
+  <!-- Two radio groups in one fieldset that has no legend: each keeps its own question. -->
+  <fieldset>
+    <p>Pick a size</p>
+    <label><input type="radio" name="size" value="s"> Small</label>
+    <label><input type="radio" name="size" value="l"> Large</label>
+    <p>Pick a color</p>
+    <label><input type="radio" name="color" value="r"> Red</label>
+    <label><input type="radio" name="color" value="b"> Blue</label>
+  </fieldset>
+
+  <!-- Two unrelated required checkboxes side by side: each one is its own question. -->
+  <div>
+    <label><input type="checkbox" name="terms" required> I accept the terms of use</label>
+    <label><input type="checkbox" name="privacy" required> I accept the Privacy Policy</label>
+  </div>
+
+  <!-- A formatting toolbar is not a question: toggle buttons beside another control have no caption. -->
+  <div>
+    <div role="toolbar"><button type="button" aria-pressed="false">B</button><button type="button" aria-pressed="false">I</button></div>
+    <textarea aria-label="Cover note"></textarea>
+  </div>
+
+  <!-- A date input with its own label, and a native select. -->
+  <label for="born">Date of birth</label> <input id="born" type="date">
+  <label for="level">Level</label> <select id="level"><option>Junior</option><option>Senior</option></select>
+</form>
+</body>
+</html>

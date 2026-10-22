@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Apply - Ashby structure (test fixture)</title>
+<style>
+  /* Ashby draws the required star with CSS: the label text has no asterisk. */
+  ._required_f7cvd_91::after { content: "*"; color: #d33; margin-left: 2px; }
+  .mark::after { content: "*"; }
+  .vh { border: 0; clip: rect(0 0 0 0); clip-path: inset(50%); height: 1px; margin: 0 -1px -1px 0; overflow: hidden; padding: 0; position: absolute; width: 1px; white-space: nowrap; }
+</style>
+</head>
+<body>
+<!--
+  Structure copied from real jobs.ashbyhq.com application pages (Cohere, OpenAI, Notion, Replit),
+  cut down to one example of every kind of control. Public question text only; nothing personal.
+  There is no <form> element, like the real pages.
+-->
+<div class="_autofillPane_5yu8i_448 ashby-application-form-autofill-pane">
+  <div role="presentation" class="_root_xd2v0_1 ashby-application-form-autofill-input-root" data-state="default">
+    <input accept="application/pdf,.pdf" type="file" tabindex="-1" class="vh">
+    <h3 class="ashby-application-form-autofill-input-title">Autofill from resume</h3>
+    <p class="ashby-application-form-autofill-input-description">Upload your resume here to autofill key application fields.</p>
+    <button class="_button_zyh3g_28">Upload file</button>
+  </div>
+</div>
+
+<div class="_jobPostingForm_5yu8i_402 ashby-application-form-container">
+<div class="_section_5yu8i_86 ashby-application-form-section-container">
+  <div class="_fieldEntry_1e3gg_28 ashby-application-form-field-entry" data-field-path="_systemfield_name">
+    <label class="_heading_f7cvd_52 _required_f7cvd_91 _label_1e3gg_42 ashby-application-form-question-title" for="_systemfield_name">Name</label>
+    <div><input placeholder="Type here..." name="_systemfield_name" required id="_systemfield_name" type="text" class="ashby-application-form-input-text" value=""></div>
+  </div>
+  <div class="_fieldEntry_1e3gg_28 ashby-application-form-field-entry" data-field-path="phone-uuid">
+    <label class="_heading_f7cvd_52 _required_f7cvd_91 _label_1e3gg_42 ashby-application-form-question-title" for="phone-uuid">Phone Number</label>
+    <input placeholder="1-415-555-1234..." name="phone-uuid" required id="phone-uuid" type="tel" class="ashby-application-form-input-text" value="">
+  </div>
+  <div class="_fieldEntry_1e3gg_28 ashby-application-form-field-entry" data-field-path="_systemfield_email">
+    <label class="_heading_f7cvd_52 _required_f7cvd_91 _label_1e3gg_42 ashby-application-form-question-title" for="_systemfield_email">Email</label>
+    <div><input placeholder="hello@example.com..." name="_systemfield_email" required id="_systemfield_email" type="email" class="ashby-application-form-input-text" value=""></div>
+  </div>
+  <!-- The typeahead has no id and no name: the label's `for` points at nothing. -->
+  <div class="_fieldEntry_1e3gg_28 ashby-application-form-field-entry" data-field-path="_systemfield_location">
+    <label class="_heading_f7cvd_52 _required_f7cvd_91 _label_1e3gg_42 ashby-application-form-question-title" for="_systemfield_location">Location</label>
+    <div class="_inputContainer_d7ago_28">
+      <input class="_input_d7ago_28 ashby-application-form-input-autocomplete" placeholder="Start typing..." aria-autocomplete="list" aria-expanded="false" aria-haspopup="listbox" role="combobox" value="">
+      <button class="_container_pjyt6_1 _toggleButton_d7ago_32">v</button>
+    </div>
+  </div>
+  <div class="_fieldEntry_1e3gg_28 ashby-application-form-field-entry" data-field-path="linkedin-uuid">
+    <label class="_heading_f7cvd_52  _label_1e3gg_42 ashby-application-form-question-title" for="linkedin-uuid">LinkedIn</label>
+    <div><input placeholder="Type here..." name="linkedin-uuid" id="linkedin-uuid" type="text" class="ashby-application-form-input-text" value=""></div>
+  </div>
+  <!-- A star that only the stylesheet knows about: no `required` attribute, no class that says so. -->
+  <div class="_fieldEntry_1e3gg_28 ashby-application-form-field-entry" data-field-path="employer-uuid">
+    <label class="mark" for="employer-uuid">Current employer</label>
+    <div><input placeholder="Type here..." name="employer-uuid" id="employer-uuid" type="text" value=""></div>
+  </div>
+  <div class="_fieldEntry_1e3gg_28 ashby-application-form-field-entry" data-field-path="_systemfield_resume">
+    <label class="_heading_f7cvd_52 _required_f7cvd_91 _label_1e3gg_42 ashby-application-form-question-title" for="_systemfield_resume">Resume</label>
+    <div role="presentation" class="_container_10xk4_70  ashby-application-form-input-file">
+      <input accept="application/pdf,.pdf" type="file" tabindex="-1" id="_systemfield_resume" required class="vh">
+      <div class="ashby-application-form-input-file-dropzone"><button class="_button_zyh3g_28">Upload File</button></div>
+    </div>
+  </div>
+
+  <!-- A start date: a date picker whose only text is its placeholder. -->
+  <div class="_fieldEntry_1e3gg_28 ashby-application-form-field-entry" data-field-path="start-uuid">
+    <label class="_heading_f7cvd_52 _required_f7cvd_91 _label_1e3gg_42 ashby-application-form-question-title" for="start-uuid">When can you start a new role?</label>
+    <div class="react-datepicker-wrapper"><div class="react-datepicker__input-container">
+      <input type="text" placeholder="Pick date..." class="_input_gc9ve_28  _greedy_gc9ve_61 ashby-application-form-input-date" required value="">
+    </div></div>
+  </div>
+
+  <!-- Yes/No questions are two toggle buttons plus a hidden checkbox; the label's `for` points at nothing. -->
+  <div class="_fieldEntry_1e3gg_28 ashby-application-form-field-entry" data-field-path="auth-uuid">
+    <label class="_heading_f7cvd_52 _required_f7cvd_91 _label_1e3gg_42 ashby-application-form-question-title" for="auth-uuid">Are you authorized to work in the country where the job is located?</label>
+    <div class="_container_1svni_28 _yesno_1e3gg_148  ashby-application-form-input-yesno">
+      <button class="_container_pjyt6_1 _option_1svni_32  ashby-application-form-input-yesno-option" aria-pressed="false" data-option="yes">Yes</button>
+      <button class="_container_pjyt6_1 _option_1svni_32  ashby-application-form-input-yesno-option" aria-pressed="false" data-option="no">No</button>
+      <input type="checkbox" class="_input_1svni_78" tabindex="-1" name="auth-uuid" style="display: none;">
+    </div>
+  </div>
+  <div class="_fieldEntry_1e3gg_28 ashby-application-form-field-entry" data-field-path="sponsor-uuid">
+    <label class="_heading_f7cvd_52 _required_f7cvd_91 _label_1e3gg_42 ashby-application-form-question-title" for="sponsor-uuid">Will you now or in the future require sponsorship for employment visa status in this country?</label>
+    <div class="_description_1e3gg_48 ashby-application-form-question-description"><p>We may provide immigration and sponsorship support to new employees.</p></div>
+    <div class="_container_1svni_28 _yesno_1e3gg_148  ashby-application-form-input-yesno">
+      <button class="_container_pjyt6_1 _option_1svni_32  ashby-application-form-input-yesno-option" aria-pressed="false" data-option="yes">Yes</button>
+      <button class="_container_pjyt6_1 _option_1svni_32  ashby-application-form-input-yesno-option" aria-pressed="false" data-option="no">No</button>
+      <input type="checkbox" class="_input_1svni_78" tabindex="-1" name="sponsor-uuid" style="display: none;">
+    </div>
+  </div>
+  <div class="_fieldEntry_1e3gg_28 ashby-application-form-field-entry" data-field-path="office-uuid">
+    <label class="_heading_f7cvd_52  _label_1e3gg_42 ashby-application-form-question-title" for="office-uuid">Would you consider an office-based role?</label>
+    <!-- Nobody preselects a Yes/No on the real pages; this one is pressed to pin that the scan reports it. -->
+    <div class="_container_1svni_28 _yesno_1e3gg_148  ashby-application-form-input-yesno">
+      <button class="_container_pjyt6_1 _option_1svni_32  ashby-application-form-input-yesno-option" aria-pressed="false" data-option="yes">Yes</button>
+      <button class="_container_pjyt6_1 _option_1svni_32  ashby-application-form-input-yesno-option" aria-pressed="true" data-option="no">No</button>
+      <input type="checkbox" class="_input_1svni_78" tabindex="-1" name="office-uuid" style="display: none;">
+    </div>
+  </div>
+
+  <!-- Radio group (Cohere style): a fieldset without a legend, the question is a label with a dangling `for`. -->
+  <div data-field-path="radio-uuid">
+    <fieldset class="_container_1258i_28 _fieldEntry_1e3gg_28 ashby-application-form-input-radio-group">
+      <label class="_heading_f7cvd_52 _required_f7cvd_91 _label_1e3gg_42 ashby-application-form-question-title" for="radio-uuid">How many years of relevant professional experience do you have?</label>
+      <div class="_option_1258i_34 false ashby-application-form-input-radio-group-option">
+        <span class="_container_132c8_28"><span class="_circle_132c8_77"></span><input type="radio" id="radio-uuid-labeled-radio-0" name="radio-uuid" class="ashby-application-form-input-radio-group-option-radio"></span>
+        <label for="radio-uuid-labeled-radio-0" class="ashby-application-form-input-radio-group-option-label">1-2 years </label>
+      </div>
+      <div class="_option_1258i_34 false ashby-application-form-input-radio-group-option">
+        <span class="_container_132c8_28"><span class="_circle_132c8_77"></span><input type="radio" id="radio-uuid-labeled-radio-1" name="radio-uuid" class="ashby-application-form-input-radio-group-option-radio" checked></span>
+        <label for="radio-uuid-labeled-radio-1" class="ashby-application-form-input-radio-group-option-label">3-5 years</label>
+      </div>
+    </fieldset>
+  </div>
+
+  <div class="_fieldEntry_1e3gg_28 ashby-application-form-field-entry" data-field-path="extra-uuid">
+    <label class="_heading_f7cvd_52  _label_1e3gg_42 ashby-application-form-question-title" for="extra-uuid">Additional Information</label>
+    <textarea placeholder="Type here..." name="extra-uuid" id="extra-uuid" class="ashby-application-form-input-textarea" rows="4"></textarea>
+  </div>
+</div>
+
+<div class="_section_5yu8i_86 ashby-application-form-section-container">
+  <!-- Checkbox groups: a fieldset, a label with a dangling `for`, and every checkbox named after its own text. -->
+  <div data-field-path="hear-uuid">
+    <fieldset class="_container_1258i_28 _fieldEntry_1e3gg_28 ashby-application-form-input-checkbox-group">
+      <label class="_heading_f7cvd_52  _label_1e3gg_42 ashby-application-form-question-title" for="hear-uuid">How did you hear about this opportunity? (select all that apply)</label>
+      <div class="_option_1258i_34 ashby-application-form-input-checkbox-group-option">
+        <span class="ashby-application-form-input-checkbox-group-option-checkbox _container_1danv_28"><input type="checkbox" id="hear-uuid-labeled-checkbox-0" name="LinkedIn"></span>
+        <label for="hear-uuid-labeled-checkbox-0" class="ashby-application-form-input-checkbox-group-option-label">LinkedIn</label>
+      </div>
+      <div class="_option_1258i_34 ashby-application-form-input-checkbox-group-option">
+        <span class="ashby-application-form-input-checkbox-group-option-checkbox _container_1danv_28"><input type="checkbox" id="hear-uuid-labeled-checkbox-1" name="Glassdoor"></span>
+        <label for="hear-uuid-labeled-checkbox-1" class="ashby-application-form-input-checkbox-group-option-label">Glassdoor</label>
+      </div>
+    </fieldset>
+  </div>
+  <!-- A required acknowledgement: one checkbox, the star is CSS on the question label. -->
+  <div data-field-path="ack-uuid">
+    <fieldset class="_container_1258i_28 _fieldEntry_1e3gg_28 ashby-application-form-input-checkbox-group">
+      <label class="_heading_f7cvd_52 _required_f7cvd_91 _label_1e3gg_42 ashby-application-form-question-title" for="ack-uuid">Applicant Arbitration Agreement Acknowledgement</label>
+      <div class="_option_1258i_34 ashby-application-form-input-checkbox-group-option">
+        <span class="ashby-application-form-input-checkbox-group-option-checkbox _container_1danv_28"><input type="checkbox" id="ack-uuid-labeled-checkbox-0" name="I acknowledge that I have read the Arbitration Agreement."></span>
+        <label for="ack-uuid-labeled-checkbox-0" class="ashby-application-form-input-checkbox-group-option-label">I acknowledge that I have read the Arbitration Agreement.</label>
+      </div>
+    </fieldset>
+  </div>
+</div>
+</div>
+<script>
+  // What the real page's React does with a Yes/No question, enough for the filler's clicks: a click
+  // presses that button and releases its neighbour, and a second click on the pressed button
+  // releases it again (so a filler that clicked blindly would undo its own answer).
+  document.querySelectorAll('.ashby-application-form-input-yesno').forEach(function (box) {
+    var buttons = box.querySelectorAll('button');
+    var hidden = box.querySelector('input[type="checkbox"]');
+    buttons.forEach(function (button) {
+      button.addEventListener('click', function () {
+        var wasPressed = button.getAttribute('aria-pressed') === 'true';
+        buttons.forEach(function (other) { other.setAttribute('aria-pressed', 'false'); });
+        if (!wasPressed) button.setAttribute('aria-pressed', 'true');
+        hidden.checked = !wasPressed && button.getAttribute('data-option') === 'yes';
+      });
+    });
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Dropdowns (test fixture)</title>
+<style>
+  .select-shell { position: relative; }
+  .select__control { border: 1px solid #666; padding: 6px; min-width: 280px; cursor: pointer; }
+  .select__menu { position: absolute; background: #fff; border: 1px solid #999; min-width: 280px; z-index: 5; }
+  .select__option { padding: 4px 8px; cursor: pointer; }
+  .select__option:hover { background: #def; }
+  .remix-css-1a0ro4n-requiredInput { opacity: 0; width: 100%; height: 0; position: absolute; bottom: 0; left: 0; pointer-events: none; }
+</style>
+</head>
+<body>
+<h1>Apply (drop-down fixture)</h1>
+<form id="app">
+  <div id="fields"></div>
+  <div><label for="source">How did you hear about us? *</label> <input id="source" type="text" required></div>
+  <div><label for="resume">Resume/CV *</label> <input id="resume" type="file" required></div>
+</form>
+<script>
+  // Drop-downs built the way Greenhouse builds them (react-select): the label points at an input
+  // with role="combobox"; clicking opens a listbox of role="option" items; typing filters it;
+  // clicking an option shows it as the single value. `typeahead` lists only appear after typing,
+  // 250 ms later, like the school list that is fetched from the server.
+  // The page builds one set of drop-downs, chosen with ?set=NAME (the default is `base`). A def with
+  // `optional` has no star and no aria-required, like an optional question; `delay` is how late a
+  // typeahead answers, in ms (250 by default).
+  var sets = {
+    base: [
+      { id: 'q_us', label: 'Is your work location in the United States', options: ['Yes', 'No'] },
+      { id: 'country', label: 'Country', options: ['Argentina', 'Chad', 'Chile', 'Chile Islands'] },
+      { id: 'school', label: 'School', typeahead: ['Other', 'Otherton College', 'Stanford University'] },
+      // A place list: it answers "Santiago" with full names and finds nothing for "Santiago, Chile".
+      { id: 'city', label: 'Location (City)', typeahead: ['Santiago de Cali, Valle del Cauca, Colombia', 'Santiago, Dominican Republic', 'Santiago, Metropolitana, Chile'] },
+      // Single-choice race lists that also offer "Hispanic or Latino": any pick answers that
+      // question too, so neither is ever answered.
+      { id: 'race', label: 'Race', options: ['White (Not Hispanic or Latino)', 'Hispanic or Latino', 'White'] },
+      { id: 'ethnicity', label: 'Ethnicity', options: ['White (Not Hispanic or Latino)', 'Hispanic or Latino', 'Decline'] }
+    ],
+    // Optional questions whose options cannot take the bank's answer: they are skipped, not failed.
+    optional: [
+      { id: 'q_reloc', label: 'Are you open to relocation for this role?', options: ['Yes', 'No'], optional: true },
+      { id: 'q_race_opt', label: 'Race / Ethnicity', options: ['White (Not Hispanic or Latino)', 'Asian (Not Hispanic or Latino)', 'Decline to self-identify'], optional: true },
+      { id: 'q_us_opt', label: 'Is your work location in the United States', options: ['Yes', 'No, but I am willing to relocate to the US', 'No, and I am not willing to relocate'], optional: true }
+    ],
+    // The same kind of question, required: it keeps failing loudly.
+    required_prose: [
+      { id: 'q_reloc_req', label: 'Are you open to relocation for this role?', options: ['Yes', 'No'] }
+    ],
+    // A typeahead that answers 1.5 s after the last key: longer than the settle time of a list.
+    slow: [
+      { id: 'grad', label: 'Graduate school', typeahead: ['Other', 'Slow University'], delay: 1500 }
+    ]
+  };
+  var dropdowns = sets[new URLSearchParams(location.search).get('set') || 'base'];
+
+  dropdowns.forEach(function (def) {
+    var wrap = document.createElement('div');
+    wrap.className = 'select';
+    wrap.innerHTML =
+      '<label id="' + def.id + '-label" for="' + def.id + '" class="label select__label">' + def.label + (def.optional ? '' : '<span aria-hidden="true">*</span>') + '</label>' +
+      '<div class="select-shell"><div class="select__control">' +
+      '<div class="select__value-container"><div class="select__placeholder">Select...</div>' +
+      '<div class="select__input-container"><input class="select__input" id="' + def.id + '" type="text" autocomplete="off" ' +
+      'role="combobox" aria-autocomplete="list" aria-expanded="false" aria-haspopup="true" aria-labelledby="' + def.id + '-label" aria-required="' + (def.optional ? 'false' : 'true') + '"></div>' +
+      '</div></div>' +
+      // react-select's invisible validation helper, exactly as Greenhouse emits it: no id, no
+      // label, no type, hidden from assistive tech, after the control. It is not a question.
+      // Only a required drop-down has it.
+      (def.optional ? '' : '<input required tabindex="-1" aria-hidden="true" class="remix-css-1a0ro4n-requiredInput" value="">') +
+      '</div>';
+    document.getElementById('fields').appendChild(wrap);
+
+    var input = wrap.querySelector('input');
+    var shell = wrap.querySelector('.select-shell');
+    var listId = 'react-select-' + def.id + '-listbox';
+    var pool = def.options || def.typeahead;
+
+    function closeMenu() {
+      var menu = shell.querySelector('.select__menu');
+      if (menu) menu.remove();
+      input.setAttribute('aria-expanded', 'false');
+      input.removeAttribute('aria-controls');
+    }
+    function choose(text) {
+      closeMenu();
+      input.value = '';
+      wrap.querySelector('.select__placeholder').hidden = true;
+      var single = wrap.querySelector('.select__single-value');
+      if (!single) {
+        single = document.createElement('div');
+        single.className = 'select__single-value';
+        wrap.querySelector('.select__value-container').prepend(single);
+      }
+      single.textContent = text;
+    }
+    function render() {
+      var typed = input.value.toLowerCase();
+      var shown = pool.filter(function (o) { return o.toLowerCase().indexOf(typed) >= 0; });
+      if (def.typeahead && !typed) shown = [];
+      closeMenu();
+      input.setAttribute('aria-expanded', 'true');
+      input.setAttribute('aria-controls', listId);
+      var menu = document.createElement('div');
+      menu.className = 'select__menu';
+      var list = document.createElement('div');
+      list.id = listId;
+      list.setAttribute('role', 'listbox');
+      shown.forEach(function (text, i) {
+        var option = document.createElement('div');
+        option.className = 'select__option';
+        option.id = 'react-select-' + def.id + '-option-' + i;
+        option.setAttribute('role', 'option');
+        option.textContent = text;
+        option.addEventListener('click', function () { choose(text); });
+        list.appendChild(option);
+      });
+      if (!shown.length) {
+        var none = document.createElement('div');
+        none.className = 'select__menu-notice';
+        none.textContent = def.typeahead && !typed ? 'Type to search' : 'No options';
+        list.appendChild(none);
+      }
+      menu.appendChild(list);
+      shell.appendChild(menu);
+    }
+    wrap.querySelector('.select__control').addEventListener('mousedown', function () {
+      input.focus();
+      if (input.getAttribute('aria-expanded') !== 'true') render();
+    });
+    input.addEventListener('input', function () {
+      if (def.typeahead) setTimeout(render, def.delay || 250); else render();
+    });
+    input.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeMenu(); });
+  });
+</script>
+</body>
+</html>

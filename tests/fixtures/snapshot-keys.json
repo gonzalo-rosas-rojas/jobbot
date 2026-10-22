@@ -1,0 +1,28 @@
+{
+  "always": [
+    "generated_at",
+    "controls.stopped", "controls.window_open", "controls.next_window", "controls.last_run_at", "controls.engine", "controls.claude_account", "controls.scheduled_task", "controls.auto_approve_min",
+    "metrics.sent_week", "metrics.responses_week", "metrics.response_rate",
+    "funnel.sent", "funnel.answered", "funnel.tests", "funnel.interviews", "funnel.offers", "funnel.by_source",
+    "pipeline.days", "pipeline.threshold", "pipeline.seen", "pipeline.above", "pipeline.with_cv", "pipeline.complete", "pipeline.sent", "pipeline.score_counts",
+    "trust",
+    "activity.from", "activity.to", "activity.slot_minutes", "activity.slots", "activity.moves", "activity.moves_total", "activity.moves_by_state",
+    "claude.spent_24h", "claude.daily_budget", "claude.by_stage",
+    "today.tasks_total", "today.tasks", "today.emails_total", "today.emails",
+    "needs_gonza.total", "needs_gonza.cards", "awaiting_approval.total", "awaiting_approval.cards", "snoozed.total", "snoozed.cards",
+    "board", "learn.total", "learn.seen", "learn.due"
+  ],
+  "whenAccount": [
+    "controls.claude_account.anchored"
+  ],
+  "withCards": [
+    "board[].state", "board[].label", "board[].total", "board[].cards",
+    "board[].cards[].key", "board[].cards[].company", "board[].cards[].title", "board[].cards[].score", "board[].cards[].state", "board[].cards[].source", "board[].cards[].url",
+    "board[].cards[].approved", "board[].cards[].has_screenshot", "board[].cards[].has_cv", "board[].cards[].has_dossier", "board[].cards[].has_handoff", "board[].cards[].updated_at", "board[].cards[].actions", "board[].cards[].marks",
+    "board[].cards[].posted_at", "board[].cards[].first_seen", "board[].cards[].salary_min", "board[].cards[].salary_max", "board[].cards[].days_in_state",
+    "board[].cards[].snoozed_until", "board[].cards[].waiting_since", "board[].cards[].age_days", "board[].cards[].prune_in_days",
+    "today.tasks[].id", "today.tasks[].text", "today.tasks[].job_key", "today.tasks[].due_at", "today.tasks[].overdue", "today.tasks[].link", "today.tasks[].kind", "today.tasks[].created_at",
+    "today.emails[].received_at", "today.emails[].from", "today.emails[].company", "today.emails[].job_key", "today.emails[].kind", "today.emails[].subject", "today.emails[].summary",
+    "activity.slots[].at", "activity.slots[].open", "activity.slots[].seen", "activity.moves[].at", "activity.moves[].key", "activity.moves[].company", "activity.moves[].title", "activity.moves[].to"
+  ]
+}

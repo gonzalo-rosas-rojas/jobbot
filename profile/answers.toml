@@ -1,0 +1,832 @@
+# Form answer bank. An entry without `value` means "ask the user": the application moves to needs_gonza.
+# Entries are tried in order: the most specific goes first.
+# A pattern matches whole words of the label, ignoring case and punctuation. A pattern that starts with = must
+# match the entire label ("=name" takes "Name *", not "Company name"). Bare generic words (city, country, phone,
+# email, race...) always go with = or inside a phrase: they appear in questions that are not that field
+# ("Foster City", "race conditions", "mobile development").
+# Three more operators (src/answers.rs, `lookup`): a phrase ending in $ must be the END of the label
+# ("reside in$" does not take "reside in and in the US"); several phrases joined by | are alternatives; several
+# terms joined by & must all hold ("a|b&c|d" = (a or b) and (c or d)). An empty term (a stray & or |) matches
+# nothing: a typo only narrows the pattern.
+# `alternatives`: other option texts tried, in order, when the field is a dropdown and the `value` option does
+# not exist at that company.
+# For yes/no questions (radio or dropdown), `value` must be the text of an option ("No", "Yes").
+#
+# Order of the file: (1) work/visa answers about the country where the user lives, (2) blocks WITHOUT an answer
+# that stop risky questions before a broad entry answers them, (3) the answers. The tests in src/answers.rs
+# (module `audit`) pin every label.
+#
+# THIS FILE IS AN EXAMPLE for a fictional person (Jane Doe). Replace every personal value (name, email, phone,
+# links, school, jobs, salary) with your own, and keep sensitive self-identification (gender, race, religion,
+# orientation, pronouns, veteran, disability...) empty unless you want the program to answer it.
+#
+# consent_checkboxes: phrases that authorize ticking a REQUIRED checkbox whose text contains them (privacy
+# notice, consent to process the application). Empty = none is ticked and the application goes to needs_gonza.
+# Even if the checkbox contains one of these phrases it is not ticked when it also accepts arbitration, terms
+# and conditions, marketing, SMS, background checks or future offers (fixed list in src/answers.rs). It is also
+# a whitelist: after removing the phrase from the label, every remaining word must be filler ("I have read and
+# agree to the ..."), part of a URL or a company possessive ("Cloudflare's"). An unknown word ("... and
+# AI-assisted screening", "... for other vacancies", "... Acme Privacy Policy") leaves the box unticked.
+consent_checkboxes = ["privacy policy", "privacy notice", "consent to the processing"]
+
+# ---------------------------------------------------------------------------------------------
+# 1. Authorization and visa, only when the question is about the country where the user lives (Chile in this
+#    example): there the honest answer is clear. These go before the unanswered blocks so they win. Two guards
+#    against COMPOUND questions ("... where you live and in the country of the job"), which also ask about
+#    another country and have no honest one-word answer:
+#    - the unanswered block below catches the words that name the other country;
+#    - every phrase ends in $: it must be the end of the label, so any new tail ("... and in the US",
+#      "... or where the job is") stops matching and the question falls into the legal block of section 2.
+# ---------------------------------------------------------------------------------------------
+# Authorization and visa questions that name a specific place go UNANSWERED here (the program asks the user):
+# whether sponsorship is needed depends on the posting, not on the label. For postings that are open only
+# through `extra_open_places` in criteria.toml, the engine answers with the user's actual work-rights facts
+# (`bank_for_job` in src/pipeline.rs). This entry stays as a safety net for whatever arrives another way.
+[[entry]]
+patterns = [
+  "australia|australian|sydney|melbourne|brisbane|perth|adelaide|canberra&sponsor|sponsorship|sponsored|authorized|authorised|authorization|authorisation|eligible|eligibility|entitled|permitted|right to work|work rights|working rights|visa|work permit|citizen|citizenship|permanent resident",
+]
+
+# Work authorization and sponsorship for a user who works as a contractor from their own country: authorization
+# for the United States is "No" and any visa sponsorship question is "No". Two questions in one ("... in your
+# country AND in the US", "authorized ... and do you require sponsorship?") stay unanswered: a single word
+# would be half the truth.
+# 1) Authorization with the US named: the phrase must be the END of the label (a tail like
+#    "... and in the country you reside in" no longer matches) or end in "without sponsorship".
+[[entry]]
+patterns = [
+  "authorized to work in the united states$|authorized to work in the united states of america$|authorized to work in the u s$|authorized to work in the us$|authorized to work in the u s a$|authorized to work in the usa$|authorised to work in the united states$|authorised to work in the united states of america$|authorised to work in the u s$|authorised to work in the us$|authorised to work in the u s a$|authorised to work in the usa$|eligible to work in the united states$|eligible to work in the united states of america$|eligible to work in the u s$|eligible to work in the us$|eligible to work in the u s a$|eligible to work in the usa$|legal right to work in the united states$|legal right to work in the united states of america$|legal right to work in the u s$|legal right to work in the us$|legal right to work in the u s a$|legal right to work in the usa$|right to work in the united states$|right to work in the united states of america$|right to work in the u s$|right to work in the us$|right to work in the u s a$|right to work in the usa$|legally permitted to work in the united states$|legally permitted to work in the united states of america$|legally permitted to work in the u s$|legally permitted to work in the us$|legally permitted to work in the u s a$|legally permitted to work in the usa$|legally entitled to work in the united states$|legally entitled to work in the united states of america$|legally entitled to work in the u s$|legally entitled to work in the us$|legally entitled to work in the u s a$|legally entitled to work in the usa$|work authorization in the united states$|work authorization in the united states of america$|work authorization in the u s$|work authorization in the us$|work authorization in the u s a$|work authorization in the usa$|work authorisation in the united states$|work authorisation in the united states of america$|work authorisation in the u s$|work authorisation in the us$|work authorisation in the u s a$|work authorisation in the usa$",
+  "authorized to work in the united states|authorized to work in the united states of america|authorized to work in the u s|authorized to work in the us|authorized to work in the u s a|authorized to work in the usa|authorised to work in the united states|authorised to work in the united states of america|authorised to work in the u s|authorised to work in the us|authorised to work in the u s a|authorised to work in the usa|eligible to work in the united states|eligible to work in the united states of america|eligible to work in the u s|eligible to work in the us|eligible to work in the u s a|eligible to work in the usa|legal right to work in the united states|legal right to work in the united states of america|legal right to work in the u s|legal right to work in the us|legal right to work in the u s a|legal right to work in the usa|right to work in the united states|right to work in the united states of america|right to work in the u s|right to work in the us|right to work in the u s a|right to work in the usa|legally permitted to work in the united states|legally permitted to work in the united states of america|legally permitted to work in the u s|legally permitted to work in the us|legally permitted to work in the u s a|legally permitted to work in the usa|legally entitled to work in the united states|legally entitled to work in the united states of america|legally entitled to work in the u s|legally entitled to work in the us|legally entitled to work in the u s a|legally entitled to work in the usa|work authorization in the united states|work authorization in the united states of america|work authorization in the u s|work authorization in the us|work authorization in the u s a|work authorization in the usa|work authorisation in the united states|work authorisation in the united states of america|work authorisation in the u s|work authorisation in the us|work authorisation in the u s a|work authorisation in the usa&without sponsorship|without visa sponsorship|without requiring|without the need|without needing|without employer|without employment sponsorship|without any sponsorship|not require sponsorship|not require visa|not need sponsorship|not need visa|no need for sponsorship|no sponsorship",
+]
+value = "No"
+
+# 2) Authorization and sponsorship in the same label: no answer.
+[[entry]]
+patterns = ["sponsorship|sponsor&authorized|authorised|authorization|authorisation|eligible|legally entitled|legally permitted|right to work|work permit|citizen|permanent resident"]
+
+# 3) Visa sponsorship: "No" (without relocating there is no visa to sponsor).
+[[entry]]
+patterns = ["sponsorship&visa|employment|work|require|requires|required|need|needs|future|status"]
+value = "No"
+
+[[entry]]
+patterns = [
+  "where the job", "where this job", "where the role", "where this role", "where the position",
+  "where this position", "the job is located", "this job is located", "the role is located",
+  "this role is located", "the position is located", "this position is located",
+  "job is based", "role is based", "position is based", "in which you are applying",
+  "where you are applying", "of this role", "of this job",
+  "of this position", "and where", "or where", "and the united states", "and the u s",
+  "and the us", "and in the united states", "and in the u s", "and in the us",
+  "or the united states", "or the u s", "or the us", "or in the united states",
+  "or in the u s", "or in the us", "to work in the united states", "to work in the u s",
+  "to work in the us", "sponsorship in the united states", "sponsorship in the us",
+  "sponsorship for the united states", "sponsorship for the us",
+]
+
+[[entry]]
+patterns = [
+  "authorized to work in the country you currently reside in$",
+  "authorized to work in the country you reside in$",
+  "authorized to work in your country of residence$",
+  "authorized to work in the country where you currently reside$",
+  "authorized to work in the country where you reside$",
+  "authorized to work in the country in which you currently reside$",
+  "authorized to work in the country in which you reside$",
+]
+value = "Yes"
+
+[[entry]]
+patterns = [
+  "sponsorship to work in the country you currently reside in$",
+  "sponsorship to work in the country you reside in$",
+  "sponsorship to work in your country of residence$",
+  "sponsorship to work in the country where you currently reside$",
+  "sponsorship to work in the country where you reside$",
+  "sponsorship to work in the country in which you currently reside$",
+  "sponsorship to work in the country in which you reside$",
+]
+value = "No"
+
+# ---------------------------------------------------------------------------------------------
+# 2. Blocks WITHOUT an answer (on purpose): questions that a broader entry would answer wrongly.
+# ---------------------------------------------------------------------------------------------
+
+# Someone else's details: never the user's (references, manager, emergency contact, family, recruiter).
+[[entry]]
+patterns = [
+  "reference", "referee", "referral", "referrer", "referred", "emergency", "supervisor",
+  "manager", "recruiter", "colleague", "spouse", "mother", "father", "parent", "family member",
+  "relative", "next of kin", "beneficiary", "dependent", "hr contact",
+]
+
+# Work or company contact details: the user's email and phone are personal ones.
+[[entry]]
+patterns = [
+  "work phone", "work email", "work telephone", "work number", "office phone", "office email",
+  "business phone", "business email", "company phone", "company email", "company contact",
+  "corporate email", "employer phone", "employer email", "employer contact", "home phone",
+  "email address of", "phone number of", "contact number of",
+]
+
+# Names other than the current one, and signatures: the bot never signs anything.
+[[entry]]
+patterns = [
+  "maiden", "former name", "previous name", "other name", "former last name", "previous last name",
+  "former first name", "previous first name", "former surname", "previous surname", "alias",
+  "also known as", "signature", "sign", "full name of",
+]
+
+# "Applicant's name", "Candidate's phone"...: the possessive belongs to the applicant, that is, the user.
+# These go BEFORE the block below, which catches "s name", "s phone" and "s email" of any other owner;
+# exact labels only, so "Applicant's manager name" does not match.
+[[entry]]
+patterns = [
+  "=applicant s name", "=candidate s name", "=applicant s full name", "=candidate s full name",
+  "=applicant name", "=candidate name", "=applicant full name", "=candidate full name",
+]
+value = "Jane Doe Garcia"
+
+[[entry]]
+patterns = [
+  "=applicant s first name", "=candidate s first name", "=applicant first name",
+  "=candidate first name",
+]
+value = "Jane"
+
+[[entry]]
+patterns = [
+  "=applicant s last name", "=candidate s last name", "=applicant last name",
+  "=candidate last name", "=applicant s surname", "=candidate s surname",
+]
+value = "Doe Garcia"
+
+[[entry]]
+patterns = [
+  "=applicant s email", "=candidate s email", "=applicant s email address",
+  "=candidate s email address", "=applicant email", "=candidate email",
+  "=applicant email address", "=candidate email address",
+]
+value = "jane.doe@example.com"
+
+[[entry]]
+patterns = [
+  "=applicant s phone", "=candidate s phone", "=applicant s phone number",
+  "=candidate s phone number", "=applicant phone", "=candidate phone",
+  "=applicant phone number", "=candidate phone number", "=applicant s mobile",
+  "=candidate s mobile",
+]
+value = "+56 9 1234 5678"
+
+# Contact details or name of ANOTHER person or company, and parts of a phone field that are not the number.
+# Normalization turns a possessive apostrophe into a space ("Employer's phone number" -> "employer s phone
+# number"), so "s phone", "s email", "s name"... catch "somebody's phone" whoever the owner is; the other
+# phrases name the person or the other number. Plain "Phone", "Phone number", "Email address", "First name"
+# and "Phone (with country code)" are still answered.
+[[entry]]
+patterns = [
+  "s phone", "s telephone", "s mobile", "s cell", "s email", "s e mail", "s contact", "s name",
+  "s first name", "s last name", "s full name", "s surname", "s given name", "employer s",
+  "emergencies", "referring", "friend", "child", "partner", "sibling", "guardian", "husband",
+  "wife", "brother", "sister", "daughter", "roommate", "landlord", "mentor", "coworker",
+  "alternate", "alternative phone", "alternative email", "alternative number", "secondary",
+  "backup", "additional phone", "additional email", "additional number", "other phone",
+  "other email", "other number", "second phone", "second email", "second number",
+  "phone type", "number type", "email type", "telephone type", "type of phone",
+  "type of number", "type of email", "extension", "ext", "phone number country code",
+  "phone country code", "mobile country code", "telephone country code", "country code for",
+  "dial code", "dialing code", "calling code",
+]
+
+# Nationality and country of citizenship, only for labels that ask exactly that. "Are you a US citizen?",
+# "citizenship status" and the rest stay in the legal block below, unanswered.
+[[entry]]
+patterns = ["=nationality", "=your nationality", "=nationality country", "=country of nationality"]
+value = "Chilean"
+alternatives = ["Chile"]
+
+[[entry]]
+patterns = [
+  "=citizenship", "=your citizenship", "=country of citizenship", "=citizenship country",
+  "=country of citizenship if applicable", "=nationality citizenship",
+]
+value = "Chile"
+alternatives = ["Chilean"]
+
+# Legal or sensitive questions outside the bank: work authorization phrased around "the country you are
+# applying in", visas, citizenship, sanctions and export control, criminal records, background checks,
+# arbitration, non-compete clauses. The user always decides these.
+[[entry]]
+patterns = [
+  "authorized to work", "authorised to work", "work authorization", "work authorisation",
+  "eligible to work", "eligibility to work", "right to work", "legally entitled",
+  "legally permitted", "work permit", "visa", "sponsorship", "immigration", "citizenship",
+  "citizen", "permanent resident", "green card", "clearance", "export control", "sanction",
+  "criminal", "convicted", "conviction", "felony", "misdemeanor", "background check",
+  "drug test", "drug screening", "non compete", "noncompete", "arbitration",
+  "restrictive covenant",
+]
+
+# Interviews and a notice period in progress: availability for an interview is not availability to start,
+# and "are you currently serving a notice period?" is not answered "Immediately".
+[[entry]]
+patterns = ["interview", "interviewed", "scheduling", "serving"]
+
+# Relocation as help or a benefit (not the user's willingness to move).
+[[entry]]
+patterns = [
+  "relocation assistance", "relocation package", "relocation support", "relocation bonus",
+  "relocation budget", "relocation expenses", "relocation allowance", "relocation stipend",
+]
+
+# "Do you identify as LGBTQ+?": no value in this example. Only the self-identification question;
+# "LGBTQ ally" and the rest below stay unanswered.
+[[entry]]
+patterns = ["identify as lgbt", "identify as lgbtq", "identify as lgbtqia", "are you lgbt", "are you lgbtq", "member of the lgbt", "member of the lgbtq", "part of the lgbtq"]
+
+# Self-identification the user keeps for themselves (gender expression, LGBT in general): a broader entry
+# (gender, race) must not answer them.
+[[entry]]
+patterns = [
+  "lgbt", "lgbtq", "gender expression",
+]
+
+# Religion: no value in this example (the program asks the user).
+[[entry]]
+patterns = ["=religion", "your religion", "religious affiliation", "religion or belief", "religion belief", "religion or faith"]
+
+# Marital status: no value in this example (the program asks the user).
+[[entry]]
+patterns = ["marital status", "=marital", "civil status", "relationship status"]
+
+# Membership in an underrepresented, minority or protected group: not the race, gender or disability
+# self-identification below ("an underrepresented racial or ethnic group" is not "White"). No answer given.
+[[entry]]
+patterns = [
+  "underrepresented", "under represented", "minority", "minorities", "marginalized",
+  "protected class", "protected group",
+]
+
+# "Ever worked at/for" with a generic object (a startup, the government, a competitor) is not the question
+# about the company being applied to: the "No" further down would be invented.
+[[entry]]
+patterns = [
+  "ever worked for a", "ever worked for an", "ever worked for the", "ever worked at a",
+  "ever worked at an", "ever worked at the", "ever worked in", "ever worked on",
+  "ever worked with", "ever worked as", "previously worked for a", "previously worked for an",
+  "previously worked for the", "previously worked at a", "previously worked at an",
+  "previously worked at the", "previously worked in", "previously worked with",
+  "previously worked on", "previously worked as", "ever been employed by a",
+  "ever been employed by an", "ever been employed by the", "previously employed by a",
+  "previously employed by an", "previously employed by the", "employee of a", "employee of an",
+  "employee of the", "employee of any",
+  "previously been employed by a", "previously been employed by an",
+  "previously been employed by the",
+  # A class of employers ("any government", "one of our competitors", "another company"):
+  "ever worked for any", "ever worked for another", "ever worked for one of",
+  "ever worked for either", "ever worked for both", "ever worked at any", "ever worked at another",
+  "ever worked at one of", "previously worked for any", "previously worked for another",
+  "previously worked for one of", "previously worked at any", "previously worked at another",
+  "previously worked at one of", "ever been employed by any", "ever been employed by another",
+  "ever been employed by one of", "previously employed by any", "previously employed by another",
+  "previously employed by one of", "previously been employed by any",
+  "previously been employed by another", "previously been employed by one of",
+  "employee of another", "employee of one of", "any government", "any federal", "any public",
+  "government or public", "government agency", "government entity", "government official",
+  "government employee", "public sector", "public official", "local government",
+  "federal government", "state government", "state or local",
+  # Companies on the user's CV (stackwave.io, Bluecrate, Pinewood Foods, Meridian Freight, Brightpath, Harbor Light):
+  # a question that names them is not answered "No" blindly.
+  "stackwave", "bluecrate", "blue crate", "pinewood foods", "meridian freight", "brightpath", "harbor light",
+  "harbor foods",
+]
+
+# ---------------------------------------------------------------------------------------------
+# 3. Answers.
+# ---------------------------------------------------------------------------------------------
+
+# Full legal name as it appears on the degree certificate. It goes before the everyday name: Ashby asks for
+# "Legal Name" and passports carry the middle name.
+[[entry]]
+patterns = [
+  "=legal name", "your legal name", "full legal name", "legal full name", "legal first and last name",
+  "name as it appears on your passport", "name as it appears on your id",
+  "name as it appears on your national id", "name as it appears on your government",
+  "name as shown on your government", "name as shown on your id",
+  "name as shown on your passport", "name as on your passport", "name as on your id",
+  "name as on your national id", "name as on your government", "name as per your passport",
+  "name as per your id", "name on your passport", "name on your government",
+]
+value = "Jane Isabel Doe Garcia"
+
+# The whole name, in its compound forms, before "first name" and "last name": "First and last name" contains
+# "last name" and must not get only the surname. Ashby calls the full name just "Name".
+[[entry]]
+patterns = [
+  "full name", "first and last name", "name first and last", "first name and last name",
+  "first last name", "first name last name", "=name", "=your name",
+]
+value = "Jane Doe Garcia"
+
+[[entry]]
+patterns = ["first name", "given name", "forename"]
+value = "Jane"
+
+[[entry]]
+patterns = ["last name", "surname", "family name"]
+value = "Doe Garcia"
+
+# The user goes by Jane (the CV is signed JANE DOE): Ashby asks for "Preferred Name (if applicable)".
+[[entry]]
+patterns = ["preferred name", "name you go by", "name do you go by", "what should we call you"]
+value = "Jane"
+
+# Middle name from the degree certificate.
+[[entry]]
+patterns = ["middle name"]
+value = "Isabel"
+
+[[entry]]
+patterns = ["=middle initial"]
+value = "I"
+
+# Job-search email, the same one as on the CV. A bare "email" appears in "may we contact you by email or
+# phone?", so it goes with = or inside a phrase.
+[[entry]]
+patterns = [
+  "=email", "=email address", "email address", "=your email", "=confirm email",
+  "confirm your email", "=personal email", "personal email", "=primary email",
+  "=contact email", "=preferred email", "=e mail", "=e mail address",
+]
+value = "jane.doe@example.com"
+
+# Bare "phone" and "mobile" appear in "phone screen", "mobile development", "phone type".
+[[entry]]
+patterns = [
+  "=phone", "=phone number", "phone number", "=telephone", "telephone number", "=mobile",
+  "mobile phone", "mobile number", "cell phone", "cellphone", "=cell", "cell number",
+  "contact number", "contact phone", "primary phone", "daytime phone", "best phone",
+  "=phone with country code", "=phone including country code",
+]
+value = "+56 9 1234 5678"
+
+# LinkedIn (profile fields only): "linkedin", "github" or "gitlab" alone are also COMPANY names ("Have you ever
+# worked at GitHub?", "...consulted for GitLab?"), which must reach the prior-employment question below
+# instead of being caught here.
+[[entry]]
+patterns = [
+  "=linkedin", "linkedin profile", "linkedin url", "linkedin link", "linkedin account",
+  "linkedin username", "linkedin handle", "linkedin page", "linkedin address", "linkedin com",
+  "your linkedin", "link to linkedin", "link to your linkedin", "url of your linkedin",
+]
+value = "https://www.linkedin.com/in/jane-doe-garcia/"
+
+# No value on purpose in this example: the fictional user has no GitHub. If the field is required the
+# application moves to needs_gonza; if it is optional it stays empty.
+
+[[entry]]
+patterns = [
+  "=github", "github profile", "github url", "github link", "github account", "github username",
+  "github handle", "github page", "github repo", "github repository", "github portfolio",
+  "github com", "your github", "link to github", "link to your github", "url of your github",
+  "=gitlab", "gitlab profile", "gitlab url", "gitlab link", "gitlab account", "gitlab username",
+  "gitlab handle", "gitlab page", "gitlab repo", "gitlab repository", "gitlab com", "your gitlab",
+  "link to gitlab", "link to your gitlab", "url of your gitlab", "github gitlab",
+  "portfolio", "website", "personal site", "twitter",
+]
+
+# Always "No": the current employer is never contacted.
+[[entry]]
+patterns = [
+  "contact your current", "contacting your current", "contact current", "contacting current",
+  "contact your present", "contacting your present",
+]
+value = "No"
+
+# Last job (the CV's most recent one). Only labels that ask for the NAME: "current employer" is also in
+# "does your current employer know you are applying?" or "is your current employer a competitor?".
+# Labels that ask for the MOST RECENT job keep the name.
+[[entry]]
+patterns = [
+  "=most recent company", "=most recent employer", "=current or most recent company",
+  "=current or most recent employer", "=current or previous employer", "=current or previous company",
+  "=who is your current or previous employer", "=what is your current or previous employer",
+  "=who is your current or previous company",
+]
+value = "Harbor Light Shipping and Logistics Center LLC (independent contractor)"
+
+# Labels that ask for the CURRENT job: the user has none right now, and saying yes would be false. They get
+# the truth plus the most recent job, so a required field does not stop the form.
+[[entry]]
+patterns = [
+  "=current company", "=current employer", "=current company name", "=current employer name",
+  "=present employer", "=current company if applicable", "=current employer if applicable",
+  "name of your current employer", "name of current employer", "who is your current employer",
+]
+value = "Between roles (most recent: Harbor Light Shipping and Logistics Center LLC, independent contractor)"
+
+# Most recent title, as on the CV. Exact labels only: "describe your current role" is an essay.
+[[entry]]
+patterns = [
+  "=most recent role", "=most recent title", "=most recent job title", "=most recent position",
+  "=current or previous job title", "=current or previous title", "=current or previous role",
+  "=current or previous position", "=what is your current or previous job title",
+  "=what is your current or previous title", "=what is your current or previous role",
+  "=what is your current or previous position",
+]
+value = "Freelance Automation Contractor"
+
+# CURRENT title: there is none (see above).
+[[entry]]
+patterns = [
+  "=current role", "=current role title", "=current title", "=current job title",
+  "=current position", "=current position title", "=current job", "=current job role",
+  "=present title", "=present position",
+]
+value = "Between roles (most recent: Freelance Automation Contractor)"
+
+# Education (from the CV). Never inflated to a bachelor's degree or a computer science degree. In dropdowns
+# (Greenhouse) the options are tried from exact to vague: the school may not be in the list, "Other" is.
+# Exact field names only.
+[[entry]]
+patterns = ["=school", "=school name", "=institution", "=university", "=college"]
+value = "Example Professional Institute"
+alternatives = ["Example Institute", "Example", "Other"]
+
+[[entry]]
+patterns = ["=degree"]
+value = "Ingeniero en Informática"
+alternatives = ["Engineer's Degree", "Other"]
+
+[[entry]]
+patterns = ["=discipline", "=field of study", "=major", "=area of study"]
+value = "Computer Engineering"
+alternatives = ["Engineering", "Information Systems", "Other"]
+
+# Greenhouse asks people outside the US for "00000", but only when the label says so. Without that
+# instruction the postal code stays unanswered (the user has not given one).
+[[entry]]
+patterns = ["enter 00000", "use 00000", "type 00000", "input 00000", "put 00000"]
+value = "00000"
+
+# The user lives in Chile and works remotely from there: only for questions about their current presence.
+# "Willing to be located in the US" is not this.
+[[entry]]
+patterns = [
+  "work location in the united states", "work location in the u s", "work location in the us",
+  "current location in the united states", "current location in the u s",
+  "current location in the us", "currently located in the united states",
+  "currently located in the u s",
+  "currently located in the us", "currently reside in the united states",
+  "currently reside in the u s", "currently reside in the us",
+]
+value = "No"
+
+# Fields that only mention moving: an address ("What is the address from which you plan on working? If you
+# would need to relocate, please type "relocating""), a location plus another question ("current location
+# and are you open to relocate?"), an instruction to type a word. The prose below answers none of them.
+# Unanswered on purpose.
+[[entry]]
+patterns = [
+  "address", "work from", "please type", "type relocating", "type in", "current location and",
+]
+
+# Willingness to relocate to the places in `extra_open_places` (criteria.toml): Yes. Relocation help
+# (assistance, package, bonus...) was left unanswered above. This goes before "Depends, I prefer remote",
+# which would answer that to a question about those places.
+[[entry]]
+patterns = [
+  "willing to relocate|willing to move|willing to relocation|open to relocating|open to relocation|open to relocate|willingness to relocate|prepared to relocate|able to relocate|ready to relocate|happy to relocate|relocate to&australia|australian|sydney|melbourne|brisbane|perth|adelaide|canberra",
+]
+value = "Yes"
+alternatives = ["Yes, I am willing to relocate", "Willing to relocate", "Open to relocation"]
+
+# "It depends, I prefer remote". A yes/no field (radio or dropdown) has no such option, so a required one
+# moves to needs_gonza; a text field gets the phrase as is. Only for questions about WILLINGNESS to move: a
+# bare "relocate" appears in "Do you plan to relocate?", "Which city would you relocate from?", "If you would
+# need to relocate, please describe...". It goes before the location entry: "willing to relocate from your
+# current location" is this question.
+[[entry]]
+patterns = [
+  "willing to relocate", "willing to relocation", "open to relocation", "open to relocating",
+  "open to relocate", "willingness to relocate",
+]
+value = "Prefer remote; open to discussing relocation depending on the role"
+
+# Current location. A bare "city" appears in "Foster City, CA" and "city of Austin".
+[[entry]]
+patterns = [
+  "current location", "where are you based", "where are you located",
+  "where are you currently located", "where are you currently based", "where do you live",
+  "where do you currently live", "where do you reside", "=location", "=location city", "=city",
+  "=your city", "=current city", "=city of residence", "=city town", "=town city",
+  "=city or town", "=home city", "=residence city", "=city state", "=city and state",
+  "=city and country", "=city country", "=city state and country", "=city state country",
+  "=current city state and country", "=your current city state and country",
+  "=current city and country", "=your current city and country",
+  "select your current city state and country$", "enter your current city state and country$",
+  "provide your current city state and country$", "indicate your current city state and country$",
+  "select your current city and country$", "enter your current city and country$",
+  "provide your current city and country$", "indicate your current city and country$",
+  "select your city state and country$", "enter your city state and country$",
+  "provide your city state and country$", "indicate your city state and country$",
+  "select your city and country$", "enter your city and country$",
+  "provide your city and country$", "indicate your city and country$",
+]
+value = "Santiago, Chile"
+
+# A yes/no question about pay ("Do you meet the salary requirements?", "Is the posted range in line with
+# your expectations?") is not a figure: "USD 6,000 per month" would be an invented answer. Unanswered, ahead
+# of every salary answer.
+[[entry]]
+patterns = [
+  "meet|meets|satisfy|satisfies|acceptable|comfortable|okay with|ok with|fine with|in line with|aligned with|align with|within the&salary|compensation|pay",
+]
+
+# Two figures are asked and one is the CURRENT salary ("Please state your current and expected salary"):
+# the expectation alone would assert a current salary the user never gave. Unanswered.
+[[entry]]
+patterns = [
+  "current and expected", "current and desired", "current and target", "current and required",
+  "current or expected", "current or desired", "current expected", "current desired",
+  "current vs expected", "current versus expected", "previous and expected",
+  "previous and desired", "present and expected", "last and expected", "and expected salary",
+  "and desired salary", "and target salary", "and expected compensation",
+  "and desired compensation", "and target compensation",
+]
+
+# Units: a field "in thousands of USD" / "(k USD)" / "($000s)" wants the figure in thousands, not 72000 (a
+# 1000x error): 6 for a monthly figure and 72 for a yearly one, which is also assumed when the field names no
+# period. Only for the EXPECTATION (the words below): the current salary and the other cases stay unanswered
+# further down. These go after "current and expected".
+[[entry]]
+patterns = [
+  "thousand|000s|1000s|in 000|k usd|usd k|in k|k$&monthly|per month|a month|each month&salary expectation|expected salary|desired salary|salary requirement|compensation expectation|expected compensation|desired compensation|compensation requirement|expected pay|desired pay|pay expectation|pay requirement|target salary|target compensation|expected base salary|desired base salary|expected monthly|desired monthly|salary you are looking for|salary are you looking for|salary you are seeking",
+]
+value = "6"
+
+[[entry]]
+patterns = [
+  "thousand|000s|1000s|in 000|k usd|usd k|in k|k$&salary expectation|expected salary|desired salary|salary requirement|compensation expectation|expected compensation|desired compensation|compensation requirement|expected pay|desired pay|pay expectation|pay requirement|target salary|target compensation|expected base salary|desired base salary|expected annual|desired annual|annual salary expectation|annual compensation expectation|salary you are looking for|salary are you looking for|salary you are seeking",
+]
+value = "72"
+
+# "What are your current salary expectations?" is the expectation, not the current salary: it goes before
+# the block below, which catches "current salary". With a yearly word ("... (annual)") the monthly text would
+# be the wrong unit: unanswered.
+[[entry]]
+patterns = [
+  "current salary expectation|current compensation expectation|current pay expectation&annual|annually|yearly|year|annum",
+]
+
+[[entry]]
+patterns = [
+  "current salary expectation", "current compensation expectation", "current pay expectation",
+]
+value = "USD 6,000 per month"
+
+# Unanswered (on purpose): the CURRENT salary, pay history, hourly or daily rates and figures in another
+# currency are never answered with the dollar expectation.
+[[entry]]
+patterns = [
+  "current salary", "current annual", "current monthly", "current yearly", "current hourly",
+  "current base", "current pay", "current compensation", "current total", "current gross",
+  "current ctc", "current earnings", "current remuneration", "currently earn", "currently make",
+  "currently making", "currently paid", "present salary", "present compensation",
+  "previous salary", "previous compensation", "previous pay", "previous annual", "last salary",
+  "last drawn", "last compensation", "last annual", "prior salary", "salary history",
+  "compensation history", "pay history", "hourly", "per hour", "hour rate", "day rate",
+  "daily rate", "ctc", "earn", "earnings", "earning", "clp", "eur", "gbp", "cad", "aud", "mxn",
+  "brl", "cop", "inr", "chf", "euros", "pesos", "pounds",
+]
+
+# "Monthly or annual": two units in one question, unanswered.
+[[entry]]
+patterns = ["monthly&annual|annually|yearly|per year|a year|per annum"]
+
+# The example user's expectation: USD 6,000 a month. When the label asks for the yearly figure it gets the
+# equivalent (6,000 x 12). A numeric-only field does not accept the text: it is not filled and moves to
+# needs_gonza.
+# A bare "annual salary" is not here: it may be the current salary. The last phrase joins an expectation word
+# with a yearly word in any order and place ("Salary expectation - Annual (USD)", "Expected Salary (USD /
+# year)", "expected salary in USD (annual)").
+[[entry]]
+patterns = [
+  "desired annual salary", "desired annual compensation", "desired annual base", "desired annual pay",
+  "desired yearly", "expected annual salary", "expected annual compensation",
+  "expected annual base", "expected annual pay", "expected yearly", "annual salary expectation",
+  "annual compensation expectation", "annual base salary expectation", "annual base expectation",
+  "yearly salary expectation", "annual expectation", "annual salary requirement",
+  "annual compensation requirement",
+  "salary expectation|expected salary|desired salary|salary requirement|compensation expectation|expected compensation|desired compensation|compensation requirement|expected pay|desired pay|pay expectation|pay requirement|target salary|target compensation|expected base salary|desired base salary|salary you are looking for|salary are you looking for|salary you are seeking&annual|annually|yearly|per year|a year|usd year|per annum",
+]
+value = "72000"
+
+# A salary label that speaks of a year that the yearly entry above did not take ("Expected salary / year",
+# "Annual salary"): the monthly text below would be the wrong unit.
+[[entry]]
+patterns = ["salary|compensation|pay&annual|annually|yearly|year|annum"]
+
+[[entry]]
+patterns = [
+  "salary expectation", "expected salary", "desired salary", "compensation expectation",
+  "expected compensation", "desired compensation", "salary requirement",
+  "compensation requirement", "pay expectation", "pay requirement", "expected pay",
+  "desired pay", "expected base salary", "desired base salary", "target salary",
+  "target compensation", "salary you are looking for", "salary are you looking for",
+  "salary you are seeking", "expected monthly", "desired monthly",
+  # A long text box (textarea) is answered only on the whole label, never by keyword: these are the short
+  # salary labels that do ask only for the figure.
+  "=salary expectations", "=compensation expectations", "=what are your salary expectations",
+  "=what are your compensation expectations", "=expected salary", "=desired salary",
+  "=salary requirements", "=compensation requirements", "=what is your expected salary",
+  "=what is your desired salary", "=expected compensation", "=desired compensation",
+]
+value = "USD 6,000 per month"
+
+# Available immediately. Only for "when can you start" and the notice period: a bare "start date" is also the
+# start date of a past job, and "availability" is availability for interviews or hours per week. A date field
+# does not accept text: it moves to needs_gonza.
+[[entry]]
+patterns = [
+  "notice period", "when can you start", "when could you start", "when are you available to start",
+  "how soon can you start", "how soon could you start", "how soon are you available",
+  "when can you join", "when can you begin", "how soon can you join", "earliest start date",
+  "earliest date you can start", "earliest you can start", "desired start date",
+  "preferred start date", "available start date", "proposed start date", "expected start date",
+  "start date availability", "availability to start", "available to start", "date available",
+  "joining date", "date of joining",
+]
+value = "Immediately"
+alternatives = ["Immediate", "ASAP", "Right away", "Now"]
+
+# English: the CV states the level (C1) and the user works in English daily, so the level is Advanced.
+# Only the user's own level: "native English speaker", another language or "writes documentation in English"
+# are not this. Dropdowns want the option's text: tried from exact to closest.
+[[entry]]
+patterns = [
+  "english level", "level of english", "english proficiency", "english language proficiency",
+  "english language level", "proficiency in english", "spoken english level",
+  "english fluency level",
+]
+value = "Advanced"
+alternatives = [
+  "C1", "Advanced (C1)", "Professional working proficiency", "Full professional proficiency",
+  "Professional", "Fluent", "Proficient", "Upper Advanced",
+]
+
+[[entry]]
+patterns = ["fluent in english", "speak english fluently", "english fluently", "proficient in english"]
+value = "Yes"
+
+# Age of majority: the user is an adult. The phrases name the age, not "at least 18 months of experience".
+[[entry]]
+patterns = [
+  "at least 18 years of age", "at least 18 years old", "18 years of age or older",
+  "18 years or older", "over the age of 18", "above the age of 18", "18 or older",
+]
+value = "Yes"
+
+# Country: only the country field (or the direct question about residence). A bare "country" appears in
+# "country code", "country where you are applying", "country of birth", "country of citizenship".
+[[entry]]
+patterns = [
+  "=country", "=country of residence", "=country region", "=your country", "=current country",
+  "=country of current residence", "=country you live in", "=country where you live",
+  "=country you currently live in", "in which country do you currently reside",
+  "in which country do you reside", "in which country do you live", "which country do you live in",
+  "which country do you reside in", "what country do you live in", "what country do you reside in",
+  "which country are you currently located in", "which country are you located in",
+  "which country are you based in", "what country are you located in",
+  "what country are you based in",
+  # "Please select the country where you currently reside." and its variants: a choosing verb next to the
+  # object, and the object must be the END of the label (a yes/no question about "the country where you
+  # currently reside" does not get "Chile").
+  "=current country of residence", "=your country of residence", "=your current country of residence",
+  "=what is your country of residence", "=what is your current country of residence",
+  "select your country of residence$", "enter your country of residence$",
+  "provide your country of residence$", "indicate your country of residence$",
+  "select your current country of residence$", "enter your current country of residence$",
+  "provide your current country of residence$", "indicate your current country of residence$",
+  "select your country of current residence$", "enter your country of current residence$",
+  "provide your country of current residence$", "indicate your country of current residence$",
+  "select the country where you currently reside$", "choose the country where you currently reside$",
+  "enter the country where you currently reside$", "indicate the country where you currently reside$",
+  "select the country where you reside$", "choose the country where you reside$",
+  "enter the country where you reside$", "indicate the country where you reside$",
+  "select the country in which you currently reside$", "choose the country in which you currently reside$",
+  "enter the country in which you currently reside$", "indicate the country in which you currently reside$",
+  "select the country in which you reside$", "choose the country in which you reside$",
+  "enter the country in which you reside$", "indicate the country in which you reside$",
+  "select the country you currently reside in$", "choose the country you currently reside in$",
+  "enter the country you currently reside in$", "indicate the country you currently reside in$",
+  "select the country you reside in$", "choose the country you reside in$",
+  "enter the country you reside in$", "indicate the country you reside in$",
+  "select the country where you currently live$", "choose the country where you currently live$",
+  "enter the country where you currently live$", "indicate the country where you currently live$",
+  "select the country where you live$", "choose the country where you live$",
+  "enter the country where you live$", "indicate the country where you live$",
+  "select the country in which you live$", "choose the country in which you live$",
+  "enter the country in which you live$", "indicate the country in which you live$",
+  "select the country where you are located$", "choose the country where you are located$",
+  "enter the country where you are located$", "indicate the country where you are located$",
+  "select the country in which you are located$", "choose the country in which you are located$",
+  "enter the country in which you are located$", "indicate the country in which you are located$",
+  "select the country you are located in$", "choose the country you are located in$",
+  "enter the country you are located in$", "indicate the country you are located in$",
+]
+value = "Chile"
+
+# Questions about the company being applied to: the user has never worked there. The patterns are phrases
+# that name employment at the company, so questions like "have you worked remotely?" do not get "No" (and the
+# generic-object block above catches "a startup").
+[[entry]]
+patterns = [
+  "ever worked at",
+  "ever worked for",
+  "ever been employed by",
+  "previously been employed by",
+  "previously employed by",
+  "previously worked at",
+  "previously worked for",
+  "former employee of",
+  "current employee of",
+  "ever or are you currently working at",
+]
+value = "No"
+# Some companies (Robinhood) offer phrases instead of Yes/No: "I have never worked at X".
+alternatives = ["I have never worked", "I have not worked", "I have never been employed", "Never"]
+
+# Voluntary self-identification (EEO): this example leaves gender, race, orientation, pronouns, veteran,
+# disability and similar entries WITHOUT a value on purpose: those answers are personal, so the program asks
+# you. Add a `value` (and the exact option texts as `alternatives`, because dropdowns want the option's text)
+# only for what you want it to answer. The patterns are self-identification phrases: a bare "race" is in
+# "race conditions", "veteran" in "veteran-friendly", "disability" in "disability benefits".
+# Two questions in one label ("Gender identity and sexual orientation") get no answer.
+[[entry]]
+patterns = ["gender&sexual orientation|sexual identity"]
+
+[[entry]]
+patterns = [
+  "=gender", "=gender optional", "gender identity", "your gender", "=gender identification",
+  "=gender self identification", "self identification of gender",
+]
+
+[[entry]]
+patterns = ["i identify as transgender", "you identify as transgender", "are you transgender"]
+
+# Race and ethnicity: no value in this example.
+[[entry]]
+patterns = [
+  "=race", "race ethnicity", "race and ethnicity", "race or ethnicity", "your race", "my race",
+  "=ethnicity", "your ethnicity", "my ethnicity", "ethnic background", "racial or ethnic background",
+  "racial ethnic background", "ethnic or racial background",
+]
+
+# "Are you Hispanic or Latino?": no value in this example.
+[[entry]]
+patterns = ["hispanic", "latino", "latina", "latinx"]
+
+# Sexual orientation: no value in this example.
+[[entry]]
+patterns = ["sexual orientation", "=orientation", "sexual identity"]
+
+# Pronouns: no value in this example.
+[[entry]]
+patterns = ["pronoun", "pronouns"]
+
+# "First-generation professional" (no parent had a professional job) is a different question from
+# first-generation college: no answer, ahead of the entry below.
+[[entry]]
+patterns = ["first generation professional", "first gen professional"]
+
+# First generation in college: no value in this example.
+[[entry]]
+patterns = [
+  "first generation college", "first generation university", "first generation student",
+  "first gen college", "first gen student",
+  "first in your family", "first in my family", "first person in your family",
+  "first to attend college", "first to go to college", "first generation",
+]
+
+[[entry]]
+patterns = [
+  "veteran status", "=veteran", "protected veteran", "are you a veteran", "u s veteran",
+  "us veteran", "military veteran", "disabled veteran", "=veteranstatus",
+  "self identification of veteran status",
+]
+
+[[entry]]
+patterns = [
+  "have a disability", "have disability", "disability status", "=disability", "=disabilities",
+  "disability self identification", "self identification of disability", "=disabilitystatus",
+  "are you an individual with a disability", "are you a person with a disability",
+]
+
+[[entry]]
+patterns = [
+  "how did you hear", "where did you hear", "how did you find out", "how did you find this",
+  "where did you find this", "how did you learn about", "how did you come across",
+]
+value = "Company careers page"
+alternatives = ["Company website", "Careers page", "Job board", "Other"]

@@ -1,0 +1,27 @@
+# Companies, domains and categories the program must never apply to or write about. This is an EXAMPLE list with
+# made-up names: replace it with your own (for instance a former employer and its group, or a field your
+# contract keeps you out of). Matching is by whole words and domain suffixes, and is covered by tests.
+names = [
+  "Harbor Light Shipping and Logistics Center",
+  "Harbor Light",
+  "Harbor Lights Shipping",
+  "Harborlight Shipping",
+  "Anchor & Pier Point Consultants",
+  "Anchor Point Consultants",
+  "Tidewater Systems",
+  "Brightwave Technology",
+  "Brightwave Technologies",
+  "Coastline Freight",
+]
+domains = [
+  "harborlight-shipping.com",
+  "tidewatersystems.net",
+]
+categories = [
+  "freight forwarding",
+  "freight forwarder",
+  "freight forwarders",
+  "ocean freight forwarding",
+  "container tracking",
+  "remote fleet tracking",
+]

@@ -1,0 +1,735 @@
+{
+ "id": 7194969,
+ "title": "AI Research Engineer - Datadog AI Research (DAIR)",
+ "questions": [
+  {
+   "description": null,
+   "label": "First Name",
+   "required": true,
+   "fields": [
+    {
+     "name": "first_name",
+     "type": "input_text",
+     "values": []
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "Last Name",
+   "required": true,
+   "fields": [
+    {
+     "name": "last_name",
+     "type": "input_text",
+     "values": []
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "Preferred First Name",
+   "required": true,
+   "fields": [
+    {
+     "name": "preferred_name",
+     "type": "input_text",
+     "values": []
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "Email",
+   "required": true,
+   "fields": [
+    {
+     "name": "email",
+     "type": "input_text",
+     "values": []
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "Phone",
+   "required": true,
+   "fields": [
+    {
+     "name": "phone",
+     "type": "input_text",
+     "values": []
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "Resume/CV",
+   "required": true,
+   "fields": [
+    {
+     "name": "resume",
+     "type": "input_file",
+     "values": []
+    },
+    {
+     "name": "resume_text",
+     "type": "textarea",
+     "values": []
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "LinkedIn Profile",
+   "required": false,
+   "fields": [
+    {
+     "name": "question_59674544",
+     "type": "input_text",
+     "values": []
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "Website",
+   "required": false,
+   "fields": [
+    {
+     "name": "question_59674545",
+     "type": "input_text",
+     "values": []
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "I certify that the information provided in this application is true and correct to the best of my knowledge. I understand that any false statements or omissions may result in disqualification from employment consideration or, if employed, in termination.",
+   "required": true,
+   "fields": [
+    {
+     "name": "question_59674546",
+     "type": "multi_value_single_select",
+     "values": [
+      {
+       "label": "Yes",
+       "value": 1
+      },
+      {
+       "label": "No",
+       "value": 0
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "description": "<p><span class=\"&ldquo;s1&quot;\">Read our&nbsp;<a href=\"https://www.datadoghq.com/legal/applicant-candidate-privacy/\" target=\"_blank\" rel=\"noopener\">Applicant and Candidate Privacy Policy</a></span>.</p>",
+   "label": "I understand my application will be processed in accordance with Datadog’s Candidate Privacy Policy.",
+   "required": true,
+   "fields": [
+    {
+     "name": "question_59674547",
+     "type": "multi_value_single_select",
+     "values": [
+      {
+       "label": "Yes",
+       "value": 1
+      },
+      {
+       "label": "No",
+       "value": 0
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "Are you legally authorised to work full-time in the country where this job is based?",
+   "required": true,
+   "fields": [
+    {
+     "name": "question_59674548",
+     "type": "multi_value_single_select",
+     "values": [
+      {
+       "label": "Yes, no restriction.",
+       "value": 585726207
+      },
+      {
+       "label": "Yes, but I will need sponsorship in the future.",
+       "value": 585726208
+      },
+      {
+       "label": "No, I need sponsorship now.",
+       "value": 585726209
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "description": "<p><em>This job requires you to be in the office 3 days a week. All open locations for this role are listed at the top of this page. For accommodations, you can submit a request <a href=\"https://docs.google.com/forms/d/e/1FAIpQLSeoJeduEZ2NdZF_65uZmWUrCM-zee7yADXX1s6Xr9zAGq8iKA/viewform\" target=\"_bla",
+   "label": "In what cities are you available to work?",
+   "required": true,
+   "fields": [
+    {
+     "name": "question_59674549[]",
+     "type": "multi_value_multi_select",
+     "values": [
+      {
+       "label": "Amsterdam",
+       "value": 718372631
+      },
+      {
+       "label": "Atlanta",
+       "value": 718372632
+      },
+      {
+       "label": "Bangalore",
+       "value": 718372633
+      },
+      {
+       "label": "Barcelona",
+       "value": 718372634
+      },
+      {
+       "label": "Barueri São Paulo",
+       "value": 718372635
+      },
+      {
+       "label": "Bordeaux",
+       "value": 718372637
+      },
+      {
+       "label": "Boston",
+       "value": 718372638
+      },
+      {
+       "label": "Chicago",
+       "value": 718372639
+      },
+      {
+       "label": "Copenhagen",
+       "value": 718372640
+      },
+      {
+       "label": "Denver",
+       "value": 718372641
+      },
+      {
+       "label": "Dubai",
+       "value": 718372642
+      },
+      {
+       "label": "Dublin",
+       "value": 718372643
+      },
+      {
+       "label": "Grenoble",
+       "value": 718372644
+      },
+      {
+       "label": "Hamburg",
+       "value": 718372645
+      },
+      {
+       "label": "Jakarta",
+       "value": 718372646
+      },
+      {
+       "label": "Lisbon",
+       "value": 718372647
+      },
+      {
+       "label": "London",
+       "value": 718372648
+      },
+      {
+       "label": "Lyon",
+       "value": 718372649
+      },
+      {
+       "label": "Madrid",
+       "value": 718372650
+      },
+      {
+       "label": "Melbourne",
+       "value": 718372651
+      },
+      {
+       "label": "Mexico City",
+       "value": 718372652
+      },
+      {
+       "label": "Montpellier",
+       "value": 718372654
+      },
+      {
+       "label": "Mumbai",
+       "value": 718372655
+      },
+      {
+       "label": "Nantes",
+       "value": 718372656
+      },
+      {
+       "label": "New York City",
+       "value": 718372657
+      },
+      {
+       "label": "Nice",
+       "value": 718372658
+      },
+      {
+       "label": "Osaka",
+       "value": 718372659
+      },
+      {
+       "label": "Paris",
+       "value": 718372660
+      },
+      {
+       "label": "Pittsburgh",
+       "value": 748104784
+      },
+      {
+       "label": "Remote",
+       "value": 718372661
+      },
+      {
+       "label": "Riyadh",
+       "value": 718372662
+      },
+      {
+       "label": "Salt Lake City",
+       "value": 718372663
+      },
+      {
+       "label": "San Francisco",
+       "value": 718372664
+      },
+      {
+       "label": "San Jose (Campbell)",
+       "value": 718372665
+      },
+      {
+       "label": "San Sebastian",
+       "value": 718372666
+      },
+      {
+       "label": "São Paulo",
+       "value": 718372667
+      },
+      {
+       "label": "Seattle",
+       "value": 718372668
+      },
+      {
+       "label": "Seoul",
+       "value": 718372669
+      },
+      {
+       "label": "Singapore",
+       "value": 718372670
+      },
+      {
+       "label": "Sophia Antipolis",
+       "value": 718372671
+      },
+      {
+       "label": "Stockholm",
+       "value": 718372672
+      },
+      {
+       "label": "Sydney",
+       "value": 718372673
+      },
+      {
+       "label": "Tel Aviv",
+       "value": 718372674
+      },
+      {
+       "label": "Tokyo",
+       "value": 718372675
+      },
+      {
+       "label": "Toronto",
+       "value": 718372676
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "description": "<p><em>Select all the languages in which you have business-level fluency, both in verbal and written communication.</em></p>",
+   "label": "Please select all the languages you speak fluently.",
+   "required": true,
+   "fields": [
+    {
+     "name": "question_59674550[]",
+     "type": "multi_value_multi_select",
+     "values": [
+      {
+       "label": "Arabic",
+       "value": 727909250
+      },
+      {
+       "label": "Bahasa Indonesia",
+       "value": 727909254
+      },
+      {
+       "label": "Bulgarian",
+       "value": 727909256
+      },
+      {
+       "label": "Cantonese",
+       "value": 727909258
+      },
+      {
+       "label": "Croatian",
+       "value": 727909261
+      },
+      {
+       "label": "Czech",
+       "value": 727909263
+      },
+      {
+       "label": "Danish",
+       "value": 727909265
+      },
+      {
+       "label": "Dutch",
+       "value": 727909267
+      },
+      {
+       "label": "English",
+       "value": 727909269
+      },
+      {
+       "label": "Estonian",
+       "value": 727909272
+      },
+      {
+       "label": "Finnish",
+       "value": 727909274
+      },
+      {
+       "label": "French",
+       "value": 727909276
+      },
+      {
+       "label": "German",
+       "value": 727909278
+      },
+      {
+       "label": "Greek",
+       "value": 727909279
+      },
+      {
+       "label": "Hebrew",
+       "value": 727909280
+      },
+      {
+       "label": "Hindi",
+       "value": 727909281
+      },
+      {
+       "label": "Hungarian",
+       "value": 727909282
+      },
+      {
+       "label": "Italian",
+       "value": 727909283
+      },
+      {
+       "label": "Japanese",
+       "value": 727909287
+      },
+      {
+       "label": "Korean",
+       "value": 727909290
+      },
+      {
+       "label": "Latvian",
+       "value": 727909292
+      },
+      {
+       "label": "Lithuanian",
+       "value": 727909294
+      },
+      {
+       "label": "Malay",
+       "value": 727909296
+      },
+      {
+       "label": "Mandarin",
+       "value": 727909298
+      },
+      {
+       "label": "Norwegian",
+       "value": 727909300
+      },
+      {
+       "label": "Polish",
+       "value": 727909302
+      },
+      {
+       "label": "Portuguese",
+       "value": 727909304
+      },
+      {
+       "label": "Portuguese (Brazilian)",
+       "value": 727909306
+      },
+      {
+       "label": "Romanian",
+       "value": 727909308
+      },
+      {
+       "label": "Russian",
+       "value": 727909310
+      },
+      {
+       "label": "Slovak",
+       "value": 727909311
+      },
+      {
+       "label": "Slovenian",
+       "value": 727909312
+      },
+      {
+       "label": "Spanish",
+       "value": 727909313
+      },
+      {
+       "label": "Swedish",
+       "value": 727909314
+      },
+      {
+       "label": "Tagalog",
+       "value": 727909315
+      },
+      {
+       "label": "Thai",
+       "value": 727909316
+      },
+      {
+       "label": "Turkish",
+       "value": 727909317
+      },
+      {
+       "label": "Ukrainian",
+       "value": 727909318
+      },
+      {
+       "label": "Vietnamese",
+       "value": 727909319
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "How did you hear about this opportunity?",
+   "required": true,
+   "fields": [
+    {
+     "name": "question_59674551",
+     "type": "multi_value_single_select",
+     "values": [
+      {
+       "label": "Advisor or Faculty referral",
+       "value": 751672257
+      },
+      {
+       "label": "AfroTech",
+       "value": 585726287
+      },
+      {
+       "label": "Angelist",
+       "value": 585726288
+      },
+      {
+       "label": "Attended a talk or conference",
+       "value": 751672258
+      },
+      {
+       "label": "Blind App",
+       "value": 585726289
+      },
+      {
+       "label": "Break Through Tech",
+       "value": 585726290
+      },
+      {
+       "label": "BuiltIn Boston",
+       "value": 585726291
+      },
+      {
+       "label": "BuiltIn NYC",
+       "value": 585726292
+      },
+      {
+       "label": "ColorStack",
+       "value": 585726293
+      },
+      {
+       "label": "Campus Event",
+       "value": 590094026
+      },
+      {
+       "label": "Carnegie Mellon University department or mailing list",
+       "value": 751672259
+      },
+      {
+       "label": "Datadog Employee",
+       "value": 585726294
+      },
+      {
+       "label": "Datadog's Careers Page",
+       "value": 585726295
+      },
+      {
+       "label": "Event",
+       "value": 585726296
+      },
+      {
+       "label": "Flexjobs",
+       "value": 585726297
+      },
+      {
+       "label": "Girls Who Code",
+       "value": 585726298
+      },
+      {
+       "label": "Github",
+       "value": 585726299
+      },
+      {
+       "label": "Glassdoor",
+       "value": 585726300
+      },
+      {
+       "label": "Hacker News",
+       "value": 585726301
+      },
+      {
+       "label": "Hired",
+       "value": 585726302
+      },
+      {
+       "label": "Hiretual",
+       "value": 585726303
+      },
+      {
+       "label": "I love Datadog's product!",
+       "value": 585726304
+      },
+      {
+       "label": "Instagram",
+       "value": 585726305
+      },
+      {
+       "label": "JobTeaser",
+       "value": 585726306
+      },
+      {
+       "label": "LinkedIn (Datadog Page)",
+       "value": 585726307
+      },
+      {
+       "label": "LinkedIn (Job Posting)",
+       "value": 585726308
+      },
+      {
+       "label": "MLT (Management Leadership for Tomorrow)",
+       "value": 750675510
+      },
+      {
+       "label": "Rewriting the Code",
+       "value": 585726309
+      },
+      {
+       "label": "School job board",
+       "value": 585726310
+      },
+      {
+       "label": "SHPE (Society of Hispanic Professional Engineers)",
+       "value": 750675511
+      },
+      {
+       "label": "The Muse",
+       "value": 585726311
+      },
+      {
+       "label": "Thrive",
+       "value": 585726312
+      },
+      {
+       "label": "Underdog",
+       "value": 585726313
+      },
+      {
+       "label": "Welcome to the Jungle",
+       "value": 585726314
+      },
+      {
+       "label": "Other",
+       "value": 585726315
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "location_questions": [],
+ "compliance": null,
+ "demographic_questions": {
+  "header": "Voluntary Self-Identification of Gender",
+  "description": "<p>At Datadog, diversity means making a conscious effort to reflect the many experiences and identities of the world outside, while treating each other with fairness and without bias. Inclusion is the choice we make every day to foster an environment where people of all backgrounds not only belong, ",
+  "questions": [
+   {
+    "id": 1757,
+    "label": "Voluntary Self-Identification of Gender:\t",
+    "required": true,
+    "type": "multi_value_single_select",
+    "answer_options": [
+     {
+      "id": 12578,
+      "label": "Female",
+      "free_form": false,
+      "decline_to_answer": false
+     },
+     {
+      "id": 12579,
+      "label": "Male",
+      "free_form": false,
+      "decline_to_answer": false
+     },
+     {
+      "id": 12580,
+      "label": "Non-binary/third gender",
+      "free_form": false,
+      "decline_to_answer": false
+     },
+     {
+      "id": 12582,
+      "label": "Prefer to self describe as",
+      "free_form": true,
+      "decline_to_answer": false
+     },
+     {
+      "id": 12686,
+      "label": "I don't wish to answer",
+      "free_form": false,
+      "decline_to_answer": true
+     }
+    ]
+   }
+  ]
+ }
+}

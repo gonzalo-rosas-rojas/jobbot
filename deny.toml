@@ -1,0 +1,54 @@
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+ignore = [
+    # ttf-parser is unmaintained and has no safe upgrade. It only enters through
+    # pdf-extract -> lopdf, a dev-dependency used by the tests to read the CV PDFs the program
+    # itself renders; it is not part of the shipped binary. Revisit when pdf-extract moves.
+    { id = "RUSTSEC-2026-0192", reason = "dev-only (pdf-extract via lopdf), not in the binary; no safe upgrade exists" },
+    # zip 8.6 enters only as a build-dependency of playwright-rs 0.19.0, which extracts the
+    # Playwright driver archive from the official download while the project is being compiled.
+    # The three advisories are about `extract()` following symlinks and keeping SUID bits of an
+    # attacker-made archive; no such archive is ever read, and zip is not in the binary. The fix
+    # is zip 9, which playwright-rs 0.19.0 (pinned with `=`) cannot take. Revisit when the pin moves.
+    { id = "RUSTSEC-2026-0367", reason = "build-only (playwright-rs build script), trusted archive; fix needs zip 9, blocked by the pinned playwright-rs" },
+    { id = "RUSTSEC-2026-0368", reason = "build-only (playwright-rs build script), trusted archive; fix needs zip 9, blocked by the pinned playwright-rs" },
+    { id = "RUSTSEC-2026-0369", reason = "build-only (playwright-rs build script), trusted archive; fix needs zip 9, blocked by the pinned playwright-rs" },
+]
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+# jobbot itself is MIT-licensed (see LICENSE); it is not published to a registry.
+private = { ignore = true }
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "CC0-1.0",
+    # MPL-2.0 is weak, file-level copyleft: using an unmodified crate from the registry puts no
+    # obligation on this code. Crates today: cssparser, cssparser-macros, dtoa-short, selectors
+    # (all through scraper) and option-ext. Re-read this line before vendoring or patching any of them.
+    "MPL-2.0",
+    # The Mozilla CA bundle (webpki-roots, webpki-root-certs), published as permissive data.
+    "CDLA-Permissive-2.0",
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# Path dependencies between our own crates carry no version; they are never published (publish = false).
+allow-wildcard-paths = true
+deny = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

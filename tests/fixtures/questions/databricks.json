@@ -1,0 +1,455 @@
+{
+ "id": 7882009002,
+ "title": "Staff Security Software Engineer, Agentic Security Engineering ",
+ "questions": [
+  {
+   "description": null,
+   "label": "First Name",
+   "required": true,
+   "fields": [
+    {
+     "name": "first_name",
+     "type": "input_text",
+     "values": []
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "Last Name",
+   "required": true,
+   "fields": [
+    {
+     "name": "last_name",
+     "type": "input_text",
+     "values": []
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "Preferred First Name",
+   "required": true,
+   "fields": [
+    {
+     "name": "preferred_name",
+     "type": "input_text",
+     "values": []
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "Email",
+   "required": true,
+   "fields": [
+    {
+     "name": "email",
+     "type": "input_text",
+     "values": []
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "Phone",
+   "required": true,
+   "fields": [
+    {
+     "name": "phone",
+     "type": "input_text",
+     "values": []
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "Resume/CV",
+   "required": true,
+   "fields": [
+    {
+     "name": "resume",
+     "type": "input_file",
+     "values": []
+    },
+    {
+     "name": "resume_text",
+     "type": "textarea",
+     "values": []
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "Cover Letter",
+   "required": false,
+   "fields": [
+    {
+     "name": "cover_letter",
+     "type": "input_file",
+     "values": []
+    },
+    {
+     "name": "cover_letter_text",
+     "type": "textarea",
+     "values": []
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "LinkedIn Profile",
+   "required": true,
+   "fields": [
+    {
+     "name": "question_30858473002",
+     "type": "input_text",
+     "values": []
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "Current Company",
+   "required": true,
+   "fields": [
+    {
+     "name": "question_33063764002",
+     "type": "input_text",
+     "values": []
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "Current Role",
+   "required": true,
+   "fields": [
+    {
+     "name": "question_33063765002",
+     "type": "input_text",
+     "values": []
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "Is your work location in the United States",
+   "required": true,
+   "fields": [
+    {
+     "name": "question_33063812002",
+     "type": "multi_value_single_select",
+     "values": [
+      {
+       "label": "Yes",
+       "value": 1
+      },
+      {
+       "label": "No",
+       "value": 0
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "Are you legally authorized to work in the country in which you are applying?",
+   "required": true,
+   "fields": [
+    {
+     "name": "question_30858476002",
+     "type": "multi_value_single_select",
+     "values": [
+      {
+       "label": "Yes",
+       "value": 1
+      },
+      {
+       "label": "No",
+       "value": 0
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "Do you now or will you in the future need sponsorship for employment visa status in the country in which you are applying?",
+   "required": true,
+   "fields": [
+    {
+     "name": "question_30858477002",
+     "type": "multi_value_single_select",
+     "values": [
+      {
+       "label": "Yes",
+       "value": 1
+      },
+      {
+       "label": "No",
+       "value": 0
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "Do you currently or have you previously worked for Databricks in the past?",
+   "required": true,
+   "fields": [
+    {
+     "name": "question_30858478002",
+     "type": "multi_value_single_select",
+     "values": [
+      {
+       "label": "No",
+       "value": 201815062002
+      },
+      {
+       "label": "Yes - I currently work at Databricks",
+       "value": 201815063002
+      },
+      {
+       "label": "Yes - Previous Full-Time Employee",
+       "value": 201815064002
+      },
+      {
+       "label": "Yes - Previous Contractor",
+       "value": 201815065002
+      },
+      {
+       "label": "Yes - Previous Intern",
+       "value": 201815066002
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "Please confirm whether any of the below applies to you.  Select all that apply.\n\nNote: This information will only be used to ensure compliance with U.S. sanctions and export controls.",
+   "required": true,
+   "fields": [
+    {
+     "name": "question_35111049002[]",
+     "type": "multi_value_multi_select",
+     "values": [
+      {
+       "label": "Citizen or permanent resident of Cuba, Iran, North Korea, or Syria",
+       "value": 221058653002
+      },
+      {
+       "label": "Ordinarily a resident of Cuba, Iran, North Korea, Syria or the Crimea, Donetsk, Luhansk, Zaporizhzhia, or Kherson regions of Ukraine",
+       "value": 221058657002
+      },
+      {
+       "label": "Ordinarily a resident of Russia or Belarus and not willing to relocate for a Databricks role",
+       "value": 221058666002
+      },
+      {
+       "label": "None of the above",
+       "value": 221058670002
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "If you selected a response to the prior question other than “none of the above,” please confirm whether any of the following also applies to you.  Select all that apply.\n\n",
+   "required": true,
+   "fields": [
+    {
+     "name": "question_35114728002[]",
+     "type": "multi_value_multi_select",
+     "values": [
+      {
+       "label": "U.S. citizen",
+       "value": 221078368002
+      },
+      {
+       "label": "U.S. non-citizen national",
+       "value": 221078372002
+      },
+      {
+       "label": "U.S. permanent resident (Green Card holder)",
+       "value": 221078374002
+      },
+      {
+       "label": "Individual granted asylum in the U.S.",
+       "value": 221078378002
+      },
+      {
+       "label": "Individual granted refugee status in the U.S.",
+       "value": 221078383002
+      },
+      {
+       "label": "Individual granted citizenship in a country other than Cuba, Iran, North Korea, or Syria",
+       "value": 221078387002
+      },
+      {
+       "label": "Individual granted permanent residency in a country other than Cuba, Iran, North Korea, or Syria",
+       "value": 221078392002
+      },
+      {
+       "label": "None of these apply to me",
+       "value": 221078397002
+      },
+      {
+       "label": "Not applicable (i.e., I selected “none of the above” for the prior question)",
+       "value": 221078400002
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "location_questions": [
+  {
+   "description": null,
+   "label": "Longitude",
+   "required": true,
+   "fields": [
+    {
+     "name": "longitude",
+     "type": "input_hidden",
+     "values": []
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "Latitude",
+   "required": true,
+   "fields": [
+    {
+     "name": "latitude",
+     "type": "input_hidden",
+     "values": []
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "Location",
+   "required": true,
+   "fields": [
+    {
+     "name": "location",
+     "type": "input_text",
+     "values": []
+    }
+   ]
+  }
+ ],
+ "compliance": [
+  {
+   "type": "eeoc",
+   "questions": [
+    {
+     "required": false,
+     "label": "VeteranStatus",
+     "fields": [
+      {
+       "name": "veteran_status",
+       "type": "multi_value_single_select",
+       "values": [
+        {
+         "label": "I don't wish to answer",
+         "value": "3"
+        },
+        {
+         "label": "I identify as one or more of the classifications of a protected veteran",
+         "value": "2"
+        },
+        {
+         "label": "I am not a protected veteran",
+         "value": "1"
+        }
+       ]
+      }
+     ]
+    }
+   ],
+   "description": "&lt;p&gt;\n  If you believe you belong to any of the categories of protected veterans listed below, please indicate by making the appropriate selection.\n  As a government contractor subject to the Vietnam Era Veterans&#39; Readjustment Assistance Act (VEVRAA), we request this information in order to "
+  },
+  {
+   "type": "eeoc",
+   "questions": [
+    {
+     "required": false,
+     "label": "Race",
+     "fields": [
+      {
+       "name": "race",
+       "type": "multi_value_single_select",
+       "values": [
+        {
+         "label": "Decline To Self Identify",
+         "value": "8"
+        },
+        {
+         "label": "Two or More Races",
+         "value": "7"
+        },
+        {
+         "label": "Native Hawaiian or Other Pacific Islander",
+         "value": "6"
+        },
+        {
+         "label": "White",
+         "value": "5"
+        },
+        {
+         "label": "Hispanic or Latino",
+         "value": "4"
+        },
+        {
+         "label": "Black or African American",
+         "value": "3"
+        },
+        {
+         "label": "Asian",
+         "value": "2"
+        },
+        {
+         "label": "American Indian or Alaskan Native",
+         "value": "1"
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "required": false,
+     "label": "Gender",
+     "fields": [
+      {
+       "name": "gender",
+       "type": "multi_value_single_select",
+       "values": [
+        {
+         "label": "Decline To Self Identify",
+         "value": "3"
+        },
+        {
+         "label": "Female",
+         "value": "2"
+        },
+        {
+         "label": "Male",
+         "value": "1"
+        }
+       ]
+      }
+     ]
+    }
+   ],
+   "description": "&lt;h3&gt;&lt;strong&gt;Voluntary Self-Identification&lt;/strong&gt;&lt;/h3&gt;&lt;br/&gt;&lt;p&gt;For government reporting purposes, we ask candidates to respond to the below self-identification survey.\nCompletion of the form is entirely voluntary. Whatever your decision, it will not be considered "
+  }
+ ],
+ "demographic_questions": null
+}

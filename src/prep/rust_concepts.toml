@@ -1,0 +1,417 @@
+# Rust concept cards for the Aprender tab (spec section 5).
+# Every task of the implementation plan appends exactly three cards at its end.
+#
+# Format: repeated [[question]] tables, each with four string keys:
+#   id        unique, "rust-t<task>-<n>", for example "rust-t1-1"
+#             The numbering is global: plan 1a used t1-t13, plan 1b-1 would take t14-t23 (not
+#             written yet), plan 1b-2 uses t24-t32 (its task N is t(23+N)).
+#   topic     always "rust"
+#   question  a conceptual question about the code that task just wrote
+#   answer    a short answer grounded in that code
+#
+# Example card:
+#
+# [[question]]
+# id = "rust-t0-1"
+# topic = "rust"
+# question = "What does the borrow checker verify?"
+# answer = "That every reference is valid for as long as it is used."
+
+[[question]]
+id = "rust-t1-1"
+topic = "rust"
+question = "`normalize(name: &str) -> String` takes a `&str` and returns a `String`. Why borrow the input but return an owned value?"
+answer = "A `&str` is a borrowed view of text that someone else owns, so the caller keeps its string and pays no copy. The result is new text built inside the function, and a function cannot return a reference to one of its locals, so it returns an owned `String` that the caller then owns."
+
+[[question]]
+id = "rust-t1-2"
+topic = "rust"
+question = "What do `#[derive(Deserialize)]` and `#[serde(deny_unknown_fields)]` do on `Criteria`, and why is the second one useful for a config file?"
+answer = "A derive macro writes a trait implementation at compile time: here serde's `Deserialize`, which maps TOML keys to struct fields and types. `deny_unknown_fields` turns an unexpected key into an error, so a typo such as `daily_capp` fails loudly instead of being ignored while a default silently applies."
+
+[[question]]
+id = "rust-t1-3"
+topic = "rust"
+question = "In `html_to_text`, why does the helper enum `Work<'a>` need the lifetime parameter `'a`?"
+answer = "Its variants hold references (`ElementRef<'a>` and `&'a str`) that point into the parsed `Html` tree. The lifetime tells the compiler those references are only valid while that tree is alive, so the borrow checker rejects any code that would keep them after `fragment` is dropped."
+
+
+[[question]]
+id = "rust-t2-1"
+topic = "rust"
+question = "`ExclusionResult.reason` is an `Option<String>`. Why is that better than an empty string for 'no reason', and what does `.as_deref()` do in the tests?"
+answer = "`Option` makes absence a type the compiler forces you to handle, instead of a magic value you might forget to check. `.as_deref()` turns `&Option<String>` into `Option<&str>`, so a test can compare it with `Some` of a string literal without cloning the `String`."
+
+[[question]]
+id = "rust-t2-2"
+topic = "rust"
+question = "In `check_exclusion`, what does `hosts.iter().any(|host| *host == domain || host.ends_with(&subdomain_suffix))` do, and what does the closure capture?"
+answer = "`iter()` yields references and `any` takes a closure and stops at the first element for which it returns true, so it is lazy and short-circuits. The closure borrows `domain` and `subdomain_suffix` from the surrounding scope instead of moving them, so both are still usable after the call."
+
+[[question]]
+id = "rust-t2-3"
+topic = "rust"
+question = "`ExclusionResult` has public fields but its constructors `excluded` and `allowed` are private. What does that buy, and what does it not buy?"
+answer = "Private associated functions keep the rule 'excluded means there is a reason' in one place inside the module, so every result built by `check_exclusion` is consistent. Because the fields are public, other modules can still build an inconsistent value by hand: Rust privacy is enforced per module, not per type."
+
+
+[[question]]
+id = "rust-t3-1"
+topic = "rust"
+question = "Why is `State` an enum instead of a string, and what happens to `as_str` and `allowed_next` when you add a new variant?"
+answer = "An enum makes illegal states unrepresentable: a value is always one of the listed variants, never a typo. `match` must be exhaustive, so adding a variant is a compile error in every `match` that does not handle it, which forces you to define its name and its allowed transitions."
+
+[[question]]
+id = "rust-t3-2"
+topic = "rust"
+question = "Inside `Tracker::transition`, how does `?` turn a `rusqlite::Error` into a `TrackerError`?"
+answer = "`?` returns early on `Err` after converting the error with `From::from`. The `#[from]` attribute on `TrackerError::Db` makes `thiserror` generate `impl From<rusqlite::Error> for TrackerError`, so database failures propagate with `?` while the illegal-transition and unknown-key cases are returned explicitly."
+
+[[question]]
+id = "rust-t3-3"
+topic = "rust"
+question = "Why is the `rusqlite::Connection` inside a `Mutex`, and what happens to an open `Transaction` when `transition` returns early with an error?"
+answer = "`Connection` is `Send` but not `Sync`, so the `Mutex` makes `Tracker` `Sync` and a `&Tracker` can be shared across threads and `.await` points. A `Transaction` rolls back in its `Drop` implementation and the mutex guard unlocks in its own `Drop`, so every early `return` cleans up without extra code (RAII)."
+
+
+[[question]]
+id = "rust-t4-1"
+topic = "rust"
+question = "Why are `RANGE` and `HOURLY` declared as `static ... LazyLock<Regex>` instead of calling `Regex::new` inside `parse_salary_monthly_usd`?"
+answer = "Compiling a regex is expensive and the function runs once per posting. A `static` cannot run arbitrary code at program start, so `LazyLock` runs the closure once, on first use and in a thread-safe way, and every later call reuses the compiled regex."
+
+[[question]]
+id = "rust-t4-2"
+topic = "rust"
+question = "What does `let (Some(mut low), Some(mut high)) = (parse(a), parse(b)) else { continue };` do, and when is `let ... else` better than `match`?"
+answer = "It destructures the tuple and binds `low` and `high` when both are `Some`; otherwise the `else` block runs and must diverge, here with `continue`. It keeps the success path flat and unindented, which beats a `match` or a nested `if let` when the failure case is just 'skip this one'."
+
+[[question]]
+id = "rust-t4-3"
+topic = "rust"
+question = "`ScoreResult` derives `PartialEq` but not `Eq` or `Ord`. Why, and why can the tests still compare scores with `assert_eq!`?"
+answer = "`f64` has `NaN`, which is not equal to itself, so floats only implement `PartialEq` and `PartialOrd`, and a struct holding them cannot derive more. `assert_eq!` needs only `PartialEq` and `Debug`, and `round1` rounds every score to one decimal, so a test can assert an exact literal such as 75.0 without floating-point noise."
+
+[[question]]
+id = "rust-t5-1"
+topic = "rust"
+question = "Why does the `Source` trait use `#[async_trait]`, and why can the pipeline then hold a `Vec<Box<dyn Source>>`?"
+answer = "A native `async fn` in a trait returns an anonymous future type that differs per implementor, so the trait cannot be used as a trait object (`dyn Source`). `#[async_trait]` rewrites `async fn fetch(&self)` into a method returning `Pin<Box<dyn Future<Output = FetchResult> + Send + '_>>`, one fixed type for every implementor. Greenhouse, Lever and RemoteOK can therefore sit in the same `Vec<Box<dyn Source>>` and be called through dynamic dispatch. The price is one heap allocation per call, which is nothing next to an HTTP request."
+
+[[question]]
+id = "rust-t5-2"
+topic = "rust"
+question = "`Source::fetch` returns a `FetchResult`, not a `Result`. How do `?`, `Option::context` and `match` work together in `GreenhouseSource` so that one bad board cannot stop the others?"
+answer = "`fetch_board` returns `anyhow::Result<(Vec<Job>, usize)>`: `?` passes up network, HTTP status and JSON errors, and `.as_array().context(...)` turns a missing `jobs` array into an error with a readable message. `fetch` is the boundary: it loops over the boards, matches each result, extends `result.jobs` on `Ok`, and on `Err` pushes the line `greenhouse:<board>: <reason>` (formatted with `{:#}` to include the whole cause chain). It never propagates the error, so errors become data at the edge and the loop always continues."
+
+[[question]]
+id = "rust-t5-3"
+topic = "rust"
+question = "In `fn str_field<'a>(value: &'a Value, key: &str) -> &'a str`, why is the lifetime `'a` written out, and why does `key` not get one?"
+answer = "The returned `&str` borrows from the JSON `value`, not from `key`. With two reference parameters and no `&self`, lifetime elision cannot guess which one the result is tied to, so `'a` states it: the result lives as long as `value`. `key` is only used during the call, so it keeps its own anonymous lifetime. Callers can therefore keep the field text after the temporary key literal or string is gone."
+
+[[question]]
+id = "rust-t6-1"
+topic = "rust"
+question = "How does `GetOnBoardSource::new(client).with_max_pages(2).with_base_url(url)` work, and why do the `with_*` methods take `mut self` instead of `&mut self`?"
+answer = "Each `with_*` method takes ownership of `self` (`mut self` only makes the local binding mutable), changes one field and returns `self`, so the calls chain and the final value is a plain owned `GetOnBoardSource`, never half-built. With `&mut self` the chain would return a reference to a temporary that dies at the end of the statement, so `let source = GetOnBoardSource::new(c).with_max_pages(2);` would not compile. The cost is moving the struct on each call, which is cheap because only the owned fields move and nothing is deep-copied."
+
+[[question]]
+id = "rust-t6-2"
+topic = "rust"
+question = "What do `#[serde(default, deny_unknown_fields)]` and the `Option<GetOnBoardConfig>` field do for `SourcesConfig`?"
+answer = "`default` fills every missing key from `Default::default()`, so an empty `sources.toml` parses to no sources and a bare `[getonboard]` table gets the category `programming`, 3 pages and 50 postings per page. `deny_unknown_fields` turns a typo such as `greenhous = [...]` into a parse error instead of silently dropping a source. `Option<GetOnBoardConfig>` encodes the rule 'table absent = source off, table present = source on' in the type, which `build_sources` reads with `if let Some(..)`."
+
+[[question]]
+id = "rust-t6-3"
+topic = "rust"
+question = "`build_sources` takes `&reqwest::Client` and hands every source `client.clone()`. Why is that cheap, and what would change if each source stored a `&Client` instead?"
+answer = "`reqwest::Client` is a handle around an `Arc` of the connection pool, so `clone()` copies a pointer and bumps a reference count; all sources still share one pool and its open connections. A source that stored `&Client` would need a lifetime parameter (`GreenhouseSource<'a>`), and `Box<dyn Source>`, which means `Box<dyn Source + 'static>` by default, could not hold it. Owning a cheap clone keeps the sources self-contained and movable into async tasks."
+
+[[question]]
+id = "rust-t7-1"
+topic = "rust"
+question = "`discover` keeps `tracker: &Tracker` alive across its `.await` points. What has to be true of `Tracker` for that future to be `Send`, and how does `Tracker` achieve it?"
+answer = "A reference held across an `.await` lives inside the future's state machine, and `&T` is `Send` only when `T: Sync`. A bare `rusqlite::Connection` is `Send` but not `Sync`, so a struct holding one directly would make the future `!Send` (it could not go to `tokio::spawn`). `Tracker` wraps the connection in a `Mutex<Connection>`: `Mutex<T>` is `Sync` whenever `T: Send`, so `Tracker: Sync`, `&Tracker: Send`, and the `discover` future is `Send`. Each method locks, runs its SQL and drops the guard before returning, so no `MutexGuard` (which is `!Send`) is ever held across an `.await`."
+
+[[question]]
+id = "rust-t7-2"
+topic = "rust"
+question = "Why are the region regexes `static` values of type `LazyLock<Regex>`, and why do they use `[^a-z]` where the Python original used look-behind?"
+answer = "Compiling a regex is expensive, so `LazyLock` (in `std` since Rust 1.80) compiles each pattern once, on first use, and shares it between threads for every later call of `region_ok`. The `regex` crate has no look-around because it guarantees linear-time matching, so `(?<![a-z])us` becomes `(^|[^a-z])us([^a-z]|$)`: `us` must be surrounded by non-letters or by the edge of the text, which keeps `austin` from matching."
+
+[[question]]
+id = "rust-t7-3"
+topic = "rust"
+question = "In `discover`, `report.errors.extend(result.errors)` is followed by `for job in result.jobs`. Why may `result` still be used after one of its fields was moved out?"
+answer = "Moving a field out of a struct is a partial move: the compiler tracks ownership per field, so `result.errors` is moved while `result.jobs` is still owned and can be consumed by the `for` loop. This is allowed because `FetchResult` has no `Drop` implementation (a type that implements `Drop` cannot be partially moved), and it avoids cloning either vector. The loop takes each `Job` by value and then lends it to the tracker as `&job`."
+
+[[question]]
+id = "rust-t8-1"
+topic = "rust"
+question = "In `cv.rs`, `CvError` derives `thiserror::Error` and has the variant `Other(#[from] anyhow::Error)` marked `#[error(transparent)]`. What do `#[from]` and `transparent` do, and why is this a typed enum instead of a plain `anyhow::Error`?"
+answer = "`#[from]` generates `impl From<anyhow::Error> for CvError`, so `?` turns any `anyhow::Error` into `CvError::Other` automatically. `transparent` forwards `Display` and `source()` to the inner error, so no extra text is added. The enum stays typed because callers `match` on `NotReady` and `NewSkills` and react differently (exit code 2 versus a bug report), which an opaque `anyhow::Error` would not allow; `anyhow` stays for the failures nobody matches on."
+
+[[question]]
+id = "rust-t8-2"
+topic = "rust"
+question = "`SKILL_LINE` and `PARENTHESES` are `static` values of type `LazyLock<Regex>`. Why not call `Regex::new` inside `parse_skill_line`, and why is `expect` acceptable there?"
+answer = "`Regex::new` compiles the pattern, which is expensive, and `tailor` and `assert_no_new_skills` parse every line of every CV. A `static` cannot run a non-const function at compile time, so `LazyLock` runs the closure on first use, exactly once and safely across threads, and then hands out `&Regex`. `expect` is acceptable because the pattern is a literal covered by tests: a failure would be a programmer bug caught immediately, not a runtime condition worth a `Result`."
+
+[[question]]
+id = "rust-t8-3"
+topic = "rust"
+question = "In `tailor`, why does the code use `items.into_iter().partition(..)` and `hit.into_iter().chain(rest)` instead of `iter()` plus clones, and why is `hit.iter().map(..)` called before `hit.into_iter()`?"
+answer = "`into_iter()` on a `Vec<String>` consumes the vector and yields owned `String`s, so `partition` moves each item into `hit` or `rest` without a single clone; `iter()` would yield `&String` and force `.cloned()`. After `into_iter()` the vector `hit` has been moved and cannot be used again, so the call that only borrows it (collecting the skill names into `matched`) has to come first. The borrow checker enforces that order."
+
+[[question]]
+id = "rust-t9-1"
+topic = "rust"
+question = "`AnswerEntry::candidates` starts with `let Some(value) = self.value.as_deref().map(str::trim).filter(|value| !value.is_empty()) else { return Vec::new(); };` and `plan_fields` then calls `bank.lookup(label).map(AnswerEntry::candidates).unwrap_or_default()`. What does each combinator do, what does `let ... else` add, and why is `AnswerEntry::value` an `Option<String>` instead of an empty string?"
+answer = "`as_deref` turns `&Option<String>` into `Option<&str>` without cloning; `map(str::trim)` trims inside the `Some`; `filter` turns a blank answer into `None`. `let ... else` binds the `Some` payload for the rest of the function and forces the `None` branch to diverge (here `return`), replacing a nested `if let`. In `plan_fields`, `lookup` gives `Option<&AnswerEntry>`, `map(AnswerEntry::candidates)` calls the method on the entry when there is one, and `unwrap_or_default` yields an empty `Vec` otherwise, so 'no entry' and 'entry without value' both end as 'nothing to fill'. `Option` makes 'ask Gonza' a distinct state every caller must handle, while an empty string could be typed into a real form by mistake."
+
+[[question]]
+id = "rust-t9-2"
+topic = "rust"
+question = "Why does the `FormFiller` trait use `#[async_trait::async_trait]` and require `Send + Sync`, and what must `BrowserFiller` contain for its `impl FormFiller` to compile?"
+answer = "A trait with a plain `async fn` cannot be used as `dyn FormFiller`, because each implementation returns a different anonymous future type. `#[async_trait]` rewrites each method to return a boxed future (`Pin<Box<dyn Future + Send + '_>>`), which restores trait objects such as the `&dyn FormFiller` the pipeline takes, at the cost of one allocation per call. The future is `Send`, so everything held across an `.await` must be `Send`, and `Send + Sync` on the trait lets a shared reference cross threads. `BrowserFiller` compiles because its `Playwright` and `BrowserContext` fields are `Send + Sync`."
+
+[[question]]
+id = "rust-t9-3"
+topic = "rust"
+question = "In `contains_phrase`, `text.match_indices(phrase)` gives byte offsets and the code slices `&text[..start]` and `&text[start + phrase.len()..]`. Why is that slicing safe, and why would character counts be the wrong offsets?"
+answer = "A `&str` slice is a byte range of UTF-8 text and must begin and end on character boundaries, or slicing panics. `match_indices` returns the byte index where the match starts, always a boundary, and adding `phrase.len()` (also bytes) lands on the boundary right after the match. Counting `chars()` gives character positions, not byte positions, so using them as slice indexes would be wrong or panic on non-ASCII text such as `Currículum`. `chars().next_back()` and `chars().next()` then read one character on each side of the match without any offset arithmetic."
+
+[[question]]
+id = "rust-t10-1"
+topic = "rust"
+question = "The pipeline tests use `FakeRenderer` and `FakeFiller` instead of a browser. How do `&dyn Renderer` and `&dyn FormFiller` make that possible, and why do the fakes keep their call log in a `Mutex` even though the tests run on one thread?"
+answer = "`prepare_all` and `submit_all` take trait objects, so any type implementing the trait can be passed: production passes `BrowserRenderer` and `BrowserFiller`, tests pass fakes that need no Chromium and finish in milliseconds. The trait methods take `&self`, so a fake that records calls needs interior mutability, and because the traits require `Send + Sync` that field must be `Sync`: `Mutex<Vec<_>>` qualifies, `RefCell` would not compile. The lock is taken only for the `push` and is never held across an `.await`."
+
+[[question]]
+id = "rust-t10-2"
+topic = "rust"
+question = "`submit_all` holds `&Tracker`, `&Criteria` and `&dyn FormFiller` across `.await` points. What does that imply for the future's `Send`-ness, and why does `Tracker` qualify although `rusqlite::Connection` is not `Sync`?"
+answer = "A reference held across `.await` lives inside the future's state machine, so the borrowed values must outlive the future, and for the future to be `Send` every `&T` it holds needs `T: Sync`. `rusqlite::Connection` is `Send` but not `Sync`, so a `Tracker` holding it directly would make the future `!Send`. `Tracker` wraps the connection in a `std::sync::Mutex`, and `Mutex<T>: Sync` whenever `T: Send`, so `&Tracker` is `Send` and the future of `submit_all` can be awaited anywhere, including inside `tokio::spawn` if a later task needs it. The rule that makes this safe is that a `MutexGuard` is taken for one tracker call and dropped before the next `.await`: the guard itself is `!Send` and must never be alive across an await point."
+
+[[question]]
+id = "rust-t10-3"
+topic = "rust"
+question = "The `match result.status` in `submit_all` has no `_` arm, but the `match gate_reason` above it ends with `Some(_)`. Why the difference, and what do `Some(\"stop_file\" | \"daily_cap\")` and `Some(why) if why.starts_with(\"excluded:\")` express?"
+answer = "`SubmitStatus` is a closed enum: matching it without a wildcard makes the compiler check exhaustiveness, so adding a variant breaks the build until `submit_all` handles it and no new outcome can skip the tracker update. The gate reason is an `Option<&str>` from an open set of strings, which can never be exhaustive, so the final `Some(_)` is a deliberate catch-all that reports any other reason as `blocked`. `\"stop_file\" | \"daily_cap\"` is an or-pattern that shares one arm between two literals, and `Some(why) if ...` is a match guard that tests a prefix and binds the matched string for use in the arm."
+
+[[question]]
+id = "rust-t11-1"
+topic = "rust"
+question = "window.rs keeps every instant as DateTime<Utc> and only converts to America/New_York or America/Santiago inside BusyBlock::covers. Why not store or compare local times?"
+answer = "A UTC instant names exactly one point on the timeline. A local wall-clock time does not: when clocks go back an hour the same local time happens twice, when they go forward some local times never happen, and the offset depends on the date (New York is -4 in October and -5 in December). Converting UTC to local with with_timezone always has exactly one answer, so the code does that only to read the local weekday and clock time. Going the other way (from_local_datetime) returns a LocalResult that can be Single, Ambiguous or None."
+
+[[question]]
+id = "rust-t11-2"
+topic = "rust"
+question = "parse_schedule returns anyhow::Result<Schedule> instead of calling unwrap() or panic! on a bad file. When is a Result the right tool and when is a panic acceptable?"
+answer = "A malformed or missing profile/schedule.toml is an expected failure that comes from outside the program, so the function returns Err with context and lets the caller decide (the CLI prints it and exits instead of running, which fails closed). The ? operator passes the Err up and .context(...) adds a readable message on the way. A panic is for bugs and broken invariants that the program cannot recover from, and unwrap() is fine in tests, where a panic is exactly how a failing test reports itself."
+
+[[question]]
+id = "rust-t11-3"
+topic = "rust"
+question = "In window.rs the method covers is private, in_run_window is pub, and the test module starts with use super::*. How does Rust visibility work here?"
+answer = "Every item is private to the module that defines it and to that module's children, unless marked pub. in_run_window is pub so other modules can call it, and pub mod window; in lib.rs makes the whole module reachable as jobbot::window. The tests module is a child of window, so use super::* lets it see even the private items of its parent. #[cfg(test)] makes the compiler include that child only for cargo test, so it adds nothing to the release binary."
+
+[[question]]
+id = "rust-t12-1"
+topic = "rust"
+question = "The commands in cli.rs are variants of an enum Command with #[derive(Subcommand)]. What does clap derive generate from it, and why is an enum a good fit?"
+answer = "The derive macro reads the enum at compile time and writes the parser: every variant becomes a subcommand (RunDaily is run-daily), its fields become flags or positional arguments, and the doc comments become the help text. Parsing returns a Command value, and the match in dispatch has to cover every variant, so adding a command without handling it is a compile error. A variant carries only the data that command accepts (Submit has --live, Digest has nothing), so impossible combinations cannot be represented."
+
+[[question]]
+id = "rust-t12-2"
+topic = "rust"
+question = "Why does cli::run return an i32 and only main call std::process::exit? What do exit codes 3 and 4 give the scheduled task?"
+answer = "A function that returns the code can be tested with assert_eq!(code, 3), while process::exit would end the whole test process. It also skips destructors (Drop) of everything still alive, so it belongs at the very top, as the last thing main does. Exit codes are the contract with the caller: run-daily.cmd reads ERRORLEVEL and treats 4 (outside the execution window) as a quiet success, 3 (STOP file) is visible in Task Scheduler as a deliberate halt, and 1 or 2 are real failures."
+
+[[question]]
+id = "rust-t12-3"
+topic = "rust"
+question = "Deps holds Box<dyn Renderer> and Option<Box<dyn FormFiller>> instead of generic type parameters. What does dyn Trait give here, and why the Box?"
+answer = "A trait object does dynamic dispatch: the method is looked up in a vtable at run time, so one Deps type works with the real BrowserRenderer or a test fake chosen when the value is built. A generic Deps<R, F> would be compiled once per combination and its type parameters would spread through every function that touches it. A dyn Trait has no size known at compile time, so it must live behind a pointer, and Box owns it on the heap. The same idea explains &mut dyn Write for the output, which lets tests capture what a command prints in a Vec<u8>."
+
+[[question]]
+id = "rust-t13-1"
+topic = "rust"
+question = "prep/mod.rs embeds the question files with include_str!. What does that macro do, and what is the trade-off compared with reading the file at run time?"
+answer = "include_str!(\"questions.toml\") reads the file while the program is being compiled, resolves the path relative to the source file that contains the macro, and turns the text into a &'static str inside the binary. A missing file is a compile error, and the finished jobbot.exe needs no data files next to it. The price is that editing the TOML requires a rebuild, whereas std::fs::read_to_string would pick up changes immediately but could fail at run time if the file is absent or in the wrong folder."
+
+[[question]]
+id = "rust-t13-2"
+topic = "rust"
+question = "Question derives Deserialize and QuestionFile has #[serde(default)] on its Vec. What does each of them do for the TOML loader?"
+answer = "#[derive(Deserialize)] generates, at compile time, the code that builds a Question from a TOML table by matching key names to field names, and it produces precise errors for a missing key or a wrong type (the loader adds the file name with with_context). #[serde(default)] tells serde to use Default::default() when the key is absent, so a rust_concepts.toml that has no [[question]] tables yet parses into an empty Vec instead of failing. Struct update syntax (..q) then copies the remaining fields while the loader trims the two text fields."
+
+[[question]]
+id = "rust-t13-3"
+topic = "rust"
+question = "next_question<'a> takes questions: &'a [Question] and returns Option<&'a Question>. Why does the result carry 'a instead of the lifetime of &self?"
+answer = "The returned reference points into the slice the caller passed, not into the PrepStore, so 'a says it stays valid exactly as long as that slice does. Without the explicit name, lifetime elision would tie the output to &self, wrongly claiming the question lives only as long as the store is borrowed and blocking uses such as grading with the same store while holding the question. The compiler uses the annotation to refuse any code that keeps the reference after the slice is dropped, so a dangling pointer is impossible."
+
+[[question]]
+id = "rust-t24-1"
+topic = "rust"
+question = "`prepare_command` builds a `Command` with a chain of calls (`args`, `current_dir`, `stdin`...) and then calls `command.env_remove(key)` in a loop. Why is `command` declared `let mut`, and what do the chained builder methods return?"
+answer = "Builder methods such as `args` and `current_dir` take `&mut self` and return `&mut Command`, so a chain keeps modifying the same value instead of creating a new one. The binding must be `mut` because every call mutates it, including the later `env_remove` loop. The chain is one statement ending in `;`, and the owned `Command` is returned at the end of the function."
+
+[[question]]
+id = "rust-t24-2"
+topic = "rust"
+question = "`is_invisible` is a `matches!(c, A..=B | C | D..=E)` over characters. What does `matches!` expand to, and what do `|` and `..=` mean inside a pattern?"
+answer = "`matches!(value, pattern)` expands to a `match` that returns `true` when the pattern matches and `false` otherwise. Inside a pattern, `|` means 'any of these alternatives' and `A..=B` is an inclusive range, so one pattern can list single characters and whole ranges. The compiler checks patterns, which makes this the idiomatic way to write a membership test over `char`."
+
+[[question]]
+id = "rust-t24-3"
+topic = "rust"
+question = "`fnv1a32` multiplies with `hash.wrapping_mul(0x0100_0193)` instead of `*`. What would `*` do, and why does the choice matter for a hash that names files?"
+answer = "In a debug build `*` panics when the result overflows `u32`, and in a release build it wraps silently, so the same code would behave differently depending on the profile. `wrapping_mul` states the intent (arithmetic modulo 2^32) and gives the same result in every build, which a file name derived from the hash needs: a dossier written today must be found under the same name tomorrow."
+
+[[question]]
+id = "rust-t25-1"
+topic = "rust"
+question = "In `run_dossier_step`, `load_claude_config(...)?` moved below the `if due.is_empty() { return Ok(()); }` check. What does `?` do, and why does the move change behavior and not only speed?"
+answer = "`expr?` returns early from the function with `Err(From::from(e))` when `expr` is an `Err`, and unwraps the `Ok` value otherwise. A broken claude.toml used to abort the step even when there was nothing to do; after the move the error is only reachable when a dossier is really due. The order of the fallible statements decides which errors a caller can ever see."
+
+[[question]]
+id = "rust-t25-2"
+topic = "rust"
+question = "`due.truncate(config.max_dossiers_per_run)` takes `&mut self`. What does that tell you about how `due` is used afterwards, compared with `due.into_iter()`?"
+answer = "`truncate` borrows the vector mutably and shortens it in place, so `due` is still owned by the function and can be iterated later. `into_iter()` takes `self` by value and consumes the vector, so it could not be used again. Methods that take `&mut self` change a value you keep; methods that take `self` hand it over."
+
+[[question]]
+id = "rust-t25-3"
+topic = "rust"
+question = "The command functions write with `writeln!(out, ...)?` where `out: &mut dyn Write`. What is `dyn Write`, and what do the tests gain from it?"
+answer = "`dyn Write` is a trait object: a pointer plus a table with the methods of whichever type implements `Write`, so the function does not need the concrete type and the call is dispatched at run time. `main` passes stdout and the tests pass a `Vec<u8>` and read back what was printed. The price is one indirect call per write and no inlining, which is irrelevant for terminal output."
+
+[[question]]
+id = "rust-t26-1"
+topic = "rust"
+question = "`approve` returns `Result<Outcome>`: a missing key is `Ok(Outcome { ok: false, .. })` and a database failure is `Err`. Why two layers?"
+answer = "`Err` is for something the program cannot handle locally (a broken database), and it travels up with `?` to be reported. An unknown key or an illegal move is a normal answer that has to be shown to Gonza, so it is data inside the `Ok` value. Keeping them apart lets the CLI turn a refusal into a printed line and the panel turn it into a 409 without parsing error text."
+
+[[question]]
+id = "rust-t26-2"
+topic = "rust"
+question = "`explain(error: &TrackerError)` matches on every variant, including `IllegalTransition { from, to }`. What happens to this function if someone adds a new variant to the enum?"
+answer = "A `match` must be exhaustive, so the code stops compiling and the compiler points at every match that needs a new arm. A catch-all `_` arm would hide that check and silently send new errors to a generic message. The struct-like variant is destructured by field name, binding `from` and `to` as references into the error."
+
+[[question]]
+id = "rust-t26-3"
+topic = "rust"
+question = "`marks_from` ends with `.iter().copied().filter(..).collect()`. Why `copied`, and how does `collect` know it must build a `Vec<State>`?"
+answer = "`iter()` over a slice of `State` yields `&State`. `State` implements `Copy`, so `copied()` turns each reference into a value and the filter and the collect work with plain `State` values. `collect` is generic over the collection it builds and takes the target type from the return type of the function, `Vec<State>`, so no turbofish is needed."
+
+[[question]]
+id = "rust-t27-1"
+topic = "rust"
+question = "In `events_for`, the expression `from.map(|text| state_from_text(1, &text)).transpose()?` appears. What do `map` and `transpose` do here?"
+answer = "`from` is an `Option<String>`. `map` applies the parser only when there is a value and produces an `Option<Result<State, Error>>`. `transpose` swaps the layers into `Result<Option<State>, Error>`, so `?` can propagate a parse failure while a missing value stays `None`. It is the standard way to use `?` on an optional step that can fail."
+
+[[question]]
+id = "rust-t27-2"
+topic = "rust"
+question = "`Tracker` writes to SQLite through `&self`. How can a method that takes a shared reference modify the database?"
+answer = "The connection lives inside a `Mutex<Connection>`, a type with interior mutability: `lock()` needs only `&self` and hands out a guard that gives exclusive `&mut` access while it lives. That makes `Tracker` usable by shared reference from several places, and `Sync`, at the cost of waiting when the lock is taken. The helper also recovers from a poisoned mutex because a panic cannot leave a statement half done."
+
+[[question]]
+id = "rust-t27-3"
+topic = "rust"
+question = "`topic_progress` uses `by_topic.entry(key).or_insert_with(|| TopicProgress { .. })` on a `BTreeMap`. Why `or_insert_with`, and why a `BTreeMap`?"
+answer = "`entry` looks the key up once and gives access to the slot, so there is no second lookup to insert. `or_insert_with` takes a closure that runs only when the slot is empty, so the default struct is built lazily, while `or_insert` would build it on every call. A `BTreeMap` iterates in key order, so the topics come out sorted without a separate sort."
+
+[[question]]
+id = "rust-t28-1"
+topic = "rust"
+question = "`Card` has the field `state: &'static str` and derives `Serialize`, with no lifetime parameter on the struct. Why does that compile?"
+answer = "`'static` is the lifetime of data that lives for the whole program, such as string literals, and it needs no parameter because it never depends on a caller. `State::as_str` returns literals, so its result can be stored in a struct that is moved, returned and serialized freely. A `&str` borrowed from a `String` would force the struct to carry a lifetime parameter."
+
+[[question]]
+id = "rust-t28-2"
+topic = "rust"
+question = "`ratio` is `(whole > 0).then(|| part as f64 / whole as f64)`. What does `bool::then` return, and why a closure?"
+answer = "`then` returns `Some(value)` when the bool is true and `None` otherwise. The closure is only called in the true case, so the division never runs when `whole` is zero; `then_some` takes a ready value and would compute it first. The result type `Option<f64>` is what lets the page show n/a instead of a NaN."
+
+[[question]]
+id = "rust-t28-3"
+topic = "rust"
+question = "`Panel` stores `clock: Box<dyn Fn() -> DateTime<Utc> + Send>`. Why a `Box`, why `dyn Fn`, and what does `Send` promise?"
+answer = "Every closure has its own anonymous type, so a struct that must hold any clock stores a trait object, and a trait object has no fixed size, so it lives behind a pointer: `Box`. `Fn` means it can be called through a shared reference as many times as needed. `Send` says the closure can be moved to another thread, which the panel needs because the server thread takes ownership of the whole `Panel`."
+
+[[question]]
+id = "rust-t29-1"
+topic = "rust"
+question = "`handle` calls `route`, which returns `Result<Reply>`, and turns an `Err` into a 500 reply with one `match`. Why handle errors at that boundary instead of everywhere?"
+answer = "Inside `route` every fallible call can use `?`, which keeps the happy path short, and the first error leaves the function. The one `match` in `handle` is the single place that decides what an unexpected failure looks like from outside (a 500 JSON message), so no handler can forget it and the server never panics. `anyhow::Error` can hold any error type, which is what lets different failures flow through the same `?`."
+
+[[question]]
+id = "rust-t29-2"
+topic = "rust"
+question = "`parse<T: DeserializeOwned>(req: &Request) -> Result<T, Reply>` is generic. What does the bound require, and how does the caller choose `T`?"
+answer = "`DeserializeOwned` means `T` can be built without borrowing from the input, so the result may outlive the request bytes it was parsed from. The caller picks `T` through the type of the variable, as in `let body: KeyBody = match parse(req) { Ok(body) => body, Err(reply) => return Ok(reply) }`, and the compiler generates one copy of `parse` per type. Plain `Deserialize<'de>` would tie `T` to the lifetime of the borrowed bytes."
+
+[[question]]
+id = "rust-t29-3"
+topic = "rust"
+question = "`token_ok` compares bytes with `zip` and `fold` instead of `==`. What do those two adapters do, and why avoid `==`?"
+answer = "`zip` pairs the two byte iterators element by element and `fold` threads an accumulator through them, here OR-ing together the XOR of every pair, so the loop always visits every byte and the result is zero only if all pairs are equal. `==` on slices can return at the first difference, and the time it takes could reveal how many leading bytes of a guess were right. The length check comes first because the length of the token is not a secret."
+
+[[question]]
+id = "rust-t30-1"
+topic = "rust"
+question = "`PanelServer::start` moves `server`, `panel` and `guard` into `std::thread::Builder::spawn(move || ...)`. What does `move` do, and what must those values satisfy?"
+answer = "`move` makes the closure take ownership of everything it uses instead of borrowing it, so nothing refers to the stack frame of `start` after it returns. `spawn` requires the closure to be `Send + 'static`: every captured value must be sendable to another thread and own its data. `Panel` qualifies because its connections are `Send`; a `PrepStore` could not be shared by two threads at once (it is not `Sync`), but moving it to one thread is fine."
+
+[[question]]
+id = "rust-t30-2"
+topic = "rust"
+question = "`shutdown(mut self)` takes `self` by value and `PanelServer` also implements `Drop`. What does each tell you about the life of the server?"
+answer = "A method that takes `self` consumes the value: after `server.shutdown()` the caller cannot use the server again, and the compiler enforces it. `Drop::drop` runs automatically when a value goes out of scope without having been moved, here to ask the thread to stop, so a test that panics does not leave the thread serving forever. Fields emptied with `Option::take` leave a valid value behind, which is why `drop` can still run afterwards."
+
+[[question]]
+id = "rust-t30-3"
+topic = "rust"
+question = "The stop flag is an `Arc<AtomicBool>` shared by `PanelServer` and the serving thread. Why not a plain `bool` or a `Mutex<bool>`?"
+answer = "Two threads cannot share a plain `bool` that one of them writes: the compiler rejects it because it would be a data race. `Arc` gives shared ownership, so the flag lives as long as its longest user, and `AtomicBool` allows a lock-free read and write through `&self`. `Ordering::Relaxed` is enough because the flag carries no other data that must be seen in a specific order; the loop only has to notice the change soon."
+
+[[question]]
+id = "rust-t31-1"
+topic = "rust"
+question = "The page is `const PAGE: &str` filled by `include_str!`, and `page_reply` does `PAGE.replace(..., &nonce)`. What is the type of each side, and where does the allocation happen?"
+answer = "`PAGE` is a `&'static str` inside the binary: no allocation, shared by every request. `str::replace` builds and returns a new owned `String` with the nonce filled in, so each request pays one allocation and the constant is never modified. The `String` then becomes the reply bytes with `into_bytes`, which reuses its buffer instead of copying it."
+
+[[question]]
+id = "rust-t31-2"
+topic = "rust"
+question = "The browser tests use `#[tokio::test]` with the multi_thread flavor, and `#[ignore]`. What does the first attribute generate, and what does the second one change?"
+answer = "`#[tokio::test]` is an attribute macro that rewrites the async function into a normal synchronous test that builds a Tokio runtime and blocks on the body; the multi_thread flavor gives that runtime several worker threads instead of one, so background tasks (such as the Playwright connection) keep running while the test body waits. `#[ignore = reason]` keeps the test out of a plain `cargo test` and shows the reason; it runs only with `cargo test -- --ignored`."
+
+[[question]]
+id = "rust-t31-3"
+topic = "rust"
+question = "`Browse` keeps a field named `_playwright` that nothing reads. Why keep it, and what happens if it is dropped early?"
+answer = "The leading underscore says 'unused on purpose' and silences the warning, but the field still owns the Playwright driver process. Rust drops the fields of a struct when the struct is dropped, so keeping it alive keeps the connection that `browser` and `page` depend on; dropping it at the start of the test would close the driver and every later call would fail. Ownership is how RAII ties the life of a resource to a value."
+
+[[question]]
+id = "rust-t32-1"
+topic = "rust"
+question = "`cmd_panel` ends with `tokio::task::spawn_blocking(move || server.wait()).await?`. Why not call `server.wait()` directly?"
+answer = "`wait` joins a thread and can block for as long as the program runs. In an async function a blocking call holds one of the runtime's worker threads, so other tasks scheduled on it would stall. `spawn_blocking` moves the call to a separate pool meant for blocking work and returns a future that `.await` can wait on without blocking a worker. The `?` handles the `JoinError` if that thread panicked."
+
+[[question]]
+id = "rust-t32-2"
+topic = "rust"
+question = "`if !args.no_open && let Err(err) = open_in_browser(&url) { ... }` mixes a boolean and a pattern in one condition. What is this feature, and what did it replace?"
+answer = "Let chains (stable in edition 2024) allow `let` patterns and ordinary conditions to be joined with `&&` in one `if`. Before, the same logic needed a nested `if` and `if let`, or a `match` with a guard. The binding `err` exists only in the block that runs when every part of the chain held, and the checks run left to right, so the browser is only launched when `--no-open` was not given."
+
+[[question]]
+id = "rust-t32-3"
+topic = "rust"
+question = "`PanelArgs` derives `Clone` and `Copy` and is passed by value to `cmd_panel`. When can a struct be `Copy`, and what does it change at the call site?"
+answer = "A struct can derive `Copy` only if every field is `Copy` (here a `u16` and a `bool`), because a copy is a plain bit-for-bit duplicate with no owned heap data. Passing it by value then does not move it, so the caller can keep using `args` afterwards. A struct holding a `String` or a `Vec` cannot be `Copy` and would be moved by the call."

@@ -1,0 +1,118 @@
+{
+    "title":  "Workable",
+    "totalSize":  26,
+    "nextPageToken":  "eyJzZWFyY2hBdCI6IjIwMjYtMTAtMDVUMDM6NTk6NTkuOTk5WiIsIm9mZnNldCI6WzAuMDAwMTI1MDgyNDcsMCwxNzg5NjY1OTkzNjY0LCJiYzkxMjhjZi1mZThlLTQxMjgtYmY0My1lYmMzY2UyZTU3ZjQiXX0=",
+    "jobs":  [
+                 {
+                     "department":  "Rocket",
+                     "id":  "2c507af9-3a33-4d77-a8cc-7babaffbc705",
+                     "title":  "Software Engineer (Python/Typescript (API integrations))",
+                     "state":  "published",
+                     "description":  "<p>We love technology, and we enjoy what we do. We are always looking for innovation. We have social awareness and try to improve it daily. We make things happen. You can trust us. Our Enrouters are always up for a challenge. We ask questions, and we love to learn.</p>",
+                     "socialSharingDescription":  "",
+                     "employmentType":  "Full-time",
+                     "benefitsSection":  "<ul><li>Monetary compensation </li><li>Year-end Bonus </li><li>IMSS, AFORE, INFONAVIT </li><li>Major Medical Expenses Insurance </li><li>Life Insurance </li><li>Funeral Expenses Coverage </li><li>TDU Membership </li><li>MediAccess </li><li>Health Check-Up Subsidy </li><li>Preferential rates for car insurance </li><li>Vacations </li>",
+                     "requirementsSection":  "<p>Must-Haves</p><p>\t•\t5+ years of experience as a Software Engineer.</p><p>\t•\tProven experience developing RESTful APIs using Python/Typescript or another modern programming language.</p><p>\t•\tSolid understanding of relational databases such as PostgreSQL.</p>",
+                     "url":  "https://jobs.workable.com/view/6toeS2gWbTnuz4KdnKCtRP/remote-software-engineer-(python%2Ftypescript-(api-integrations))-in-chile-at-enroute",
+                     "language":  "en",
+                     "locations":  [
+                                       "TELECOMMUTE",
+                                       "Chile"
+                                   ],
+                     "location":  {
+                                      "city":  "",
+                                      "subregion":  null,
+                                      "countryName":  "Chile"
+                                  },
+                     "created":  "2026-09-22T16:28:39.737Z",
+                     "updated":  "2026-09-22T16:28:39.737Z",
+                     "company":  {
+                                     "id":  "a9b05c82-218c-4e7e-98f6-3d1046defa8f",
+                                     "title":  "Enroute",
+                                     "website":  "http://www.enroutesystems.com",
+                                     "image":  "https://workablehr.s3.amazonaws.com/uploads/account/logo/39239/logo",
+                                     "description":  "",
+                                     "url":  "https://jobs.workable.com/company/mXjXkdJUs4UM692pV9ZhNt/jobs-at-enroute",
+                                     "socialSharingImage":  "https://workablehr.s3.amazonaws.com/uploads/account/open_graph_logo/39239/social",
+                                     "socialSharingDescription":  ""
+                                 },
+                     "isFeatured":  false,
+                     "workplace":  "remote"
+                 },
+                 {
+                     "department":  "Technology & Development",
+                     "id":  "d536d15c-e169-435e-8c00-23974901e8d3",
+                     "title":  "Senior Backend Engineer | Remote | LATAM Only | 89010",
+                     "state":  "published",
+                     "description":  "<h3><strong>About Us</strong></h3><p>At <strong>Remote Talent LATAM</strong>, we connect top Latin American talent with leading companies. We guide businesses and candidates through every step of the hiring process, ensuring the perfect match in skills, culture, and goals. While we’re not direct employers, we act as a trusted partner, bridging the gap between exceptional talent and growing opportunities.</p>",
+                     "socialSharingDescription":  "",
+                     "employmentType":  "Full-time",
+                     "benefitsSection":  "<p><strong>Why Join Us?</strong> </p><ul><li>💼 <strong>Full-Time Position:</strong> 8AM to 5:00PM EST M–F Business hours</li><li>💰 <strong>Salary:</strong> $4,500 USD</li><li>🏠 <strong>100% Remote work environment</strong></li><li>📄 <strong>Contract:</strong> Independent Contractor</li></ul><p>📄 Resumes must be submitted in English.</p>",
+                     "requirementsSection":  "<h3><strong>Must-Have Qualifications</strong></h3><ul><li><strong>5+ years of professional Shopify</strong> and <strong>PHP experience</strong>, including at least <strong>3 years of Laravel in production</strong>.</li>",
+                     "url":  "https://jobs.workable.com/view/sk4nRAnfHWLf7PV49eYUTD/senior-backend-engineer-%7C-remote-%7C-latam-only-%7C-89010-in-chile-at-remote-talent-latam",
+                     "language":  "en",
+                     "locations":  [
+                                       "TELECOMMUTE",
+                                       "Chile"
+                                   ],
+                     "location":  {
+                                      "city":  "",
+                                      "subregion":  null,
+                                      "countryName":  "Chile"
+                                  },
+                     "created":  "2026-09-17T17:28:12.372Z",
+                     "updated":  "2026-09-17T17:28:12.372Z",
+                     "company":  {
+                                     "id":  "52e49176-5cdd-446d-9af7-80c32e168ebd",
+                                     "title":  "Remote Talent LATAM",
+                                     "website":  "https://remotetalentlatam.com/",
+                                     "image":  "https://workablehr.s3.amazonaws.com/uploads/account/logo/685562/logo",
+                                     "description":  "",
+                                     "url":  "https://jobs.workable.com/company/beFLZdyxb7RnSqg78uptaP/jobs-at-remote-talent-latam",
+                                     "socialSharingImage":  "https://workablehr.s3.amazonaws.com/uploads/account/open_graph_logo/685562/social",
+                                     "socialSharingDescription":  ""
+                                 },
+                     "isFeatured":  false,
+                     "workplace":  "remote"
+                 },
+                 {
+                     "department":  "TuxCare",
+                     "id":  "481a9c7d-3a33-452d-9046-d6c40c69848a",
+                     "title":  "Kernel Developer (remote work, LATAM)",
+                     "state":  "published",
+                     "description":  "<p><strong>TuxCare </strong>offers a portfolio of security solutions for Linux and open-source software aimed at enterprise organizations. With TuxCare, enterprises can automate live vulnerability patching, minimize downtime, keep their applications secure and compliant, and get support from a team that knows Linux security best – covering the most popular Linux distributions, end-of-life systems, programming languages, and much more.</p>",
+                     "socialSharingDescription":  "",
+                     "employmentType":  "Full-time",
+                     "benefitsSection":  "<p><strong>What's in it for you?</strong></p><ul><li>A focus on professional development</li><li>Interesting and challenging projects</li><li>Fully remote work with flexible working hours, which allows you to schedule your day and work from any location worldwide</li>",
+                     "requirementsSection":  "<p><strong>To be successful in this role, you should have:</strong></p><ul><li>Strong proficiency in C programming and exceptional debugging skills</li><li>Experience with Linux kernel core subsystems</li><li>Extensive experience with GDB and other debuggers</li><li>Basic understanding of kernel ABI </li>",
+                     "url":  "https://jobs.workable.com/view/9Uq4ksrYhmMr4fVeqEt3Qb/kernel-developer-(remote-work%2C-latam)-in-santiago-at-cloudlinux",
+                     "language":  "en",
+                     "locations":  [
+                                       "TELECOMMUTE",
+                                       "Santiago, Chile"
+                                   ],
+                     "location":  {
+                                      "city":  "Santiago",
+                                      "subregion":  null,
+                                      "countryName":  "Chile"
+                                  },
+                     "created":  "2026-05-22T10:33:04.675Z",
+                     "updated":  "2026-05-22T10:33:04.675Z",
+                     "company":  {
+                                     "id":  "de96ad05-a4db-4fb2-b905-361995090aa8",
+                                     "title":  "Cloudlinux",
+                                     "website":  "https://www.cloudlinux.com/",
+                                     "image":  "https://workablehr.s3.amazonaws.com/uploads/account/logo/553117/logo",
+                                     "description":  "",
+                                     "url":  "https://jobs.workable.com/company/tucwPFE7kmxGFFNWrBQrS1/jobs-at-cloudlinux",
+                                     "socialSharingImage":  "https://workablehr.s3.amazonaws.com/uploads/account/open_graph_logo/553117/social",
+                                     "socialSharingDescription":  ""
+                                 },
+                     "isFeatured":  false,
+                     "workplace":  "remote"
+                 }
+             ],
+    "autoAppliedFilters":  {
+
+                           }
+}

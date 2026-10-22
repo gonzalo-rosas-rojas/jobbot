@@ -1,0 +1,152 @@
+[
+ {
+  "portalJobPost": {
+   "portalId": 242,
+   "portalUrl": "https://careers-apac-atlassian.icims.com/jobs/25538/backend-software-engineer/job",
+   "id": 25538,
+   "updatedDate": "2026-10-21 01:00 AM"
+  },
+  "id": 25538,
+  "portalId": 242,
+  "title": "Backend Software Engineer",
+  "locations": [
+   "Sydney - Australia -   Sydney,  2000 Australia",
+   "Remote - Remote",
+   "Auckland - New Zealand -   Auckland,  1010 New Zealand"
+  ],
+  "category": "Engineering",
+  "overview": "<p><strong>Working at Atlassian</strong></p><p>Atlassians can choose where they work – whether in an office, from home, or a combination of the two. That way, Atlassians have more control over supporting their family, personal goals, and other priorities. We can hire people in any country where we have a legal entity.</p><p>With a sufficient timezone overlap with the team, we're able to hire eligi",
+  "responsibilities": "<p><strong>Responsibilities</strong></p><p>Wait, I don't have Java experience and you still want to interview me? That's right! At Atlassian, we hire engineers that can demonstrate their ability to learn and keep up with new and emerging technologies. It's true that Atlassian's stack is primarily written in Java and in the role you'll be coding primarily in Java, but we do believe in using the rig",
+  "qualifications": "<p><strong>Qualifications</strong></p><p>Sound like an exciting opportunity? We think so too... In order to set you up for impact on day one, we'll expect you to have this on your first day:</p><ul><li><p>You will not be required to know a specific programming language, however experience with a prominent language such as Java, Python, C#, C/C++, or Ruby is crucial.</p></li><li><p>Deep understandi",
+  "applyUrl": "https://careers-apac-atlassian.icims.com/jobs/25538/backend-software-engineer/job?mode=apply",
+  "compensation": "<p data-compensation='true'>At Atlassian, we strive to design equitable, explainable, and competitive compensation programs. We follow consistent hiring practices and account for each candidate's skills, knowledge, and experience when setting base pay within the range.</p><p>This role may also be eligible for benefits, bonuses, commissions, and equity.</p>"
+ },
+ {
+  "portalJobPost": {
+   "portalId": 242,
+   "portalUrl": "https://careers-apac-atlassian.icims.com/jobs/26986/enterprise-security-engineer/job",
+   "id": 26986,
+   "updatedDate": "2026-09-25 06:04 AM"
+  },
+  "id": 26986,
+  "portalId": 242,
+  "title": "Enterprise Security Engineer",
+  "type": "Full-Time",
+  "locations": [
+   "Sydney - Australia -   Sydney,  2000 Australia",
+   "Remote - Remote",
+   "Melbourne - Australia -   Melbourne,  3000 Australia",
+   "Brisbane - Australia -   Brisbane,   Australia"
+  ],
+  "category": "Security",
+  "overview": "<p>The Enterprise Security Engineer is a hands-on engineer who implements, operates, and improves security controls across corporate architecture, SaaS platforms, cloud services, endpoints, identity, data, and workforce technologies. This role translates enterprise security strategy into practical, measurable controls and secure-by-default solutions that reduce risk without slowing the business.</",
+  "responsibilities": "<h3>Enterprise Security Engineering</h3><ul><li><p>Design, implement, operate, and maintain security controls across identity, endpoints, network, cloud (AWS/GCP), SaaS, and data-protection domains.</p></li><li><p>Remediate identified gaps in access controls, device posture, SaaS configurations, and sensitive data protections.</p></li><li><p>Assist with the rollout and adoption of secure baseline ",
+  "qualifications": "<h2><strong>Key Skills and Experience</strong></h2><ul><li><p>3–5+ years of experience in cybersecurity, security engineering, cloud security, systems engineering, or enterprise technology.</p></li></ul><ul><li><p>Experience implementing, operating, and maintaining security controls across identity, endpoint, SaaS, cloud, network, and data protection domains.</p></li><li><p>Hands-on experience wit",
+  "applyUrl": "https://careers-apac-atlassian.icims.com/jobs/26986/enterprise-security-engineer/job?mode=apply"
+ },
+ {
+  "portalJobPost": {
+   "portalId": 111,
+   "portalUrl": "https://careers-americas.icims.com/jobs/27781/principal-technical-program-manager/job",
+   "id": 27781,
+   "updatedDate": "2026-10-20 04:24 PM"
+  },
+  "id": 27781,
+  "portalId": 111,
+  "title": "Principal Technical Program Manager",
+  "locations": [
+   "Seattle - United States -   Seattle, Washington  United States",
+   "Remote - Remote",
+   "Sydney - Australia -   Sydney,  2000 Australia"
+  ],
+  "category": "Engineering",
+  "overview": "<p>We are seeking a Principal Technical Program Manager to drive technical strategy, infrastructure planning, and cross-functional execution across our LLM inference platform.</p><p>In this role, you will lead end-to-end programs spanning GPU capacity planning, inference optimization, model migrations, and cost-per-token efficiency, while building standardized benchmarking frameworks and governanc",
+  "responsibilities": "<ul><li><p>Set a long-term strategy and roadmap for the open-weight LLM inference platform. Base it on business goals, customer needs, barriers to adoption and industry trends, and build it with stakeholders across Engineering, Product, Security and Finance.</p></li><li><p>Turn business goals into ranked technical problems, such as cost per token, latency, throughput, reliability and model coverag",
+  "qualifications": "<ul><li><p>10+ years on software teams as a Development Manager or TPM, including 3+ years on ML, AI platform or large-scale infrastructure programs.</p></li><li><p>Working knowledge of LLM architecture, inference optimization, serving frameworks and GPU infrastructure economics.</p></li><li><p>Experience with multi-vendor GPU or inference-provider strategies and AI cost management</p></li><li><p>",
+  "applyUrl": "https://careers-americas.icims.com/jobs/27781/principal-technical-program-manager/job?mode=apply",
+  "payRanges": "<p>In The <strong>United States</strong>, we have three geographic pay zones. For this role, our current base pay ranges for new hires in each zone are:</p>\n<p><strong>Zone A</strong>: $204,300 - $266,725</p>\n<p><strong>Zone B</strong>: $183,870 - $240,053</p>\n<p><strong>Zone C</strong>: $169,569 - $221,382</p>",
+  "compensation": "<p data-compensation='true'>At Atlassian, we strive to design equitable, explainable, and competitive compensation programs. We follow consistent hiring practices and account for each candidate's skills, knowledge, and experience when setting base pay within the range.</p><p>Please visit <a href=\"http://go.atlassian.com/payzones\">go.atlassian.com/payzones</a> for more information on which locations are included in each of our geographic pay zones. However, please confirm the zone for your specific location with your recruiter.</p><p>This role may also be eligible for benefits, bonuses, commissions, and equity.</p>"
+ },
+ {
+  "portalJobPost": {
+   "portalId": 17,
+   "portalUrl": "https://globalcareers-atlassian.icims.com/jobs/25480/account-executive%2c-mid-market/job",
+   "id": 25480,
+   "updatedDate": "2026-09-24 03:33 PM"
+  },
+  "id": 25480,
+  "portalId": 17,
+  "title": "Account Executive, Mid Market",
+  "type": "Full-Time",
+  "locations": [
+   "Bengaluru - India -   Bengaluru,  560071 India",
+   "Remote - India - Remote",
+   "Remote - Remote"
+  ],
+  "category": "Sales",
+  "overview": "<p><strong>Working at Atlassian</strong></p><p>Atlassians can choose where they work – whether in an office, from home, or a combination of the two. That way, Atlassians have more control over supporting their family, personal goals, and other priorities. We can hire people in any country where we have a legal entity. Interviews and onboarding are conducted virtually, a part of being a distributed",
+  "responsibilities": "<ul><li><p>Develop and implement named Account or Territory (India) plans geared at both maximising expansion opportunities across a wide portfolio of products and ensuring high bar of customer success.</p></li><li><p>Developing and execute strategies to drive growth and engagement within the mid-market segment.</p></li><li><p>Identify and qualify opportunities within the defined mid-market custom",
+  "qualifications": "<ul><li><p>8+ years of Enterprise Software Sales Experience</p></li><li><p>Experience growing mid-market accounts with India-based customers</p></li><li><p>Experience creating alignment and orchestrating internal account teams</p></li><li><p>Experience managing key customer relationships.</p></li><li><p>Extensive experience utilising a CRM to achieve and correlate key performance metrics</p></li><",
+  "applyUrl": "https://globalcareers-atlassian.icims.com/jobs/25480/account-executive%2c-mid-market/job?mode=apply"
+ },
+ {
+  "portalJobPost": {
+   "portalId": 242,
+   "portalUrl": "https://careers-apac-atlassian.icims.com/jobs/27500/enterprise-account-manager/job",
+   "id": 27500,
+   "updatedDate": "2026-10-15 01:21 AM"
+  },
+  "id": 27500,
+  "portalId": 242,
+  "title": "Enterprise Account Manager",
+  "type": "Full-Time",
+  "locations": [
+   "Sydney - Australia -   Sydney,  2000 Australia",
+   "Remote - Remote"
+  ],
+  "category": "Sales",
+  "overview": "<p>We are looking for a proactive, high-performing Enterprise Account Manager - Mandarin speaking to manage the retention and growth of our largest and most complex Enterprise customers within the Greater China Region (GCR). At Atlassian, with over 300,000 customers worldwide, our Account Management team plays a critical role in driving long-term value and digital transformation for the organizati",
+  "responsibilities": "<ul><li><p><strong>Own Revenue Accountability:</strong> Drive individual sales performance, maintain a high-accuracy pipeline forecast, and balance priorities within a complex enterprise customer footprint.</p></li><li><p><strong>Drive Account Strategy:</strong> Partner cross-functionally with the Enterprise Sales team, Services, Channel Partners, and Customer Success teams to execute strategic ac",
+  "qualifications": "<p>At Atlassian, we strive to design equitable, explainable, and competitive compensation programs. We follow consistent hiring practices and account for each candidate's skills, knowledge, and experience when setting base pay within the range.</p><p>This role may also be eligible for benefits, bonuses, commissions, and equity.</p><ul><li><p><strong>5+ years of experience</strong> in Enterprise Ac",
+  "applyUrl": "https://careers-apac-atlassian.icims.com/jobs/27500/enterprise-account-manager/job?mode=apply"
+ },
+ {
+  "portalJobPost": {
+   "portalId": 251,
+   "portalUrl": "https://campus-americas.icims.com/jobs/25998/data-engineer%2c-2027-graduate-u.s/job",
+   "id": 25998,
+   "updatedDate": "2026-10-06 09:35 PM"
+  },
+  "id": 25998,
+  "portalId": 251,
+  "title": "Data Engineer, 2027 Graduate U.S",
+  "locations": [
+   "Seattle - United States -   Seattle, Washington  United States"
+  ],
+  "category": "Graduates",
+  "overview": "<p><strong>Working at Atlassian</strong><br/>Atlassians have the flexibility to work where they can collaborate most effectively with their team, whether at home, one of our global offices, or both. We hire in any country where we have a legal entity. Learn how we work at <a href=\"https://go.atlassian.com/distributed\"><u>go.atlassian.com/distributed</u></a>.</p><p><strong>Your Future Org</strong><",
+  "responsibilities": "<p>Data Engineering is a multi-faceted role, where you can have focused or broad set of responsibilities, including:</p><ul><li><p>Define metrics</p></li><li><p>Instrument logging</p></li><li><p>Acquire/ingest data</p></li><li><p>Architect &amp; modeling data</p></li><li><p>Transform data</p></li><li><p>Ensure data quality, governance, and enablement</p></li><li><p>Alerting, visualization, and rep",
+  "qualifications": "<ul><li><p>Pursuing a Bachelor's or Masters in Computer Science or a related technical field and are graduating by August 2027</p></li><li><p>Demonstrated interest in the Data Engineering field through academic coursework, previous work or internship experience, or personal projects</p></li><li><p>Experience programming with Python, or other related object-oriented programming languages</p></li><l",
+  "applyUrl": "https://campus-americas.icims.com/jobs/25998/data-engineer%2c-2027-graduate-u.s/job?mode=apply",
+  "payRanges": "<p>In The <strong>United States</strong>, we have three geographic pay zones. For this role, our current base pay ranges for new hires in each zone are:</p>\n<p><strong>Zone A</strong>: $124,200 - $162,150</p>\n<p><strong>Zone B</strong>: $111,780 - $145,935</p>\n<p><strong>Zone C</strong>: $103,086 - $134,585</p>",
+  "compensation": "<p data-compensation='true'>At Atlassian, we strive to design equitable, explainable, and competitive compensation programs. We follow consistent hiring practices and account for each candidate's skills, knowledge, and experience when setting base pay within the range.</p><p>Please visit <a href=\"http://go.atlassian.com/payzones\">go.atlassian.com/payzones</a> for more information on which locations are included in each of our geographic pay zones. However, please confirm the zone for your specific location with your recruiter.</p><p>This role may also be eligible for benefits, bonuses, commissions, and equity.</p>"
+ },
+ {
+  "portalJobPost": {
+   "portalId": 242,
+   "portalUrl": "https://careers-apac-atlassian.icims.com/jobs/26753/principal-software-engineer/job",
+   "id": 26753,
+   "updatedDate": "2026-10-21 09:20 AM"
+  },
+  "id": 26753,
+  "portalId": 242,
+  "title": "Principal Software Engineer",
+  "type": "Full-Time",
+  "locations": [],
+  "category": "Engineering",
+  "overview": "<h3>Working at Atlassian India</h3><p>Atlassian's mission \"to unleash the potential of every team\" is the guiding light behind what we do. Our products, including Jira, Confluence and Bitbucket, help teams everywhere work better together, from NASA to Cochlear.</p><p>Our office is in Bengaluru, but eligible candidates can work remotely across India: from home, from an office, or somewhere in betwe",
+  "responsibilities": "<p>As a Principal Engineer, you will set the technical direction for Atlassian's Kubernetes, compute and AI/ML infrastructure platform. You will lead engineers across several teams on our hardest problems, and take large, cross-team initiatives from design to launch.</p><h3>What you'll do</h3><ul><li><p>Define the architecture and multi-year roadmap for a multi-cloud, cell-based Kubernetes fleet t",
+  "qualifications": "<ul><li><p>10+ years building and operating large-scale cloud infrastructure or platform-as-a-service systems.</p></li><li><p>Deep, hands-on Kubernetes expertise from running it in production at scale: internals, networking, multi-tenancy, and building operators and CRDs.</p></li><li><p>Strong experience with AWS and/or GCP (EKS/GKE) and distributed systems design.</p></li><li><p>Strong programmin",
+  "applyUrl": "https://careers-apac-atlassian.icims.com/jobs/26753/principal-software-engineer/job?mode=apply"
+ }
+]

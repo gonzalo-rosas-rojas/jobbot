@@ -1,0 +1,37 @@
+# Headless Claude (claude -p). Every key is optional; these are the shipped values.
+
+# Full path of claude.exe. Leave it empty to look for it (PATH, then %APPDATA%\npm).
+# Set it when the scheduled task runs under another Windows user.
+program = ""
+
+model = "claude-sonnet-5-5"
+
+# Most the program may spend on Claude in any rolling 24 hours (API-equivalent dollars).
+daily_budget_usd = 1.5
+
+# One call never spends more than this (passed to --max-budget-usd).
+per_call_budget_usd = 0.5
+
+timeout_secs = 300
+
+# run-daily writes at most this many dossiers per run.
+max_dossiers_per_run = 2
+
+# ---- The private subscription (checked before every call)
+
+# Claude's config folder for jobbot alone (credentials, .claude.json). Empty means
+# %LOCALAPPDATA%\jobbot\claude-config; otherwise an absolute path. Log in there once with
+# `jobbot claude-login`. Your own ~/.claude is never used.
+config_dir = ""
+
+# The email `claude auth status` must report, and the organization id (a UUID) it must report.
+# Empty means: not checked. DO NOT fill them in this file: it is committed, and the repository may
+# be published. Put both in profile/claude.local.toml (git-ignored; any key of this file may go
+# there and wins over it), e.g.
+#     expected_email = "you@example.com"
+#     expected_org_id = "<the orgId that `jobbot claude-login` prints>"
+expected_email = ""
+expected_org_id = ""
+
+# Plans a login may have. `team` and `enterprise` are an employer's account: never add them.
+allowed_subscriptions = ["pro", "max"]

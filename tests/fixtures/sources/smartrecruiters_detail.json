@@ -1,0 +1,72 @@
+{
+ "id": "744000153279439",
+ "name": "ANALISTA MARKETING PRODUTO JR ou PL -  36087",
+ "uuid": "6a551411-2bf6-442d-aef8-5d48f6986bbb",
+ "jobId": "b6bc3f47-892d-438d-aad2-1e75e434cc2e",
+ "jobAdId": "888334b9-83d3-48f2-bb86-50021a6699ee",
+ "defaultJobAd": true,
+ "refNumber": "REF297658U",
+ "company": {
+  "name": "Bosch Group",
+  "identifier": "BoschGroup"
+ },
+ "location": {
+  "city": "Campinas",
+  "region": "SP",
+  "country": "br",
+  "address": "Avenida Robert Bosch",
+  "postalCode": "13064-765",
+  "remote": true,
+  "hybrid": false,
+  "latitude": "-22.8992722",
+  "longitude": "-47.1170748",
+  "fullLocation": "Campinas, SP, Brazil"
+ },
+ "releasedDate": "2026-10-02T22:35:26.714Z",
+ "postingUrl": "https://jobs.smartrecruiters.com/BoschGroup/744000153279439-analista-marketing-produto-jr-ou-pl-36087",
+ "applyUrl": "https://jobs.smartrecruiters.com/BoschGroup/744000153279439-analista-marketing-produto-jr-ou-pl-36087?oga=true",
+ "referralUrl": "https://jobs.smartrecruiters.com/external-referrals/company/BoschGroup/publication/6a551411-2bf6-442d-aef8-5d48f6986bbb?dcr_ci=BoschGroup",
+ "jobAd": {
+  "sections": {
+   "companyDescription": {
+    "title": "Descrição da empresa",
+    "text": "<p><em>Na Bosch, moldamos o futuro por meio das inovações tecnológicas de alta qualidade e de serviços que despertam entusiasmo e melhoram a vida das pessoas. Temos uma promessa sólida para nossos colaboradores: crescemos juntos, gostamos do nosso trabalho e inspiramos uns aos outros. Junte-se a nós e sinta a diferença.</em></p>"
+   },
+   "jobDescription": {
+    "title": "Descrição da vaga",
+    "text": "<p>Atuação no desenvolvimento e gestão do ciclo de vida dos produtos da CG (Commercial Goods) na América Latina, apoiando a implementação da estratégia e iniciativas de negócio da categoria.</p><p>Principais atividades:</p><p>- Desenvolvimento e implementação de estratégia de marketing (4P's) no mercado de reposição da América Latina, com base nos requisitos do mercado.</p><p>- Gerenciamento do ciclo de vida dos produtos.</p><p>- Acompanhamento do P&amp;L das linhas, bem como gerenciamento de ações corretivas.</p><p>- Gerenciamento do modelo de negócio ideal para cada produto/cliente.</p><p>- Realizar visitas / teleconferências / workshops com clientes (distribuidores e Oficinas), fábricas e subsidiarias Bosch.</p><p>- Comunicação técnica do produto (catálogos, folders, benchmark), inovações e tendências.</p><p>- Suportar a áreas Go-To-Market</p><p>- Terá forte relacionamento com parceiros de outras regiões, principalmente Alemanha, China e Estados Unidos no desenvolvimento de produtos e modelos de negócio, bem como parceiros internos responsáveis por desenvolvimento de produtos.</p><p>#LI-MM1</p>"
+   },
+   "qualifications": {
+    "title": "Qualificações",
+    "text": "<p>- Superior Completo</p><p>- Conhecimento Pacote Office, principalmente Excel e Powerpoint, conhecimento em SAP e PowerBI.</p><p>- Conhecimento em Marketing de Produto e processos administrativos, preferencialmente relacionados ao setor automotivo.</p><p>- Conhecimento em gerenciamento de projetos com times multifuncionais.</p><p>- Disponibilidade para eventuais viagens.</p><p>- Inglês avançado.</p><p><strong>Diferencial:</strong></p><p>- Espanhol intermediário ou avançado.</p><p>- Conhecimento técnico e familiaridade com produtos automotivos (desenhos, lista técnica e normas).</p><p><strong>Competências:</strong></p><p>- Bom raciocínio lógico e análise crítica.</p><p>- Perfil técnico-comercial, orientação para resultado.</p><p>- Experiência em apresentações em português e inglês.</p><p>- Habilidade de interação com parceiros internacionais (Argentina, EUA, Ásia e Europa).</p>"
+   },
+   "additionalInformation": {
+    "title": "Informações adicionais",
+    "text": "<p><strong><em>Benefícios da Bosch</em></strong></p><ul><li>Programas de Bem-Estar e Saúde: avaliação preventiva anual, ambulatório dentro da localidade para atendimento durante o horário de trabalho, programa antitabagismo, programa de saúde mental, fisioterapia e curso de gestante</li><li>Assistência médica e odontológica</li><li>Política de reembolso para algumas condições especiais de saúde</li><li>Subsídio para medicamentos através da Funcional Health</li><li>Jornadas de trabalho flexível com política de home office (não aplicado para horistas)</li><li>Short Friday&#xa0;para administrativo e horista do turno normal (apenas em Campinas)</li><li>Participação nos lucros e resultados (PLR)&#xa0;</li><li>Política de expatriação internacional e de transferências nacionais&#xa0;</li><li>Plano de previdência privada e empréstimos com taxas diferenciadas</li><li>Seguro de vida&#xa0;&#xa0;&#xa0;</li><li>Associação opcional ao Clube da Bosch dentro da planta com academia, piscinas, churrasqueiras, campos de futebol e society, espaço para eventos, ginásio de esportes, quadras de areia, quadra de tênis, lanchonete e calendário anual de eventos</li><li>Auxílio para mamães com creche na planta (verificar vagas disponíveis)</li><li>Licença maternidade e adoção estendida de 180 dias&#xa0;&#xa0;</li><li>Licença paternidade e adoção de 20 dias&#xa0;</li><li>Alimentação no local de trabalho e Vale Alimentação</li><li>Ônibus fretado (ou Vale Transporte)</li><li>Estacionamento gratuito (para "
+   }
+  }
+ },
+ "active": true,
+ "visibility": "PUBLIC",
+ "industry": {
+  "id": "automotive",
+  "label": "Automotive"
+ },
+ "function": {
+  "id": "marketing",
+  "label": "Marketing"
+ },
+ "experienceLevel": {
+  "id": "not_applicable",
+  "label": "Not Applicable"
+ },
+ "typeOfEmployment": {
+  "id": "permanent",
+  "label": "Full-time"
+ },
+ "language": {
+  "code": "pt-BR",
+  "label": "Portuguese (Brazil)",
+  "labelNative": "português (Brasil)"
+ }
+}

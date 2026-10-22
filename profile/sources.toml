@@ -1,0 +1,72 @@
+# Boards with a public API. The slugs are a seed list that was NOT all verified: `cargo run --bin smoke`
+# prints an ERR 404 for every slug that does not exist; delete it. Adding a board is one line: any company
+# that publishes at boards.greenhouse.io/<slug>, jobs.lever.co/<slug> or jobs.ashbyhq.com/<slug>.
+greenhouse = [
+  "anthropic", "gitlab", "databricks", "elastic", "mongodb", "cloudflare", "datadog",
+  "canonical", "vercel", "grafanalabs",
+  "stripe", "figma", "webflow", "discord", "reddit", "dropbox", "coinbase", "brex", "scaleai",
+  "wikimedia", "mozilla", "cockroachlabs", "fivetran",
+  "twilio",
+  "gleanwork",
+  "airtable", "asana", "affirm", "calendly", "carta", "gusto", "hubspot", "intercom", "lattice",
+  "mixpanel", "pagerduty", "okta", "fastly",
+  "factored", "clara", "wizeline", "customerio",   # checked 2026-10-05 with a probe: companies that hire in Chile/LatAm/Americas
+  "buildkite", "cultureamp", "block",   # Australia, checked 2026-10-21 (they return postings in AU)
+]
+lever = ["metabase", "spotify", "outreach", "wealthfront", "fintual", "airtm", "kavak",   # checked 2026-10-04/05: all of them return remote-friendly postings
+  "deputy", "immutable", "mable", "megaport",   # Australia, checked 2026-10-21
+]
+ashby = [
+  "openai", "cohere", "notion", "ramp", "perplexity",
+  "linear", "replit", "cursor", "elevenlabs", "posthog", "supabase", "render", "modal",
+  "baseten", "langchain", "harvey", "sierra", "decagon", "synthesia", "mercury", "neon",
+  "weaviate", "vanta", "clerk", "resend", "zed",
+  "toku", "railway", "mural", "truelogic", "addi", "nubank", "stickermule", "lago", "tailor",   # checked 2026-10-05: Chile/LatAm or "Global"
+  "camunda",   # 2026-10-05: remote "wherever they can hire"; may not hire in Chile (ask)
+  "xero", "airwallex", "zip",   # Australia, checked 2026-10-21 (Sydney/Melbourne)
+]
+remoteok = true
+remotive = true   # remote listings from hundreds of companies; you apply from the link (listing_only)
+remoteyeah = true   # free RSS with no account, the latest 200 remote postings; one request per run (listing_only)
+pythonjobs = true   # RSS of python.org/jobs: Python postings, no dates; one request per run (listing_only)
+atlassian = true    # the job list on atlassian.com (one request, ~360 postings, 18 in Australia); you apply on their iCIMS portal from the link (listing_only)
+
+[getonboard]
+categories = ["programming"]
+max_pages = 3
+
+# Listing-only sources: you apply from the link in the digest (listing_only), never with the browser.
+# Workable and Recruitee are switched off: they need company slugs and their form is not handled yet.
+[himalayas]
+country = "CL"   # returns what is open to Chile and what is worldwide
+queries = ["ai engineer", "full stack engineer", "software engineer"]
+max_pages = 2    # Himalayas answers 429 if asked quickly: few queries and few pages
+
+[jobicy]
+geo = "latam"
+industry = "dev"
+count = 50
+
+[hackernews]
+months = 1       # the latest monthly "Ask HN: Who is hiring?" thread
+remote_only = true
+
+# More public sources, no key and no account (checked live on 2026-10-05). You apply from the link in the
+# digest (listing_only). Each one makes a few requests per run, with a pause between them.
+[weworkremotely]   # one RSS per category
+categories = ["remote-full-stack-programming-jobs", "remote-back-end-programming-jobs"]
+
+[workingnomads]    # the site's public JSON, one request; only the development category
+categories = ["Development"]
+
+[workable_search]  # the public search of jobs.workable.com: remote jobs that list Chile among their places
+queries = ["software engineer", "full stack developer", "ai engineer", "backend developer"]
+location = "Chile"
+max_pages = 2      # 20 postings per page
+
+[fourdayweek]      # documented public API of 4dayweek.io (60 requests per minute): engineering remote jobs
+queries = ["software engineer", "full stack", "ai engineer"]
+category = "engineering"
+max_age_days = 30
+max_pages = 2
+per_page = 50

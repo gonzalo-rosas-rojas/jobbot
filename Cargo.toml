@@ -1,0 +1,73 @@
+[workspace]
+members = [".", "crates/jobbot-domain"]
+# Without this, a bare `cargo test` skips the domain's own tests.
+default-members = [".", "crates/jobbot-domain"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+# An application, not a library: nothing here is ever uploaded to a registry.
+publish = false
+
+# Versions of the dependencies two or more crates share live here, once.
+[workspace.dependencies]
+chrono = "0.4.45"
+chrono-tz = "0.10.4"
+html-escape = "0.2.15"
+regex = "1.13.1"
+scraper = "0.27.0"
+serde = { version = "1.0.229", features = ["derive"] }
+thiserror = "2.0.21"
+toml = "1.1.6"
+url = "2.5.8"
+
+[workspace.lints.rust]
+# `deny`, not `forbid`: one test sets an environment variable (unsafe since edition 2024) and
+# allows it at that site with a SAFETY note. No production code uses unsafe.
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+
+[package]
+name = "jobbot"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+default-run = "jobbot"
+
+[dependencies]
+jobbot-domain = { path = "crates/jobbot-domain" }
+anyhow = "1.0.104"
+async-trait = "0.1.92"
+chrono = { workspace = true, features = ["serde"] }
+chrono-tz.workspace = true
+clap = { version = "4.6.7", features = ["derive"] }
+getrandom = "0.4"
+html-escape.workspace = true
+playwright-rs = "=0.19.0"
+pulldown-cmark = "0.13.4"
+regex.workspace = true
+reqwest = { version = "0.13.5", features = ["json"] }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+scraper.workspace = true
+serde.workspace = true
+serde_json = "1.0.151"
+thiserror.workspace = true
+tiny_http = "0.12.0"
+tokio = { version = "1.53.1", features = ["fs", "io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
+toml.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+pdf-extract = "0.12.1"
+tempfile = "3.27.0"
+wiremock = "0.6.5"
+
+[lints]
+workspace = true

@@ -1,0 +1,21 @@
+[package]
+name = "jobbot-domain"
+description = "The pure core of jobbot: the job model, the application state machine, scoring, exclusion and outbound-text rules. No I/O."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+chrono.workspace = true
+chrono-tz.workspace = true
+html-escape.workspace = true
+regex.workspace = true
+scraper.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+url.workspace = true
+
+[lints]
+workspace = true

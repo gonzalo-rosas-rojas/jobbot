@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Apply - react-select helper inputs (test fixture)</title>
+<style>
+  /* The board's stylesheet hides the helper with opacity, not with display: it is still laid out
+     (it has an offsetParent) and a scan that only looks at visibility counts it as a control. */
+  .select-shell { position: relative; }
+  .remix-css-1a0ro4n-requiredInput { opacity: 0; width: 100%; height: 0; position: absolute; bottom: 0; left: 0; pointer-events: none; }
+</style>
+</head>
+<body>
+<!--
+  Every react-select drop-down of a Greenhouse form is followed by an invisible `required` input that
+  react-select adds for the browser's own validation: no id, no name, no type, no label, only a
+  generated `...-requiredInput` class. The real pages (job-boards.greenhouse.io, embed forms) give it
+  `tabindex="-1" aria-hidden="true"`; the second and third drop-downs here lose those attributes, to
+  pin that the scan recognises the helper by what it is (the sibling of a combobox) and not by one
+  attribute. The two inputs at the end are NOT helpers and are real, unlabeled, required controls:
+  they must still be reported.
+-->
+<form id="application-form">
+  <div class="select"><div class="select__container">
+    <label id="country-label" for="country" class="label select__label">Country<span aria-hidden="true">*</span></label>
+    <div class="select-shell remix-css-b62m3t-container">
+      <div><div class="select__control"><div class="select__value-container"><div class="select__input-container">
+        <input class="select__input" autocomplete="off" id="country" tabindex="0" type="text" aria-autocomplete="list" aria-expanded="false" aria-haspopup="true" aria-labelledby="country-label" aria-required="true" role="combobox" value="">
+      </div></div></div></div>
+      <input required tabindex="-1" aria-hidden="true" class="remix-css-1a0ro4n-requiredInput" value="">
+    </div>
+  </div></div>
+
+  <div class="select"><div class="select__container">
+    <label id="degree-label" for="degree" class="label select__label">Degree<span aria-hidden="true">*</span></label>
+    <div class="select-shell remix-css-b62m3t-container">
+      <div><div class="select__control"><div class="select__value-container"><div class="select__input-container">
+        <input class="select__input" autocomplete="off" id="degree" tabindex="0" type="text" aria-autocomplete="list" aria-expanded="false" aria-haspopup="true" aria-labelledby="degree-label" aria-required="true" role="combobox" value="">
+      </div></div></div></div>
+      <input required tabindex="-1" class="remix-css-1a0ro4n-requiredInput" value="">
+    </div>
+  </div></div>
+
+  <div class="select"><div class="select__container">
+    <label id="discipline-label" for="discipline" class="label select__label">Discipline<span aria-hidden="true">*</span></label>
+    <div class="select-shell remix-css-b62m3t-container">
+      <div><div class="select__control"><div class="select__value-container"><div class="select__input-container">
+        <input class="select__input" autocomplete="off" id="discipline" tabindex="0" type="text" aria-autocomplete="list" aria-expanded="false" aria-haspopup="true" aria-labelledby="discipline-label" aria-required="true" role="combobox" value="">
+      </div></div></div></div>
+      <input required class="remix-css-1a0ro4n-requiredInput" value="">
+    </div>
+  </div></div>
+
+  <!-- Not a helper: a required text box with no label and nothing to do with a drop-down. -->
+  <div class="field-wrapper"><input required type="text" class="input input__single-line" value=""></div>
+
+  <!-- Not a helper either: it carries the class, but there is no combobox beside it. -->
+  <div class="field-wrapper"><input required class="remix-css-1a0ro4n-requiredInput" value="" style="opacity: 1; position: static; height: auto;"></div>
+</form>
+</body>
+</html>

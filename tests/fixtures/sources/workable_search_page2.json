@@ -1,0 +1,80 @@
+{
+    "title":  "Workable",
+    "totalSize":  26,
+    "jobs":  [
+                 {
+                     "department":  "Workana Premium",
+                     "id":  "85206445-a454-4df0-8c81-5cb74b0a6d15",
+                     "title":  "Full Stack MERN Developer",
+                     "state":  "published",
+                     "description":  "<p>Workana is the largest remote work platform for talents in Latin America. Our Workana Premium segment focuses on connecting exceptional professionals with leading companies around the world, offering competitive compensation, dedicated support, and the flexibility of remote work.</p><p>We are pleased to present the following opportunity.</p><p>About Our Client</p>",
+                     "socialSharingDescription":  "",
+                     "employmentType":  "",
+                     "benefitsSection":  "",
+                     "requirementsSection":  "",
+                     "url":  "https://jobs.workable.com/view/hrsUiXggyn3GX8tMrQEgmz/remote-full-stack-mern-developer-in-santiago-at-workana",
+                     "language":  "en",
+                     "locations":  [
+                                       "TELECOMMUTE",
+                                       "Santiago, Santiago Metropolitan Region, Chile"
+                                   ],
+                     "location":  {
+                                      "city":  "Santiago",
+                                      "subregion":  "Santiago Metropolitan Region",
+                                      "countryName":  "Chile"
+                                  },
+                     "created":  "2026-09-11T14:50:50.847Z",
+                     "updated":  "2026-09-11T14:50:50.847Z",
+                     "company":  {
+                                     "id":  "fa0141ef-acdc-4407-ba0c-dc76315b29c2",
+                                     "title":  "Workana",
+                                     "website":  "http://workana.com",
+                                     "image":  "",
+                                     "description":  "",
+                                     "url":  "https://jobs.workable.com/company/wSyiKiaa7abTa8N4S2cpd7/jobs-at-workana",
+                                     "socialSharingDescription":  ""
+                                 },
+                     "isFeatured":  false,
+                     "workplace":  "remote"
+                 },
+                 {
+                     "department":  "Dev",
+                     "id":  "41fde89e-e6e6-4c1a-9ebe-0604b5a03d13",
+                     "title":  "Fullstack Engineer (Talent pool)",
+                     "state":  "published",
+                     "description":  "<p><strong>Fullstack Engineer <br /></strong>Remote: Latin America, Philippines, Eastern Europe</p><p>Salary: USD Based on expertise</p><p>Schedule: Flexible, overlap with US hours. ( Full time or Part time)</p><p><strong><br />Join the HireLago Vetted Talent Network</strong></p>",
+                     "socialSharingDescription":  "",
+                     "employmentType":  "Full-time",
+                     "benefitsSection":  "<ul><li> <strong>Remote Work:</strong> Work from anywhere—our team is global, and we value work-life balance. </li></ul><ul><li> <strong>Growth Opportunities:</strong> As a key player i you’ll have the chance to shape your role and grow with us. </li></ul>",
+                     "requirementsSection":  "<ul><li>3–6 years of professional Fullstack Engineering experience.</li><li>Strong experience with at least one modern frontend framework: React, Vue.js, Angular</li><li>Professional experience with at least one backend language/framework: Node.js, Python/Django, Ruby on Rails, Similar.</li><li>Strong SQL skills.</li>",
+                     "url":  "https://jobs.workable.com/view/99D5rvuxCXEFkGGQppsBGX/remote-fullstack-engineer-(talent-pool)-in-chile-at-lago",
+                     "language":  "en",
+                     "locations":  [
+                                       "TELECOMMUTE",
+                                       "Chile"
+                                   ],
+                     "location":  {
+                                      "city":  "",
+                                      "subregion":  null,
+                                      "countryName":  "Chile"
+                                  },
+                     "created":  "2026-08-11T06:13:47.447Z",
+                     "updated":  "2026-08-11T06:13:47.447Z",
+                     "company":  {
+                                     "id":  "779ab1e1-aafd-4cc6-b71e-01f5250a3d9b",
+                                     "title":  "Lago",
+                                     "website":  "https://hirelago.com/",
+                                     "image":  "https://workablehr.s3.amazonaws.com/uploads/account/logo/687496/logo",
+                                     "description":  "",
+                                     "url":  "https://jobs.workable.com/company/fLBK8dBBYxkHwkj9pperGP/jobs-at-lago",
+                                     "socialSharingImage":  "https://workablehr.s3.amazonaws.com/uploads/account/open_graph_logo/687496/social",
+                                     "socialSharingDescription":  ""
+                                 },
+                     "isFeatured":  false,
+                     "workplace":  "remote"
+                 }
+             ],
+    "autoAppliedFilters":  {
+
+                           }
+}

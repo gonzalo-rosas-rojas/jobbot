@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+    <channel>
+        <title>Remote jobs: Front-end, Back-end, DevOps, QA &amp; More</title>
+        <link>https://remoteyeah.com</link>
+        <description>Remote jobs: Front-end, Back-end, DevOps, QA & More</description>
+        <language>en-us</language>
+        <lastBuildDate>Mon, 05 Oct 2026 03:22:23 +0000</lastBuildDate>
+        <atom:link href="https://remoteyeah.com/rss.xml?utm_source=rss&ref=rss" rel="self" type="application/rss+xml" />
+        <image>
+            <url>https://remoteyeah.com/assets/logo.png</url>
+            <title>Remote jobs: Front-end, Back-end, DevOps, QA &amp; More</title>
+            <link>https://remoteyeah.com</link>
+        </image>
+                    <item>
+                <title> Remote Software Architect (AWS, NodeJS) - Latin America, Remote at Bluelight Consulting </title>
+                <company> Bluelight Consulting </company>
+                <description><![CDATA[<ul><li>Skills: JavaScript, TypeScript, Node.js, AWS, REST, PostgreSQL, Web security, Message queues</li><li>Experiences: Principal</li><li>Employments: Full-time</li><li>Benefits: Flexible working hours, Competitive salary</li><li>Locations: Latin America (Remote), Chile (Remote)</li></ul><h2>Description:</h2>
+<ul>
+<li>Bluelight is a leading software consultancy focused on innovative technology and exceptional client service.</li>
+<li>Seeking a skilled Software Architect (AWS, NodeJS) to join a dynamic and growing team in a remote capacity.</li>
+<li>Opportunity to work on challenging projects and contribute to high-quality applications in a collaborative environment.</li>
+</ul>
+]]></description>
+                <category> Software Architect </category>
+                <tags> JavaScript, TypeScript, Node.js, AWS, REST, PostgreSQL, Web security, Message queues, Principal, Full-time, Flexible working hours, Competitive salary, Software Architect, Latin America, Chile </tags>
+                <location> Latin America, Chile </location>
+                <pubDate>2026-10-04T20:01:20+00:00</pubDate>
+                <guid isPermaLink="false">software-architect-aws-nodejs-latin-america-remote-bluelight-consulting-6</guid>
+                <link>https://remoteyeah.com/jobs/remote-software-architect-aws-nodejs-latin-america-remote-bluelight-consulting-6?utm_source=rss&amp;ref=rss</link>
+                <image>https://remoteyeah.com/storage/jobs/software-architect-aws-nodejs-latin-america-remote-bluelight-consulting-6.jpeg</image>
+            </item>
+            <item>
+                <title> Remote Staff Software Engineer at Cision </title>
+                <company> Cision </company>
+                <description><![CDATA[<ul><li>Skills: Docker, AWS, GitLab, GCP, Kubernetes, Jenkins, GitHub, CI/CD, Python, Java, Go, C#</li><li>Experiences: Staff</li><li>Employments: Full-time</li><li>Locations: Bulgaria (Remote)</li></ul><h2>Description:</h2>
+<ul>
+<li>Seeking a Staff Software Engineer (DevX) to enhance developer experience through tools and platforms.</li>
+<li>Responsibilities include building software solutions for coding, testing, and deployment, mentoring engineers, and improving CI/CD processes.</li>
+</ul>
+]]></description>
+                <category> Software Engineer </category>
+                <tags> Docker, AWS, GitLab, GCP, Kubernetes, Jenkins, GitHub, CI/CD, Python, Java, Go, C#, Staff, Full-time, Software Engineer, Bulgaria </tags>
+                <location> Bulgaria </location>
+                <pubDate>2026-10-05T01:31:27+00:00</pubDate>
+                <guid isPermaLink="false">staff-software-engineer-cision-6</guid>
+                <link>https://remoteyeah.com/jobs/remote-staff-software-engineer-cision-6?utm_source=rss&amp;ref=rss</link>
+                <image>https://remoteyeah.com/storage/jobs/staff-software-engineer-cision-6.jpeg</image>
+            </item>
+            <item>
+                <title> Remote Online Data Analyst - Spanish (US) at Jobs for Humanity </title>
+                <company> Jobs for Humanity </company>
+                <description><![CDATA[<ul><li>Experiences: Mid-level</li><li>Employments: Part-time</li><li>Locations: Worldwide (Remote)</li></ul><h2>Description:</h2>
+<ul>
+<li>Conduct structured quality audits on spatial and mapping datasets using advanced mapping tools.</li>
+<li>Verify, evaluate, and validate complex geographic and business information.</li>
+</ul>
+]]></description>
+                <category> Data Analyst </category>
+                <tags> Mid-level, Part-time, Data Analyst, Worldwide </tags>
+                <location> Worldwide </location>
+                <pubDate>2026-10-05T00:01:13+00:00</pubDate>
+                <guid isPermaLink="false">online-data-analyst-spanish-us-jobs-for-humanity-2</guid>
+                <link>https://remoteyeah.com/jobs/remote-online-data-analyst-spanish-us-jobs-for-humanity-2?utm_source=rss&amp;ref=rss</link>
+                <image>https://remoteyeah.com/storage/jobs/online-data-analyst-spanish-us-jobs-for-humanity-2.jpeg</image>
+            </item>
+            <item>
+                <title> Remote Sr. Data Engineer at Carrot </title>
+                <company> Carrot </company>
+                <description><![CDATA[<ul><li>Skills: SQL, AWS, GCP, Software as a Service, JIRA, Git, GitHub, Web security, Python, Go, Snowflake, Airflow</li><li>Experiences: Senior</li><li>Employments: Full-time</li><li>Benefits: Family leave, Competitive salary</li></ul><h2>Description:</h2>
+<ul>
+<li>Lead the evolution, reliability, and scalability of Carrot's data infrastructure across analytics, reporting, and business intelligence.</li>
+<li>Architect, build, and maintain automated data pipelines, integrate diverse data sources, and deliver secure, high-quality data solutions.</li>
+</ul>
+]]></description>
+                <category> Data Engineer </category>
+                <tags> SQL, AWS, GCP, Software as a Service, JIRA, Git, GitHub, Web security, Python, Go, Snowflake, Airflow, Senior, Full-time, Family leave, Competitive salary, Data Engineer </tags>
+                <location>  </location>
+                <pubDate>2026-10-04T17:31:12+00:00</pubDate>
+                <guid isPermaLink="false">sr-data-engineer-carrot</guid>
+                <link>https://remoteyeah.com/jobs/remote-sr-data-engineer-carrot?utm_source=rss&amp;ref=rss</link>
+                <image>https://remoteyeah.com/storage/jobs/sr-data-engineer-carrot.jpeg</image>
+            </item>
+    </channel>
+</rss>

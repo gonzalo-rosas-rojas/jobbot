@@ -1,0 +1,52 @@
+[
+    {
+        "url":  "https://www.workingnomads.com/job/go/1878435/",
+        "title":  "Head of Engineering",
+        "description":  "<p><strong>About </strong><a href=\"https://lemon.io/\" rel=\"nofollow\" target=\"_blank\"><strong>Lemon.io</strong></a></p>",
+        "company_name":  "Lemon.io",
+        "category_name":  "Development",
+        "tags":  "architecture,startup,it",
+        "location":  "Europe, Latin America, USA",
+        "pub_date":  "2026-09-20T16:29:25-04:00"
+    },
+    {
+        "url":  "https://www.workingnomads.com/job/go/1889808/",
+        "title":  "Stack .NET Developer / Algorithm Engineer – Backend Focus.",
+        "description":  "<h1><strong>Stack .NET Developer / Algorithm Engineer – Backend Focus.</strong></h1>\n<p> </p>",
+        "company_name":  "CloudGeometry",
+        "category_name":  "Development",
+        "tags":  "dotnet,sql,architecture,react,communication",
+        "location":  "Brazil",
+        "pub_date":  "2026-09-24T10:57:36-04:00"
+    },
+    {
+        "url":  "https://www.workingnomads.com/job/go/1857010/",
+        "title":  "Product Lead (Strategy + Full Stack)",
+        "description":  "<p>Do you want to join the company behind Northern Europe’s largest crypto and stock market comparison platforms? Do you want to <strong>own the product roadmap end to end and build it yourself</strong>? Do you want to decide what we build next as we expand globally?</p>",
+        "company_name":  "Optimizee Group",
+        "category_name":  "Development",
+        "tags":  "full stack,php,laravel,product owner,tailwind",
+        "location":  "Worldwide",
+        "pub_date":  "2026-09-12T08:13:43-04:00"
+    },
+    {
+        "url":  "https://www.workingnomads.com/job/go/1843246/",
+        "title":  "Senior Python Developer (Fullstack, BE-Heavy)",
+        "description":  "<h3><strong>About us:</strong></h3>\n<p> </p>",
+        "company_name":  "Proxify",
+        "category_name":  "Development",
+        "tags":  "django,fastapi,postgresql,cloud,python",
+        "location":  "CET (+/- 3 hours)",
+        "pub_date":  "2026-09-07T14:40:31-04:00"
+    },
+    {
+        "url":  "https://www.workingnomads.com/job/go/1891955/",
+        "title":  "Beekman Social - Account Manager",
+        "description":  "<p><strong>OPPORTUNITY: ACCOUNT MANAGER</strong></p>",
+        "company_name":  "Beekman Social",
+        "category_name":  "Marketing",
+        "tags":  "account manager,client relationship,communication,creative,strategy",
+        "location":  "Remote, USA Only",
+        "pub_date":  "2026-09-25T02:36:13-04:00"
+    }
+]

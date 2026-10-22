@@ -1,0 +1,325 @@
+{
+    "data":  [
+                 {
+                     "id":  "01a10457-36fb-77cf-9e93-7fa2924a6560",
+                     "slug":  "full-stack-engineer-finance-at-ledgebrook-f2cc121f",
+                     "title":  "Full Stack Engineer - Finance",
+                     "description":  "#### Description\n\nLedgebrook is an InsurTech MGA on a mission to bring Specialty insurance into the modern era. Burdened with legacy technology and processes, the industry has not kept pace with the speed of innovation seen in other sectors. Positioned at the cutting edge of the next generation of InsurTech, Ledgebrook offers the best of both worlds: innovative world-class technology deployed by a leadership team armed with over 100 years of insurance expertise.\n\n#### About the Role\n\nWe’re looking for a talented Full Stack Software Engineer to help us solve the complex, technical challenges of\n",
+                     "url":  "https://4dayweek.io/job/full-stack-engineer-finance-at-ledgebrook-f2cc121f",
+                     "category":  "engineering",
+                     "role":  "Full Stack Engineer",
+                     "level":  "mid",
+                     "contract_type":  "permanent",
+                     "schedule_type":  "unlimited_pto",
+                     "hours_per_week_min":  40,
+                     "hours_per_week_max":  40,
+                     "work_arrangement":  "remote",
+                     "locations":  [
+                                       {
+                                           "country":  "United States",
+                                           "continent":  "North America",
+                                           "work_arrangement":  "remote",
+                                           "is_primary":  true
+                                       },
+                                       {
+                                           "country":  "Canada",
+                                           "continent":  "North America",
+                                           "work_arrangement":  "remote"
+                                       },
+                                       {
+                                           "country":  "Brazil",
+                                           "continent":  "South America",
+                                           "work_arrangement":  "remote"
+                                       }
+                                   ],
+                     "salary_min":  10000000,
+                     "salary_max":  15000000,
+                     "salary_currency":  "USD",
+                     "salary_period":  "year",
+                     "skills":  [
+                                    {
+                                        "name":  "Agile",
+                                        "slug":  "agile"
+                                    },
+                                    {
+                                        "name":  "Communication",
+                                        "slug":  "communication"
+                                    },
+                                    {
+                                        "name":  "Data Modeling",
+                                        "slug":  "data-modeling"
+                                    },
+                                    {
+                                        "name":  "Testability",
+                                        "slug":  "testability"
+                                    }
+                                ],
+                     "stack":  [
+                                   {
+                                       "name":  "Angular",
+                                       "slug":  "angular"
+                                   },
+                                   {
+                                       "name":  "Bootstrap",
+                                       "slug":  "bootstrap"
+                                   },
+                                   {
+                                       "name":  "CSS",
+                                       "slug":  "css"
+                                   }
+                               ],
+                     "tools":  [
+                                   {
+                                       "name":  "AWS Code Pipelines",
+                                       "slug":  "aws-code-pipelines"
+                                   },
+                                   {
+                                       "name":  "Docker",
+                                       "slug":  "docker"
+                                   }
+                               ],
+                     "posted_at":  "2026-10-04T00:36:27Z",
+                     "company":  {
+                                     "id":  "01a057d1-212f-7615-8a7f-73534d19b3ea",
+                                     "slug":  "ledgebrook",
+                                     "name":  "Ledgebrook",
+                                     "url":  "https://4dayweek.io/company/ledgebrook",
+                                     "website":  "https://www.ledgebrook.com",
+                                     "country":  "United States",
+                                     "hires_worldwide":  false
+                                 }
+                 },
+                 {
+                     "id":  "01a10012-8f5e-7cc5-85b3-4b646fc3b8ea",
+                     "slug":  "software-engineer-at-micro1-90aef963",
+                     "title":  "Software Engineer",
+                     "description":  "**Pay:** $30-$100 per hour (USD).\n\n**Job Type:** Contractor (~15 hrs a week)\n\n**Location:** Remote\n\n**Schedule:** Flexible, you pick the hours and days (including weekends if desired)\n\n**Job Summary:** In this role, you'll apply your expertise to help train next-generation AI systems. Your work will shape how models learn, reason, and perform through high-quality, real-world input. No prior experience in AI is required — your domain knowledge is what matters.\n\nYou'll create realistic, interesting and challenging coding tasks for AI to solve involving feature implementation and bug fixes, and i\n",
+                     "url":  "https://4dayweek.io/job/software-engineer-at-micro1-90aef963",
+                     "category":  "engineering",
+                     "role":  "Software Engineer",
+                     "contract_type":  "contract",
+                     "schedule_type":  "part_time",
+                     "hours_per_week_min":  15,
+                     "hours_per_week_max":  15,
+                     "work_arrangement":  "remote",
+                     "locations":  [
+                                       {
+                                           "country":  "United States",
+                                           "continent":  "North America",
+                                           "work_arrangement":  "remote",
+                                           "is_primary":  true
+                                       }
+                                   ],
+                     "salary_min":  3000,
+                     "salary_max":  10000,
+                     "salary_currency":  "USD",
+                     "salary_period":  "hour",
+                     "skills":  [
+                                    {
+                                        "name":  "Automated Testing",
+                                        "slug":  "automated-testing"
+                                    },
+                                    {
+                                        "name":  "Code Review",
+                                        "slug":  "code-review"
+                                    },
+                                    {
+                                        "name":  "Communication",
+                                        "slug":  "communication"
+                                    },
+                                    {
+                                        "name":  "Debugging",
+                                        "slug":  "debugging"
+                                    }
+                                ],
+                     "stack":  [
+                                   {
+                                       "name":  "C++",
+                                       "slug":  "cplusplus"
+                                   },
+                                   {
+                                       "name":  "Go",
+                                       "slug":  "go"
+                                   },
+                                   {
+                                       "name":  "Java",
+                                       "slug":  "java"
+                                   }
+                               ],
+                     "tools":  [
+                                   {
+                                       "name":  "APIs",
+                                       "slug":  "apis"
+                                   }
+                               ],
+                     "posted_at":  "2026-10-03T04:42:59Z",
+                     "company":  {
+                                     "id":  "019dfd05-2824-7645-9125-e1325a00e833",
+                                     "slug":  "micro1",
+                                     "name":  "Micro1",
+                                     "url":  "https://4dayweek.io/company/micro1",
+                                     "website":  "https://www.micro1.ai",
+                                     "country":  "United States",
+                                     "hires_worldwide":  false
+                                 }
+                 },
+                 {
+                     "id":  "01a10012-277e-7729-a412-f5b9d961f56f",
+                     "slug":  "senior-software-developer-front-end-trading-at-wealthsimple-82ab05bb",
+                     "title":  "Senior Software Developer (Front End), Trading",
+                     "description":  "### **Build something people love**\n\nWealthsimple is Canada’s leading financial innovator. The company offers a full suite of simple, sophisticated financial products across managed investing, do-it-yourself trading, cryptocurrency, tax filing, spending and saving. Wealthsimple currently serves more than 4 million Canadians and holds over $155 billion in assets under administration. The company was founded in 2014 by a team of financial experts and technology entrepreneurs, and is headquartered in Toronto, Canada.\n\nWe're proud of what we've built — and we're just getting started. Read our [Cul\n",
+                     "url":  "https://4dayweek.io/job/senior-software-developer-front-end-trading-at-wealthsimple-82ab05bb",
+                     "category":  "engineering",
+                     "role":  "Front End Engineer",
+                     "level":  "senior",
+                     "contract_type":  "permanent",
+                     "schedule_type":  "generous_parental_leave",
+                     "hours_per_week_min":  40,
+                     "hours_per_week_max":  40,
+                     "work_arrangement":  "remote",
+                     "locations":  [
+                                       {
+                                           "country":  "Canada",
+                                           "continent":  "North America",
+                                           "work_arrangement":  "remote",
+                                           "is_primary":  true
+                                       }
+                                   ],
+                     "salary_min":  15120000,
+                     "salary_max":  18900000,
+                     "salary_currency":  "CAD",
+                     "salary_period":  "year",
+                     "skills":  [
+                                    {
+                                        "name":  "Agile",
+                                        "slug":  "agile"
+                                    },
+                                    {
+                                        "name":  "Code Reviews",
+                                        "slug":  "code-reviews"
+                                    },
+                                    {
+                                        "name":  "Communication",
+                                        "slug":  "communication"
+                                    },
+                                    {
+                                        "name":  "Design Reviews",
+                                        "slug":  "design-reviews"
+                                    }
+                                ],
+                     "stack":  [
+                                   {
+                                       "name":  "GraphQL",
+                                       "slug":  "graphql"
+                                   },
+                                   {
+                                       "name":  "Java",
+                                       "slug":  "java"
+                                   },
+                                   {
+                                       "name":  "Kotlin",
+                                       "slug":  "kotlin"
+                                   }
+                               ],
+                     "tools":  [
+                                   {
+                                       "name":  "AI Tools",
+                                       "slug":  "ai-tools"
+                                   },
+                                   {
+                                       "name":  "Git",
+                                       "slug":  "git"
+                                   }
+                               ],
+                     "posted_at":  "2026-10-03T04:42:32Z",
+                     "company":  {
+                                     "id":  "019f3384-5603-7899-a363-f959ae88b6d0",
+                                     "slug":  "wealthsimple",
+                                     "name":  "Wealthsimple",
+                                     "url":  "https://4dayweek.io/company/wealthsimple",
+                                     "website":  "https://www.wealthsimple.com",
+                                     "country":  "Canada",
+                                     "hires_worldwide":  false
+                                 }
+                 },
+                 {
+                     "id":  "01a108a0-e62e-7aac-a453-767665f9d6fa",
+                     "slug":  "senior-software-engineer-streams-observability-at-elastic-e72191ed",
+                     "title":  "Senior Software Engineer - Streams - Observability",
+                     "description":  "Elastic, the Search AI Company, enables everyone to find the answers they need in real time, using all their data, at scale — unleashing the potential of businesses and people. The Elastic Search AI Platform, used by more than 50% of the Fortune 500, brings together the precision of search and the intelligence of AI to enable everyone to accelerate the results that matter. By taking advantage of all structured and unstructured data — securing and protecting private information more effectively — Elastic’s complete, cloud-based solutions for search, security, and observability help organization\n",
+                     "url":  "https://4dayweek.io/job/senior-software-engineer-streams-observability-at-elastic-e72191ed",
+                     "category":  "engineering",
+                     "role":  "Software Engineer",
+                     "level":  "senior",
+                     "contract_type":  "permanent",
+                     "schedule_type":  "best_place_to_work",
+                     "hours_per_week_min":  40,
+                     "hours_per_week_max":  40,
+                     "work_arrangement":  "remote",
+                     "locations":  [
+                                       {
+                                           "country":  "Portugal",
+                                           "continent":  "Europe",
+                                           "work_arrangement":  "remote",
+                                           "is_primary":  true
+                                       }
+                                   ],
+                     "skills":  [
+                                    {
+                                        "name":  "Analytical Skills",
+                                        "slug":  "analytical-skills"
+                                    },
+                                    {
+                                        "name":  "Communication",
+                                        "slug":  "communication"
+                                    },
+                                    {
+                                        "name":  "Critical Thinking",
+                                        "slug":  "critical-thinking"
+                                    },
+                                    {
+                                        "name":  "Debugging",
+                                        "slug":  "debugging"
+                                    }
+                                ],
+                     "stack":  [
+                                   {
+                                       "name":  "Golang",
+                                       "slug":  "golang"
+                                   },
+                                   {
+                                       "name":  "JRuby",
+                                       "slug":  "jruby"
+                                   },
+                                   {
+                                       "name":  "Java",
+                                       "slug":  "java"
+                                   }
+                               ],
+                     "tools":  [
+                                   {
+                                       "name":  "Docker",
+                                       "slug":  "docker"
+                                   },
+                                   {
+                                       "name":  "Elastic Stack",
+                                       "slug":  "elastic-stack"
+                                   }
+                               ],
+                     "posted_at":  "2026-10-04T20:35:25Z",
+                     "company":  {
+                                     "id":  "019e8865-8535-78af-ac09-4eb18809d71b",
+                                     "slug":  "elastic",
+                                     "name":  "Elastic",
+                                     "url":  "https://4dayweek.io/company/elastic",
+                                     "website":  "https://www.elastic.co",
+                                     "country":  "United States",
+                                     "hires_worldwide":  false
+                                 }
+                 }
+             ],
+    "has_more":  true,
+    "limit":  25,
+    "page":  1,
+    "total":  2195
+}

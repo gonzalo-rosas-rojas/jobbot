@@ -1,0 +1,68 @@
+{
+ "id": 49922569,
+ "title": "Ask HN: Who is hiring? (October 2026)",
+ "created_at": "2026-10-01T15:02:07.000Z",
+ "children": [
+  {
+   "author": "mwest1066",
+   "children": [
+    {
+     "author": "cebert",
+     "children": [],
+     "created_at": "2026-10-02T00:13:01.000Z",
+     "created_at_i": 1790899981,
+     "id": 49928484,
+     "options": [],
+     "parent_id": 49922584,
+     "points": null,
+     "story_id": 49922569,
+     "text": "It’s fantastic to have a university professor involved in this project.",
+     "title": null,
+     "type": "comment",
+     "url": null
+    }
+   ],
+   "created_at": "2026-10-01T15:02:37.000Z",
+   "created_at_i": 1790866957,
+   "id": 49922584,
+   "options": [],
+   "parent_id": 49922569,
+   "points": null,
+   "story_id": 49922569,
+   "text": "PrairieLearn (Remote US) — Full-Stack Software Engineer — TypeScript &#x2F; Postgres &#x2F; React &#x2F; AI<p>PrairieLearn (<a href=\"https:&#x2F;&#x2F;www.prairielearn.com\" rel=\"nofollow\">https:&#x2F;&#x2F;www.prairielearn.com</a>) is an open-source assessment platform used by universities across the US (Berkeley, Princeton, Michigan, Illinois, and others). We power mastery-based learning and large-scale exams.<p>We’re a small, profitable, early-stage company (bootstrapped, no VC) that is growing quickly. Our users love us and we have very high retention and rapid spread through word of mouth. As an early-stage hire, you’ll work across the stack and enjoy meaningful ownership from day one.<p>Tech we use: Node.js &#x2F; TypeScript backend, Postgres, AWS, React. We’re also developing AI tooling, including LLM agents to help instructors create content, and vision-language models to help grade student work. PrairieLearn is open core: <a href=\"https:&#x2F;&#x2F;github.com&#x2F;PrairieLearn&#x2F;PrairieLearn\" rel=\"nofollow\">https:&#x2F;&#x2F;github.com&#x2F;PrairieLearn&#x2F;PrairieLearn</a><p>Details:<p>- Location: Remote (US only)<p>- Salary: $100k-$180k depending on experience<p>- Benefits: Stock options (0.5% - 1.5%), unlimited PTO, flexible hours<p>- Role: Full-time. (We’re not able to sponsor visas at this time.)<p>Apply at <a href=\"https:&#x2F;&#x2F;www.prairielearn.com&#x2F;jobs-ashby?utm_source=YeEJ5MAKkr&amp;ashby_jid=ee6fdbc3-1c3a-4fa3-bb3f-13ddab449baf\" rel=\"nofollow\">https:&#x2F;&#x2F;www.prairielearn.com&#x2F;jobs-ashby?utm_source=YeEJ5MAKk...</a>",
+   "title": null,
+   "type": "comment",
+   "url": null
+  },
+  {
+   "author": "shepherd-eng",
+   "children": [],
+   "created_at": "2026-10-01T15:02:51.000Z",
+   "created_at_i": 1790866971,
+   "id": 49922593,
+   "options": [],
+   "parent_id": 49922569,
+   "points": null,
+   "story_id": 49922569,
+   "text": "Shepherd (Series B) | ONSITE | San Francisco, CA &amp; New York City, NY<p>At Shepherd, we&#x27;re pursuing the most ambitious technical vision in commercial insurance: fully autonomous underwriting. Shepherd is an AI-native commercial insurance platform transforming how high-hazard industries get covered.<p>The infrastructure behind the AI boom (data centers, semiconductor fabs, renewable energy assets) has to be built and insured, but traditional carriers weren&#x27;t built for this speed. We built Shepherd to solve that.<p>We announced our $42M Series B earlier this year! That brings our total funding to over $60M — led by Intact Private Capital, the investment arm of one of the largest insurers in the world. Intact is not only our lead investor but also a carrier partner, a testament to the confidence the incumbent industry has in what we&#x27;re building.<p>We’re looking for product-minded, high ownership engineers to join our team! The Engineering team is HQ’d in SF, but we’re growing in NYC now too!<p>We’re hiring for 2 Senior Full Stack Software Engineers, 1 Machine Learning Engineer and 1 AI Product Manager in SF, and 2 Staff Full Stack Software Engineers in NYC. Engineers own projects end-to-end so full stack ability is expected.<p>Check out our open roles here: <a href=\"https:&#x2F;&#x2F;shepherdinsurance.com&#x2F;careers\">https:&#x2F;&#x2F;shepherdinsurance.com&#x2F;careers</a>\nOur stack includes: Typescript, React, Next.js, GraphQL w&#x2F; Apollo, Node.js, Postgres &amp; Redis\n– If you have experience building AI agents or multi-step reasoning systems, we’d love to hear from you.<p>* In the form, be sure to mention that you heard about this opportunity via Hacker News.\nIf you want to read more about our team and culture, check out our blog: <a href=\"https:&#x2F;&#x2F;shepherdinsurance.com&#x2F;blog\">https:&#x2F;&#x2F;shepherdinsurance.com&#x2F;blog</a>",
+   "title": null,
+   "type": "comment",
+   "url": null
+  },
+  {
+   "author": "norejisace",
+   "children": [],
+   "created_at": "2026-10-01T15:03:25.000Z",
+   "created_at_i": 1790867005,
+   "id": 49922606,
+   "options": [],
+   "parent_id": 49922569,
+   "points": null,
+   "story_id": 49922569,
+   "text": "We The Flywheel | Production Designer | REMOTE (async, global) | Contract, part-time to full-time | <a href=\"https:&#x2F;&#x2F;wetheflywheel.com&#x2F;en&#x2F;careers&#x2F;production-designer-remote&#x2F;?utm_source=hackernews&amp;utm_medium=community&amp;utm_campaign=hn-whoishiring-2026-10&amp;utm_content=production-designer\" rel=\"nofollow\">https:&#x2F;&#x2F;wetheflywheel.com&#x2F;en&#x2F;careers&#x2F;production-designer-rem...</a><p>We&#x27;re a small, agent-led studio. Most of our ops run through AI agents, and the people here direct them. We need a production designer who turns briefs into polished, on-brand marketing, social and ad creative, fast, inside an existing brand system.<p>What we&#x27;re looking for:\n- Real Figma experience (required)\n- You&#x27;ve wired Figma into coding agents like Codex or Claude Code (e.g. Figma MCP), so a design becomes working code without a hand-off\n- Strong typography and layout craft, and you can keep quality up across a high volume of assets\n- Clear written English for async work<p>Apply through the link. It starts with a short skills assessment, no cover letter needed.<p>For other roles, see our careers page: <a href=\"https:&#x2F;&#x2F;wetheflywheel.com&#x2F;en&#x2F;careers&#x2F;?utm_source=hackernews&amp;utm_medium=community&amp;utm_campaign=hn-whoishiring-2026-10&amp;utm_content=careers\" rel=\"nofollow\">https:&#x2F;&#x2F;wetheflywheel.com&#x2F;en&#x2F;careers&#x2F;?utm_source=hackernews&amp;...</a>",
+   "title": null,
+   "type": "comment",
+   "url": null
+  }
+ ]
+}

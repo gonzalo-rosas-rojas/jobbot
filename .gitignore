@@ -1,0 +1,9 @@
+/target
+# Runtime state: the SQLite database, logs, screenshots, dossiers, drafts.
+/data
+# The kill switch file created by `jobbot stop`.
+STOP
+.env
+# Personal values that must not reach a repository that may be published (see profile/claude.toml).
+profile/*.local.toml
+.playwright-mcp/

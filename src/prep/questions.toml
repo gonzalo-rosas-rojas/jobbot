@@ -1,0 +1,234 @@
+# Interview drill seed bank: 18 questions in 9 topics, in Spanish.
+# Add questions with the same keys. Ids must be unique across this file and rust_concepts.toml.
+
+[[question]]
+id = "js-event-loop"
+topic = "javascript"
+question = """\
+    Explica el event loop de JavaScript. ¿En qué orden se ejecutan el código síncrono, las \
+    microtasks (promesas) y las macrotasks (setTimeout)? ¿Qué imprime este código: setTimeout(() => \
+    console.log('a'), 0); Promise.resolve().then(() => console.log('b')); console.log('c')?"""
+answer = """\
+    Primero corre todo el código síncrono de la pila (imprime c). Luego se vacía por completo la \
+    cola de microtasks (promesas, queueMicrotask): imprime b. Después el loop toma una macrotask \
+    (timers, I/O): imprime a. Orden: c, b, a. Tras cada macrotask se vuelven a vaciar las \
+    microtasks."""
+
+[[question]]
+id = "js-closures"
+topic = "javascript"
+question = """\
+    ¿Qué es un closure y cuál es un bug clásico que provoca? Por ejemplo, un for con var y \
+    setTimeout."""
+answer = """\
+    Un closure es una función que conserva acceso al ámbito léxico donde fue creada, incluso después \
+    de que ese ámbito terminó. Bug clásico: en for (var i = 0; i < 3; i++) setTimeout(() => \
+    console.log(i)) se imprime 3, 3, 3 porque todas las funciones comparten la misma variable i. Se \
+    arregla con let (una variable nueva por iteración) o con una función que reciba i como \
+    argumento."""
+
+[[question]]
+id = "ts-unknown-any"
+topic = "typescript"
+question = """\
+    ¿Cuál es la diferencia entre any y unknown, y entre type e interface en TypeScript?"""
+answer = """\
+    any desactiva el chequeo de tipos; unknown obliga a estrechar el tipo (typeof, instanceof, type \
+    guards) antes de usar el valor, por eso es más seguro. interface describe formas de objetos, se \
+    puede extender y admite declaration merging; type es un alias que además permite uniones, \
+    intersecciones, tipos mapeados y primitivos. Para objetos simples son casi intercambiables."""
+
+[[question]]
+id = "ts-generics-narrowing"
+topic = "typescript"
+question = """\
+    ¿Para qué sirven los genéricos y qué es el estrechamiento de tipos (type narrowing) con una \
+    unión discriminada?"""
+answer = """\
+    Los genéricos permiten escribir funciones y tipos reutilizables que conservan la relación entre \
+    tipos de entrada y salida (function first<T>(xs: T[]): T). Una unión discriminada es un conjunto \
+    de tipos que comparten un campo literal (kind: 'ok' | 'error'); al comprobar ese campo en un if \
+    o switch, TypeScript estrecha el tipo y permite acceder a los campos propios de cada variante, \
+    con chequeo de exhaustividad usando never."""
+
+[[question]]
+id = "react-useeffect"
+topic = "react"
+question = """\
+    ¿Cómo funciona el arreglo de dependencias de useEffect y para qué sirve la función de limpieza? \
+    Da un bug típico."""
+answer = """\
+    El efecto corre después del render y se vuelve a ejecutar cuando cambia algún valor del arreglo \
+    (comparación con Object.is); [] corre una vez al montar; sin arreglo corre en cada render. La \
+    función de limpieza corre antes de volver a ejecutar el efecto y al desmontar: sirve para \
+    cancelar suscripciones, timers o fetch (AbortController). Bug típico: omitir una dependencia y \
+    leer un valor viejo (stale closure), o poner como dependencia un objeto o función creado en cada \
+    render y provocar un loop."""
+
+[[question]]
+id = "react-keys"
+topic = "react"
+question = """\
+    ¿Por qué React exige key en las listas y qué pasa si usas el índice del arreglo como key?"""
+answer = """\
+    React usa la key para identificar qué elemento cambió, se movió o se eliminó al reconciliar. Con \
+    índices, si la lista se reordena o se insertan o borran elementos, las keys apuntan a otros \
+    datos y React reutiliza mal el estado interno de los componentes (inputs que conservan texto \
+    equivocado, animaciones rotas). Debe usarse un id estable y único del dato."""
+
+[[question]]
+id = "sql-indexes"
+topic = "sql"
+question = """\
+    ¿Qué es un índice B-tree, cuándo ayuda y cuándo no? ¿Cómo verificas que una consulta lo usa?"""
+answer = """\
+    Un B-tree mantiene las claves ordenadas y permite buscar por igualdad y por rangos en O(log n). \
+    Ayuda en WHERE, JOIN y ORDER BY sobre columnas selectivas; no ayuda en tablas pequeñas, en \
+    columnas de baja selectividad, con funciones sobre la columna (WHERE lower(email) = ...) sin \
+    índice funcional, ni con LIKE '%texto'. Cada índice cuesta espacio y ralentiza INSERT y UPDATE. \
+    Se verifica con EXPLAIN (ANALYZE) buscando Index Scan en lugar de Seq Scan. En índices \
+    compuestos importa el orden de las columnas (prefijo izquierdo)."""
+
+[[question]]
+id = "sql-acid-isolation"
+topic = "sql"
+question = """\
+    ¿Qué garantiza ACID y qué anomalías previenen los niveles de aislamiento read committed, \
+    repeatable read y serializable?"""
+answer = """\
+    Atomicidad (todo o nada), Consistencia (se respetan las restricciones), Aislamiento (las \
+    transacciones concurrentes no se pisan) y Durabilidad (lo confirmado sobrevive a una caída). \
+    Read committed evita lecturas sucias; repeatable read evita además las lecturas no repetibles; \
+    serializable evita también las lecturas fantasma y se comporta como una ejecución en serie. En \
+    PostgreSQL el valor por defecto es read committed; a mayor aislamiento, más conflictos y \
+    reintentos."""
+
+[[question]]
+id = "auth-session-vs-jwt"
+topic = "http-auth"
+question = """\
+    Compara sesiones con cookie y JWT para autenticación web. ¿Qué ataques importan (XSS, CSRF) y \
+    cómo los mitigas?"""
+answer = """\
+    Sesión: el servidor guarda el estado y la cookie lleva solo un id; se puede revocar al instante. \
+    JWT: token firmado y autocontenido, sin estado en el servidor pero difícil de revocar; conviene \
+    vida corta más refresh token. Guardar el token en localStorage lo expone a XSS; una cookie \
+    HttpOnly lo protege de XSS pero exige defensa contra CSRF (SameSite=Lax o Strict, token CSRF). \
+    Siempre HTTPS, flag Secure y CSP para reducir XSS."""
+
+[[question]]
+id = "auth-oauth-pkce"
+topic = "http-auth"
+question = """\
+    Explica el flujo OAuth2 authorization code con PKCE y por qué se usa."""
+answer = """\
+    El cliente genera un code_verifier aleatorio y envía su hash (code_challenge) al redirigir al \
+    usuario al servidor de autorización. El usuario se autentica y el servidor devuelve un \
+    authorization code al redirect URI. El cliente canjea el code enviando el code_verifier \
+    original; el servidor verifica que su hash coincida. PKCE evita que un atacante que intercepte \
+    el code pueda canjearlo y permite clientes públicos (SPA, móviles) sin client secret."""
+
+[[question]]
+id = "sd-rate-limiter"
+topic = "system-design"
+question = """\
+    Diseña un rate limiter para una API multi-tenant. ¿Qué algoritmo usas y dónde guardas el estado?"""
+answer = """\
+    Algoritmos: token bucket (permite ráfagas controladas), leaky bucket (salida constante) y \
+    sliding window (más preciso, más memoria). El estado compartido va en Redis con operaciones \
+    atómicas (script Lua o INCR más EXPIRE) para que funcione con varias instancias. La clave es \
+    tenant más endpoint o API key. Se responde 429 con Retry-After y encabezados de límite restante. \
+    Considerar límites por tenant y globales, qué pasa si Redis falla (fail-open o fail-closed según \
+    el riesgo) y métricas."""
+
+[[question]]
+id = "sd-multitenant"
+topic = "system-design"
+question = """\
+    ¿Qué estrategias hay para aislar datos en un SaaS multi-tenant y cuándo usas cada una?"""
+answer = """\
+    Base de datos por tenant: máximo aislamiento y respaldos por cliente, pero costosa de operar a \
+    escala. Schema por tenant: buen aislamiento con costo medio y migraciones más complejas. Tablas \
+    compartidas con columna tenant_id: lo más barato y escalable, pero exige aplicar el filtro \
+    siempre (row-level security en PostgreSQL, scoping en la capa de datos) y probar que no haya \
+    fugas entre tenants. Se elige según requisitos de cumplimiento, tamaño y cantidad de tenants; \
+    muchos SaaS usan tablas compartidas y mueven a los clientes grandes a aislamiento dedicado."""
+
+[[question]]
+id = "rag-pipeline"
+topic = "llm-rag"
+question = """\
+    Describe un pipeline RAG de producción: chunking, recuperación híbrida, reranking y cómo evalúas \
+    la calidad."""
+answer = """\
+    Ingesta: limpiar, dividir en chunks con solapamiento respetando la estructura (títulos, \
+    párrafos) y guardar metadatos. Recuperación: embeddings (búsqueda semántica) combinados con BM25 \
+    (búsqueda léxica) y fusión de rankings (RRF). Reranking con un cross-encoder sobre los top-k. \
+    Generación con el contexto y citas obligatorias. Evaluación: conjunto de preguntas con \
+    respuestas esperadas; medir recall@k de la recuperación y fidelidad de la respuesta a las \
+    fuentes (groundedness), además de latencia y costo. Los cambios se prueban contra ese conjunto \
+    antes de desplegar."""
+
+[[question]]
+id = "llm-hallucinations"
+topic = "llm-rag"
+question = """\
+    ¿Cómo reduces las alucinaciones en una aplicación con LLM?"""
+answer = """\
+    Basar la respuesta en fuentes recuperadas y exigir citas; instruir al modelo a decir que no sabe \
+    cuando el contexto no alcanza; bajar la temperatura; validar salidas estructuradas con esquemas; \
+    verificar automáticamente las citas contra el texto fuente; añadir una segunda pasada de \
+    verificación en casos críticos; y medir con evals continuas. Ninguna técnica elimina el riesgo, \
+    por eso se diseña el flujo asumiendo que a veces falla (revisión humana en acciones de alto \
+    impacto)."""
+
+[[question]]
+id = "mcp-tool-calling"
+topic = "agents-mcp"
+question = """\
+    ¿Qué es MCP (Model Context Protocol) y cómo funciona el bucle de tool calling de un agente?"""
+answer = """\
+    MCP es un protocolo abierto que estandariza cómo una aplicación con LLM descubre y usa \
+    herramientas, recursos y prompts expuestos por servidores (transportes stdio o HTTP/SSE). El \
+    bucle de tool calling: el modelo recibe la conversación y la lista de herramientas con su \
+    esquema; si decide usar una, devuelve una llamada estructurada; el programa la ejecuta, agrega \
+    el resultado a la conversación y vuelve a llamar al modelo; el bucle termina cuando el modelo \
+    responde sin pedir más herramientas o se alcanza un límite de pasos."""
+
+[[question]]
+id = "agent-prompt-injection"
+topic = "agents-mcp"
+question = """\
+    ¿Qué es una inyección de prompt en un agente con herramientas y cómo te defiendes?"""
+answer = """\
+    Es cuando contenido no confiable (páginas web, correos, documentos) contiene instrucciones que \
+    el modelo obedece como si vinieran del usuario. Defensas: mínimo privilegio en las herramientas, \
+    separar el contenido no confiable de las instrucciones, exigir confirmación humana para acciones \
+    destructivas o que envían datos hacia afuera, listas permitidas de destinos y acciones, validar \
+    los argumentos de las herramientas, mantener los secretos fuera del contexto del modelo, y \
+    registrar y auditar las llamadas. No existe un filtro perfecto: se diseña para limitar el daño."""
+
+[[question]]
+id = "docker-layers"
+topic = "devops"
+question = """\
+    ¿Cómo optimizas una imagen Docker y su tiempo de build? Explica las capas y el multi-stage."""
+answer = """\
+    Cada instrucción crea una capa y el caché se invalida desde la primera capa que cambia, así que \
+    se copian primero los archivos de dependencias (package.json y lockfile), se instalan y recién \
+    después el código. Multi-stage: una etapa de build con compiladores y devDependencies y una \
+    etapa final mínima que copia solo los artefactos, reduciendo tamaño y superficie de ataque. \
+    También: imagen base slim, .dockerignore, usuario no root y no guardar secretos en la imagen."""
+
+[[question]]
+id = "idempotent-jobs"
+topic = "devops"
+question = """\
+    ¿Qué es la idempotencia y cómo diseñas jobs en background con reintentos seguros?"""
+answer = """\
+    Una operación es idempotente si ejecutarla varias veces produce el mismo resultado que \
+    ejecutarla una vez. Con reintentos (backoff exponencial con jitter) un job puede ejecutarse más \
+    de una vez, así que se usan claves de idempotencia únicas por operación guardadas junto al \
+    efecto (restricción única en la base de datos), upserts, y se confirma el efecto y el avance del \
+    job de forma atómica. Además: límite de reintentos, dead-letter queue para fallos permanentes y \
+    métricas con alertas."""
