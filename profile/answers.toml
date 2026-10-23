@@ -40,8 +40,10 @@ consent_checkboxes = ["privacy policy", "privacy notice", "consent to the proces
 # ---------------------------------------------------------------------------------------------
 # Authorization and visa questions that name a specific place go UNANSWERED here (the program asks the user):
 # whether sponsorship is needed depends on the posting, not on the label. For postings that are open only
-# through `extra_open_places` in criteria.toml, the engine answers with the user's actual work-rights facts
-# (`bank_for_job` in src/pipeline.rs). This entry stays as a safety net for whatever arrives another way.
+# through `extra_open_places` in criteria.toml, the engine answers them as a move there: not authorized, not a
+# citizen or resident, no visa, sponsorship needed, and one fixed sentence for a visa-status question
+# (`bank_for_job` in src/pipeline.rs, the answers in src/answers.rs). This entry stays as a safety net for
+# whatever arrives another way.
 [[entry]]
 patterns = [
   "australia|australian|sydney|melbourne|brisbane|perth|adelaide|canberra&sponsor|sponsorship|sponsored|authorized|authorised|authorization|authorisation|eligible|eligibility|entitled|permitted|right to work|work rights|working rights|visa|work permit|citizen|citizenship|permanent resident",

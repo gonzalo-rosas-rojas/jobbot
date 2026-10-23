@@ -1,7 +1,7 @@
 //! RemoteOK feed: `GET {base}/api`.
 //!
 //! RemoteOK's terms require linking back to the listing and naming RemoteOK as the source:
-//! every job keeps its RemoteOK `url`, and the digest (Task 12) shows the source name.
+//! every job keeps its RemoteOK `url`, and the digest shows the source name.
 
 use anyhow::Context;
 use async_trait::async_trait;

@@ -32,8 +32,10 @@ Rules the code enforces, each with tests:
   that choose the account or the payer are stripped.
 - **A spending limit.** `profile/claude.toml` sets a daily and a per-call budget; when the daily budget is
   reached, no further call is made.
-- **A kill switch.** `jobbot stop` creates a `STOP` file that every command that changes anything checks
-  before acting.
+- **A kill switch.** `jobbot stop` creates a `STOP` file. While it exists, every command that asks Claude for
+  text (dossier, freelance, claude-check, run-daily) refuses to start, run-daily looks again before each
+  dossier, and no flag overrides it; discover, prepare and submit stop too. Commands that only keep records
+  (approve, mark, prep and the like) keep working.
 
 ## Using it yourself
 

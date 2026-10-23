@@ -1,5 +1,5 @@
-# Rust concept cards for the Aprender tab (spec section 5).
-# Every task of the implementation plan appends exactly three cards at its end.
+# Rust concept cards for the Aprender tab.
+# New cards go at the end of the file.
 #
 # Format: repeated [[question]] tables, each with four string keys:
 #   id        unique, "rust-t<task>-<n>", for example "rust-t1-1"

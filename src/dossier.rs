@@ -1,4 +1,4 @@
-//! Per-job interview dossier (spec section 5, item 3, "profunda"): what the posting says about
+//! Per-job interview dossier: what the posting says about
 //! the company, the questions to expect, three stories drawn only from the CV, and the gaps to
 //! study, which become cards of the interview drill. Claude writes the first draft and the
 //! program checks it: a story whose evidence is not a line of the CV is dropped, every text is

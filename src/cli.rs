@@ -287,7 +287,7 @@ enum InboxCommand {
     /// Importa un archivo JSON con los correos (una lista de mensajes). Importar el mismo archivo
     /// dos veces no cambia nada. Solo escribe en la base: ignora STOP y la ventana.
     Import {
-        /// El archivo JSON (ver «Bandeja de correo» en el README).
+        /// El archivo JSON (ver «Inbox file» en el README).
         file: PathBuf,
     },
 }
@@ -2023,7 +2023,7 @@ fn cmd_prep(
 /// Serves the local panel until the process is stopped (Ctrl+C). Like `prep` and `approve`, it
 /// ignores STOP and the window: it only reads and writes the tracker and the prep store, on this
 /// PC, and starts no discovery, browser or Claude. The clock is the start time plus the time
-/// elapsed since, which keeps `main` the only place that reads the real one. The one thing it
+/// elapsed since, so it follows `main`'s reading of the real one. The one thing it
 /// asks of Windows is, read-only and in the background, whether the scheduled task is registered
 /// and when it fires next (`panel::scheduler`).
 async fn cmd_panel(
@@ -2092,7 +2092,7 @@ mod tests {
     use crate::open_check::OpenStatus;
     use crate::testing::{FakeClaude, SAMPLE_CV, make_job, make_job_with, sample_dossier_json};
 
-    // Two instants chosen with the window tests of Task 11 (the same schedule file is used):
+    // Two instants chosen like the ones in the window tests (the same schedule file is used):
     // Wednesday 2026-10-14 15:00 UTC is 11:00 in New York, a busy hour; 22:00 UTC is 18:00 there
     // and 19:00 in Santiago, so the execution window is open.
     fn busy_now() -> DateTime<Utc> {

@@ -426,7 +426,7 @@ mod tests {
         assert!(cfg.fourdayweek.is_some());
         assert!(
             cfg.greenhouse.len() >= 30,
-            "the seed list is wide on purpose (audit finding A1)"
+            "the seed list is wide on purpose"
         );
         assert!(!names(&cfg).is_empty());
     }

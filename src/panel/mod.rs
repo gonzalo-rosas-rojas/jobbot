@@ -1,4 +1,4 @@
-//! The local panel (plan ruling R1): a small web page served on this PC only, drawn from the same
+//! The local panel: a small web page served on this PC only, drawn from the same
 //! SQLite files the commands use. `snapshot` builds the data, `http` holds every guard and route as
 //! plain functions, `server` moves bytes. Nothing here starts discovery, a browser or Claude. The
 //! one question the panel puts to Windows (is the scheduled task there, and when does it fire?) is
@@ -21,7 +21,7 @@ use crate::tracker::Tracker;
 use scheduler::{TaskAnswer, TaskQuery, TaskWatch};
 
 /// Where the panel gets the time. `jobbot panel` passes "start time plus time elapsed", like the
-/// window watch, so `main` stays the only place that reads the clock.
+/// window watch, starting from `main`'s reading of the real clock; tests pass a stopped one.
 pub type Clock = Box<dyn Fn() -> DateTime<Utc> + Send>;
 
 pub struct Panel {

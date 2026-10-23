@@ -1,4 +1,6 @@
-//! Entry point: the only place that reads the clock and the working directory.
+//! Entry point: reads the working directory and the clock, and hands that `now` to `cli::run`.
+//! `sources` also reads the wall clock, but only to drop expired or closed postings and to turn
+//! an HTTP-date `Retry-After` into a wait.
 
 #[tokio::main]
 async fn main() {

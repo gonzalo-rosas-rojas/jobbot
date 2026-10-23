@@ -1,4 +1,4 @@
-//! Freelance drafts (spec section 5, item 11): a profile and proposals for the platforms Gonza
+//! Freelance drafts: a profile and proposals for the platforms Gonza
 //! chooses. Output is a Markdown draft under `data/freelance/`; nothing is ever sent to a
 //! platform. The guards are the point of this file: the CV that Claude sees has no contact line,
 //! no entry of an excluded employer and none of the `never_name` entries; a skill is kept only if

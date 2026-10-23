@@ -643,7 +643,7 @@ pub fn find_claude_program(
         .filter(|p| p.is_file())
 }
 
-/// What an employer's managed policy for Claude Code leaves on a Windows PC (R8c section 4): the
+/// What an employer's managed policy for Claude Code leaves on a Windows PC: the
 /// registry value `Settings` under `HKLM\SOFTWARE\Policies\ClaudeCode` (and the same under `HKCU`),
 /// the folder `%ProgramFiles%\ClaudeCode` (`managed-settings.json`, `managed-settings.d\`), and
 /// `remote-settings.json` in the config folder, the cache of settings that an organization's

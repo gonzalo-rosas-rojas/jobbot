@@ -1,4 +1,4 @@
-//! Execution window (spec section 3). The rules live in the pure domain crate
+//! Execution window. The rules live in the pure domain crate
 //! (`jobbot_domain::window`) and are re-exported here; this file only reads `profile/schedule.toml`.
 
 use std::path::Path;

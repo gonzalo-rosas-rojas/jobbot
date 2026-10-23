@@ -1,14 +1,23 @@
 # jobbot
 
+[![CI](https://github.com/GonzaloRosas/jobbot/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/GonzaloRosas/jobbot/actions/workflows/ci.yml)
+
+**Walkthrough:** [The Night Shift](https://gonzalorosas.github.io/jobbot-showcase/), a scroll-driven story of one
+night of jobbot (18:00 to 09:00) on fictional data, ending in a live demo of its panel (an earlier build, in
+Spanish). Source: [jobbot-showcase](https://github.com/GonzaloRosas/jobbot-showcase).
+
+[![The Night Shift, scrolling from the hero to the panel, the five layers and the dawn](https://raw.githubusercontent.com/GonzaloRosas/jobbot-showcase/main/docs/hero.gif)](https://gonzalorosas.github.io/jobbot-showcase/)
+
 A local job-search assistant written in Rust. It finds postings from public sources, drops the ones you
 must not apply to, scores the rest, tailors your CV, fills application forms in a real browser, and keeps
 a tracker. It is built around one rule: **it never says anything you have not told it to say, and it
 never sends anything without a way for you to stop it.**
 
-I wrote it for my own job search, with [Claude Code](https://claude.com/claude-code) as the pair-programmer
-(see [AI-USE.md](AI-USE.md)). It is a personal tool, not a product: it targets Windows, and part of its
-output is in Spanish, my working language. The profile and CV in this repository describe a **fictional
-person** so that the test suite can run; replace them with your own.
+I built it for my own job search by directing [Claude Code](https://claude.com/claude-code): I chose the
+goals, the architecture and the rules, and reviewed the changes; Claude wrote most of the code and tests (see
+[AI-USE.md](AI-USE.md)). It is a personal tool, not a product: it targets Windows, and part of its output is
+in Spanish, my native language. The profile and CV in this repository describe a **fictional person** so that
+the test suite can run; replace them with your own.
 
 ## What it does
 
@@ -44,14 +53,22 @@ These are the parts I would want a reviewer to check.
   to answer. An open question ("why this company?"), a legal question, or self-identification such as gender
   or ethnicity is left empty and marked in red in the screenshot. `--live` refuses to click submit while a
   required answer is missing.
+- **One work-rights rule lives in code.** A posting that is open only because `extra_open_places` in
+  `profile/criteria.toml` names its place (Australia in the example) is answered as a move there: "authorized
+  to work there?", "citizen or permanent resident?" and "hold a valid visa?" get "No", "will you need
+  sponsorship or a visa?" gets "Yes", and a visa-status question gets one fixed sentence (`bank_for_job` in
+  `src/pipeline.rs`, the answers in `src/answers.rs`). An empty list turns it off.
 - **A human reviews the first applications.** The first five go through dry run or `--assist`. Only after that
   does the program submit on its own, within daily caps and a 90-day cool-down per company.
 - **Exclusions are tested data.** `profile/exclusions.toml` lists companies, domains and categories the
   program must never apply to or write about (for example a former employer). They are matched on whole words
   and domain suffixes, they are stripped from the CV before anything reaches a model, and tests keep it so.
-- **Idle hours, a kill switch and a lock.** Nothing runs inside the busy hours of `profile/schedule.toml`.
-  `jobbot stop` creates a `STOP` file that every command that changes anything checks before acting. A lock
-  prevents two runs from overlapping.
+- **Idle hours, a kill switch and a lock.** Inside the busy hours of `profile/schedule.toml` the hourly task
+  does nothing, and discover, prepare, submit, run-daily, dossier, freelance and claude-check refuse to start
+  unless given `--ignore-window`. `jobbot stop` creates a `STOP` file: while it exists those seven commands
+  refuse to start (run-daily also looks again between steps, submit before each application), and no flag
+  overrides it. Commands that only keep records (approve, mark, record, task, inbox import, the panel) keep
+  working, and nothing approved under STOP is sent until you resume. A lock prevents two runs from overlapping.
 - **Postings and e-mails are data, not instructions.** They are cleaned and length-limited, and nothing in
   them is ever executed or obeyed.
 - **A spending limit on the model.** `profile/claude.toml` caps Claude calls per day and per call. The calls
@@ -106,11 +123,13 @@ jobbot confirm KEY...           mark as sent something you sent by hand
 jobbot digest                   daily summary
 jobbot run-daily                discover + prepare + submit + dossiers + digest
 jobbot status                   counts by state, the last run, the verified Claude account
+jobbot results [--last 20]      latest submit results (mode, state, answers filled, what was missing)
 jobbot stop | resume            kill switch
 jobbot mark KEY STATE           record a reply by hand (replied, interview, offer, rejected, ...)
 jobbot record ...               record an application you sent yourself
 jobbot inbox import FILE        import job e-mails summarised elsewhere (the program never touches your mail)
 jobbot today                    your list for today
+jobbot task add TEXT | done ID  add a to-do to today's list, or mark one done
 jobbot dossier KEY...           interview-preparation dossier (calls Claude)
 jobbot freelance profile|proposal PLATFORM   draft only; nothing is posted anywhere
 jobbot prep ...                 spaced-repetition interview drill
@@ -119,14 +138,27 @@ jobbot claude-check | claude-login
 jobbot install-browsers
 ```
 
+### Inbox file
+
+`jobbot inbox import FILE` reads a JSON array of at most 500 messages (2 MB). Each message needs `message_id`,
+`thread_id`, `from`, `subject`, `received_at` (RFC 3339), `kind` (`ack`, `rejection`, `recruiter`,
+`interview_invite`, `technical_test`, `action_required` or `other`) and `summary`; `company`, `job_key` and
+`task` (`{"text": ..., "due_at": ...}`) are optional. Every text is cleaned and cut to a fixed length, and a
+message already imported is skipped.
+
+### Scheduling
+
 Scheduling on Windows is two scripts: `scripts/schedule.ps1` registers an hourly task, `\jobbot\run-daily`,
 that exits immediately outside the run window, and `scripts/unschedule.ps1` removes it. Neither runs by itself.
 
 ## Tests and tooling
 
 - **1,175 tests** run offline with a plain `cargo test`: sources against recorded fixtures, forms against
-  local HTML pages, Claude against a fake `claude` executable. Another 105 drive a real Chromium (form filling,
-  PDF rendering, the panel) and run with `cargo test -- --ignored` after `install-browsers`.
+  local HTML pages, Claude against a fake `claude` executable. Another 109 are marked `#[ignore]`: 107 need a
+  real Chromium (form filling, PDF rendering, the panel; two of them act only when `JOBBOT_SCAN_URLS` /
+  `JOBBOT_REAL_URLS` list live pages), one asks a logged-in `claude` (a real call) and one queries the Windows
+  Task Scheduler, read-only. After `install-browsers`,
+  `cargo test -- --ignored --test-threads=1 --skip real_claude --skip real_scheduler` runs the browser ones.
 - CI (`.github/workflows/ci.yml`) runs `cargo fmt --check`, `cargo clippy -D warnings` and `cargo test` on
   Windows (and, informationally, Linux), plus `cargo deny` and `cargo audit`. Actions are pinned by commit.
 - `unsafe_code` is denied for the workspace and `dbg!`, `todo!` and `unimplemented!` are denied by clippy.
@@ -138,6 +170,12 @@ that exits immediately outside the run window, and `scripts/unschedule.ps1` remo
 - Much of the CLI and panel text is in Spanish, and so are the interview-practice questions in
   `src/prep/questions.toml` and the CLI help (the doc comments in `src/cli.rs`). The example profile and the
   scripts are in English, as are most code comments.
+- Times are Santiago (Chile) time: the CLI, the digest, the dossiers, the freelance drafts and the panel show
+  them in that zone, and the dates of `jobbot today` and of the digest follow it. The zone is fixed in the code;
+  only the busy hours in `profile/schedule.toml` take any IANA zone.
+- The first build downloads the Playwright driver (Node.js from nodejs.org and playwright-core from npm) into
+  the user cache. playwright-rs checks the TLS connection but no checksum; to build against a driver you checked
+  yourself, point `PLAYWRIGHT_DRIVER_CACHE_DIR` at it.
 - Greenhouse, Lever and Ashby forms are handled; other application systems are listed for you to open by hand.
 - The local panel's page is a single built HTML file (`src/panel/page.html`); its front-end sources are not part
   of this repository.

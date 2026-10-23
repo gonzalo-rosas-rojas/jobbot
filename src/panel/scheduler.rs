@@ -6,7 +6,7 @@
 //! again in a thread of its own, so a snapshot returns at once whatever Windows is doing; until
 //! there is an answer, or when there is none (the child failed, timed out, or said something this
 //! file does not understand), the snapshot says `null`, "no data". Only an answer from Windows
-//! that the task is not registered becomes `exists: false` (criterion A15).
+//! that the task is not registered becomes `exists: false`.
 
 use std::io::Read;
 use std::panic::AssertUnwindSafe;

@@ -1,4 +1,4 @@
-//! Salary parsing and the 0-100 job score (spec section 4).
+//! Salary parsing and the 0-100 job score.
 
 use std::collections::BTreeMap;
 use std::sync::LazyLock;

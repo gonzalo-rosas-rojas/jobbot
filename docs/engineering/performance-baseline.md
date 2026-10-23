@@ -1,7 +1,12 @@
 # Performance baseline
 
-Measured on 2026-10-10 at commit 95bfc76 of branch `backend/excelencia`, before any change of this branch.
+Measured on 2026-10-10, before any of the hardening work below, on the development history that precedes
+the public release (those commits are not published).
 Machine: Intel Core i9-14900HX, 64 GB RAM, Windows 11, rustc 1.95.0.
+
+The hardening work was done in phases: 0 is this baseline, 1 added the checks and CI, 2 the fixes listed
+under "After phase 2", 3a the extraction of `jobbot-domain`. Phase 4, benchmarks with a regression budget,
+has not been built yet.
 
 ## Read commands (copy of a real database of 18.6 MB, release binary, 30 runs after one cold run)
 
@@ -29,7 +34,7 @@ Peak memory is read by polling the process while it runs, so it is a lower bound
 
 ## After phase 2
 
-Measured on 2026-10-10 at the head of branch `backend/excelencia` after phase 2 (navigation guard,
+Measured on 2026-10-10 after phase 2 (navigation guard,
 intents table, WAL, schema version, retry policy), same machine, same script, same copy of the real
 database (18.6 MB, still in the old journal mode when copied). Two full runs of 30 are shown to
 give the spread; the first run of the first command migrates the copy.
@@ -70,7 +75,7 @@ as a gain to build on; phase 4 owns benchmarks with a regression budget.
 
 ## After phase 3a
 
-Measured on 2026-10-20 at the head of branch `backend/excelencia` after the extraction of
+Measured on 2026-10-20 after the extraction of
 `jobbot-domain` (workspace of two crates), same machine. Each build time is one run, so a
 difference of a second is inside the noise.
 
@@ -93,8 +98,8 @@ latencies of "After phase 2" apply as they are.
 
 ## Panel snapshot
 
-Measured by the UI session on a copy of the real database; re-measured when the benchmarks of
-phase 4 exist.
+Measured during the development of the panel, on a copy of the real database; to be re-measured when the
+benchmarks of phase 4 exist.
 
 `GET /api/snapshot` 38 ms release, 126 ms debug; `build_snapshot` 30 ms (pipeline 9, cards 7,
 funnel 3); `redact_json` 1.3 to 1.9 ms.
@@ -107,15 +112,15 @@ funnel 3); `redact_json` 1.3 to 1.9 ms.
 
 ## Budgets
 
-Rule: budget = max(hypothesis of the spec, 1.25 x measured p95), so no budget starts already
+Rule: budget = max(starting hypothesis, 1.25 x measured p95), so no budget starts already
 violated. The budgets are ceilings; what catches a regression early is the 10 % tolerance against
 the figures in this file.
 
 | item | hypothesis | measured p95 | budget |
 |---|---|---|---|
 | read commands, warm | <= 150 ms | 19 to 39 ms | 150 ms |
-| `GET /api/snapshot`, release | <= 100 ms | 38 ms (UI session) | 100 ms |
-| `GET /api/snapshot`, debug | <= 400 ms | 126 ms (UI session) | 400 ms |
+| `GET /api/snapshot`, release | <= 100 ms | 38 ms (see Panel snapshot) | 100 ms |
+| `GET /api/snapshot`, debug | <= 400 ms | 126 ms (see Panel snapshot) | 400 ms |
 | `build_snapshot` at 10x data | <= 50 ms | not measured (needs the synthetic set) | 50 ms, provisional |
-| `redact_json` over about 20,000 strings | <= 5 ms | 1.3 to 1.9 ms (UI session) | 5 ms |
+| `redact_json` over about 20,000 strings | <= 5 ms | 1.3 to 1.9 ms (see Panel snapshot) | 5 ms |
 | regression tolerance in any benchmark | 10 % | n/a | 10 % |

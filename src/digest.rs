@@ -1,4 +1,4 @@
-//! Daily digest in Spanish Markdown (spec section 5, item 8): what needs Gonza, what is
+//! Daily digest in Spanish Markdown: what needs Gonza, what is
 //! waiting for his approval, live conversations, the last 24 hours' sends, new matches and
 //! weekly metrics. The date in the title is Santiago's, because Gonza reads it there; everything
 //! else is computed in UTC. Rejections are counted in the metrics but never listed: they stay in

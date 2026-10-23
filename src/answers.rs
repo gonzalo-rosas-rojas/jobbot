@@ -341,7 +341,7 @@ fn says_only(text: &str, phrase: &str) -> bool {
 
 /// Phrases that mean a consent box is about more than the privacy consent Gonza authorized. One of
 /// them anywhere in the label keeps the box unticked even when it also says "privacy policy"
-/// (spec, sections 3 and 7: nothing legal is accepted, no background check is consented to). This
+/// (nothing legal is accepted, no background check is consented to). This
 /// is a safety rule, so it lives here and not in the editable answers file; a box it blocks goes
 /// to Gonza.
 const CONSENT_NEVER: &[&str] = &[

@@ -64,7 +64,7 @@ pub struct Signals {
     pub china: Vec<String>,
 }
 
-/// Scoring and gating settings (spec sections 4 and 7).
+/// Scoring and gating settings.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Criteria {

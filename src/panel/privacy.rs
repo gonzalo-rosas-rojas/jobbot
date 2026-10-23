@@ -1,4 +1,4 @@
-//! What the snapshot must never carry (criterion A9): a whole e-mail address, or the folder of the
+//! What the snapshot must never carry: a whole e-mail address, or the folder of the
 //! Windows user. `claude auth status` reports both, and the messages the preflight writes quote
 //! them; this is the one place that takes them out before anything reaches the page.
 

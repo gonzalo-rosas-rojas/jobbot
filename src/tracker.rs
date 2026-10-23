@@ -815,7 +815,7 @@ impl Tracker {
     }
 
     /// Stored postings that never got an application: discovery scored them below the
-    /// threshold. `rescore` (Task 7) looks at them again when the criteria change.
+    /// threshold. `rescore` looks at them again when the criteria change.
     pub fn jobs_without_application(&self) -> anyhow::Result<Vec<Job>> {
         let conn = self.lock();
         let mut stmt = conn.prepare(&format!(

@@ -3,7 +3,7 @@
 
 use std::fmt;
 
-/// Where an application is in its life. Applications start at `Scored`; the spec's
+/// Where an application is in its life. Applications start at `Scored`; a
 /// "found" state is implicit (a row in `jobs`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum State {

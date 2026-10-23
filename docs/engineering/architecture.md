@@ -57,4 +57,4 @@ code and the integration tests did not change when the modules moved. New code m
 
 `paths`, `answers`, `gate`, the SM-2 scheduler of `prep`, and the types shared by `form` and
 `handoff` are pure or nearly so and move next; the adapters (SQLite, sources, Claude, browser,
-panel) and the use cases follow the layering in the design spec.
+panel) and the use cases are planned to follow, each into a crate at its layer under the same rule.

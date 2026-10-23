@@ -1,6 +1,6 @@
-//! Interview drill (spec section 5, item 10): a question bank, SM-2 scheduling and a progress
+//! Interview drill: a question bank, SM-2 scheduling and a progress
 //! store. The bank is compiled into the binary from two TOML files: `questions.toml` (the
-//! interview seed questions) and `rust_concepts.toml` (the Rust cards every task appends).
+//! interview seed questions) and `rust_concepts.toml` (the Rust concept cards).
 
 pub mod sm2;
 pub mod store;
@@ -105,7 +105,7 @@ mod tests {
         let rust: Vec<&Question> = all.iter().filter(|q| q.topic == "rust").collect();
         assert!(
             rust.len() >= 3,
-            "every task appends 3 cards, found {}",
+            "expected at least 3 Rust cards, found {}",
             rust.len()
         );
         assert!(

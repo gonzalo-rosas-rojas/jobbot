@@ -26,7 +26,7 @@ use crate::today::RECENT_DAYS;
 use crate::tracker::{ApplicationRow, State, TaskRow};
 use crate::window::{in_run_window, load_schedule, next_window_start};
 
-/// Cards shown per board column, and in the queue of things that need Gonza (plan ruling R8).
+/// Cards shown per board column, and in the queue of things that need Gonza.
 pub const COLUMN_CAP: usize = 25;
 pub const QUEUE_CAP: usize = 50;
 /// Applications the company still has to answer or decide on: the page lists every one of them.
@@ -3156,7 +3156,7 @@ mod tests {
     fn the_scheduled_task_is_null_when_nobody_knows_and_exists_false_only_when_windows_said_so() {
         use crate::panel::scheduler::{FixedTask, TaskAnswer};
 
-        // An empty `meta` and no question asked (A15): the engine never ran, and nobody knows
+        // An empty `meta` and no question asked: the engine never ran, and nobody knows
         // about the task. "No data" is `null`, never `exists: false`.
         let (bare, _dir) = panel();
         let controls = serde_json::to_value(build_snapshot(&bare).unwrap().controls).unwrap();
