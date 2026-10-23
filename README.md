@@ -146,4 +146,6 @@ that exits immediately outside the run window, and `scripts/unschedule.ps1` remo
 
 ## License
 
-[MIT](LICENSE).
+[MIT](LICENSE), except the third-party fonts, code and icons listed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), which keep their own licences (the fonts: SIL Open Font License
+1.1, texts in `licenses/fonts/`).

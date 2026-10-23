@@ -4,7 +4,7 @@ Every file here is embedded with `include_bytes!` through the `ASSETS` table in 
 `GET /a/<launch-id>/<name>`, where `<launch-id>` is a random hex value chosen once per start (like the token, but
 it is not a secret: it only makes every start a new cache key, so the replies may say `max-age=31536000, immutable`).
 The page gets the prefix the way it gets the nonce: `__ASSETS__` in `page.html` becomes `/a/<launch-id>`, so a
-stylesheet writes `url("__ASSETS__/inter-400.woff2")` (inside an `@font-face`) and a script `__ASSETS__ + "/inter-400.woff2"` (see `panel-src/README.md`).
+stylesheet writes `url("__ASSETS__/inter-400.woff2")` (inside an `@font-face`) and a script `__ASSETS__ + "/inter-400.woff2"`.
 
 The route is not a file server: the name is compared exactly against the table (no `..`, no sub-paths, no query),
 the MIME type is the one written in the table, never guessed, and anything else is a 404. It sits under the same
@@ -26,4 +26,4 @@ the MIME type is the one written in the table, never guessed, and anything else 
 5. Keep it small: everything here is in the binary and in every `cargo build`. A 24x24 icon is bytes; a subset font
    is tens of KB; anything bigger deserves a reason in the commit message.
 
-The five `.woff2` files are the page's four families (Barlow Condensed 700, Geist Mono 400, Instrument Serif 400 italic, Inter 400 and 600), served as `font/woff2`. They are not edited here: `panel-src/assets/fonts/` is their origin (official repository at a pinned commit, subset with pyftsubset, accepted by `ots`, every sha256 in its `VENDORED.md`) and `node panel-src/tools/assets-sync.mjs` (`syncFonts`, also run by `build.mjs --install`) copies them here after checking each hash. Their rows in `THIRD_PARTY_NOTICES.md` carry the origin, `OFL-1.1` and the sha256 of the copy in this folder; the licence texts are in `panel-src/assets/fonts/licenses/`.
+The five `.woff2` files are the page's four families (Barlow Condensed 700, Geist Mono 400, Instrument Serif 400 italic, Inter 400 and 600), served as `font/woff2`. They are not edited here: they come from the front-end sources, which are not published here (official repository at a pinned commit, subset with pyftsubset, accepted by `ots`), and are copied here only after each sha256 checks out. Their rows in `THIRD_PARTY_NOTICES.md` carry the origin, `OFL-1.1` and the sha256 of the copy in this folder; the licence texts are in `licenses/fonts/` at the repository root.
