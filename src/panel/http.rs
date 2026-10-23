@@ -2676,7 +2676,7 @@ mod tests {
         }
     }
 
-    /// The four families of the page (criterion A4), as `panel-src/tools/assets-sync.mjs` copies them.
+    /// The four families of the page, as `panel-src/tools/assets-sync.mjs` copies them.
     const FONTS: [&str; 5] = [
         "barlow-condensed-700.woff2",
         "geist-mono-400.woff2",
@@ -2726,7 +2726,7 @@ mod tests {
         }
         assert!(
             total <= 120 * 1024,
-            "the five fonts weigh {total} bytes; the ceiling is 120 KB (R8 rule 10)"
+            "the five fonts weigh {total} bytes; the ceiling is 120 KB"
         );
         // And nothing else is a font: the table holds exactly these five besides the mark.
         let fonts_in_table = ASSETS.iter().filter(|(_, mime, _)| *mime == "font/woff2");
@@ -2737,6 +2737,7 @@ mod tests {
     fn every_asset_has_a_row_with_its_hash_in_the_notices_and_no_row_lacks_its_file() {
         // The rule of `assets/README.md`: no row, no asset. The notices file is read at build time,
         // so a new `ASSETS` entry without its line fails here before it reaches a release.
+        use sha2::{Digest, Sha256};
         let notices = include_str!("../../THIRD_PARTY_NOTICES.md");
         let rows: Vec<&str> = notices
             .lines()
@@ -2756,6 +2757,11 @@ mod tests {
             assert!(
                 hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit()),
                 "{name}: {hash:?} is not a sha256"
+            );
+            assert_eq!(
+                hash,
+                format!("{:x}", Sha256::digest(bytes)),
+                "{name}: the sha256 in THIRD_PARTY_NOTICES.md is not the file's"
             );
             assert!(!bytes.is_empty(), "{name} is empty");
         }
@@ -2824,7 +2830,7 @@ mod tests {
         assert_eq!(handle(&p, &guard(), &post).status, 405);
     }
 
-    // ---- what leaves the panel (criterion A9, widened): one filter on every JSON reply
+    // ---- what leaves the panel : one filter on every JSON reply
 
     /// Every string of `value` with the path to it, leaving out the ones under a link field.
     fn leaves(value: &Value, path: &str, out: &mut Vec<(String, String)>) {

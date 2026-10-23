@@ -16,7 +16,7 @@ the MIME type is the one written in the table, never guessed, and anything else 
 2. Add a row to `THIRD_PARTY_NOTICES.md` (repo root) with the origin, the licence (`own` for something drawn here,
    SPDX id or `LicenseRef-...` otherwise), the URL it came from and its sha256 (`sha256sum <file>`; the hash goes last,
    in backticks). No row, no asset: a Rust test (`every_asset_has_a_row_...` in `http.rs`) fails when an `ASSETS` entry
-   has no row, when the row does not name its MIME type or does not end in a 64-digit hash, and when a row for an
+   has no row, when the row does not name its MIME type or does not end in the sha256 of the file, and when a row for an
    image or a font has no entry in the table.
 3. A font (`.woff2`, `.ttf`, `.otf`) goes through `ots-sanitize` first (the same sanitiser the browsers use) and only
    enters if it passes; subset it with `pyftsubset --flavor=woff2` when the whole file is not needed. The page refers
