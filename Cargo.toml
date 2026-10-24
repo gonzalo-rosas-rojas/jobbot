@@ -23,6 +23,8 @@ scraper = "0.27.0"
 serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.21"
 toml = "1.1.6"
+# Unicode TR39 confusable skeletons: an excluded name spelled with look-alike letters still matches.
+unicode-security = "0.1.2"
 url = "2.5.8"
 
 [workspace.lints.rust]

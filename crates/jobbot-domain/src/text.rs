@@ -25,10 +25,49 @@ const BLOCK_TAGS: &[&str] = &[
 /// Tags whose content is code or styling, never visible text.
 const SKIPPED_TAGS: &[&str] = &["script", "style"];
 
-/// Lowercase ASCII words of a company name, without legal suffixes:
-/// `"Harbor Light Shipping & Logistics Center, LLC"` becomes `"harbor light shipping and logistics center"`.
+/// `text` as a person reads it, for matching: without the invisible format characters (a soft
+/// hyphen or a zero-width space inside a word does not split it) and with full-width letters,
+/// digits and spaces as their ASCII forms.
+pub fn as_read(text: &str) -> String {
+    crate::outbound::strip_invisible(text)
+        .chars()
+        .map(|c| match c {
+            '\u{FF01}'..='\u{FF5E}' => char::from_u32(c as u32 - 0xFEE0).unwrap_or(c),
+            '\u{3000}' => ' ',
+            other => other,
+        })
+        .collect()
+}
+
+/// `text` with every non-ASCII letter that looks like a Latin one written as that Latin letter
+/// (Unicode TR39 confusable skeletons: Cyrillic "В", Greek "Β" and mathematical bold "𝐁" all
+/// become "B"), and accents dropped ("é" becomes "e"). ASCII is left as it is, so this folds
+/// letters from other scripts, not ASCII look-alikes such as "1" for "l". For matching only: the
+/// result is not shown or stored.
+pub fn fold_look_alikes(text: &str) -> String {
+    if text.is_ascii() {
+        return text.to_string();
+    }
+    let mut folded = String::with_capacity(text.len());
+    let mut one = [0u8; 4];
+    for c in text.chars() {
+        if c.is_ascii() {
+            folded.push(c);
+        } else {
+            let combining = |c: &char| ('\u{0300}'..='\u{036F}').contains(c);
+            folded.extend(
+                unicode_security::skeleton(c.encode_utf8(&mut one)).filter(|c| !combining(c)),
+            );
+        }
+    }
+    folded
+}
+
+/// Lowercase ASCII words of a company name as a person reads it (`as_read`), without legal
+/// suffixes: `"Harbor Light Shipping & Logistics Center, LLC"` becomes
+/// `"harbor light shipping and logistics center"`.
 pub fn normalize(name: &str) -> String {
-    let lowered = name.to_lowercase().replace('&', " and ");
+    let lowered = as_read(name).to_lowercase().replace('&', " and ");
     let spaced: String = lowered
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { ' ' })
@@ -170,6 +209,29 @@ pub fn contains_word(text: &str, term: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn look_alike_letters_fold_to_latin_and_ascii_stays_as_it_is() {
+        assert_eq!(fold_look_alikes("Tidewater 1 lI"), "Tidewater 1 lI");
+        // Cyrillic "Т", "е" and "Ѕ": they read as Latin and fold to it.
+        assert_eq!(
+            fold_look_alikes("\u{0422}id\u{0435}water \u{0405}ystems"),
+            "Tidewater Systems"
+        );
+        assert_eq!(fold_look_alikes("Soci\u{00E9}t\u{00E9}"), "Societe");
+    }
+
+    #[test]
+    fn normalize_reads_a_name_as_a_person_sees_it() {
+        for written in [
+            "Tide\u{200B}water Systems",
+            "Tide\u{00AD}water Systems",
+            "\u{202B}Tidewater\u{2060} Systems\u{202C}",
+            "\u{FF34}\u{FF49}\u{FF44}\u{FF45}\u{FF57}\u{FF41}\u{FF54}\u{FF45}\u{FF52}\u{3000}Systems",
+        ] {
+            assert_eq!(normalize(written), "tidewater systems", "{written:?}");
+        }
+    }
 
     #[test]
     fn normalize_strips_suffix_and_ampersand() {

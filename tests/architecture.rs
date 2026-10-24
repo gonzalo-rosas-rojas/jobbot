@@ -20,7 +20,7 @@ const LAYERS: [&str; 2] = ["jobbot-domain", "jobbot"];
 const DOMAIN: &str = "jobbot-domain";
 
 /// The only external crates the domain may use (any kind of dependency, dev included).
-const DOMAIN_ALLOWED: [&str; 9] = [
+const DOMAIN_ALLOWED: [&str; 10] = [
     "chrono",
     "chrono-tz",
     "html-escape",
@@ -29,6 +29,8 @@ const DOMAIN_ALLOWED: [&str; 9] = [
     "serde",
     "thiserror",
     "toml",
+    // Pure tables (TR39 confusables): exclusion matching folds look-alike letters.
+    "unicode-security",
     "url",
 ];
 

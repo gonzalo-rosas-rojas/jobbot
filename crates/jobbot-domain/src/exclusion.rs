@@ -3,7 +3,7 @@
 
 use crate::models::Job;
 use crate::rules::Exclusions;
-use crate::text::{contains_word_lc, host_of, normalize};
+use crate::text::{as_read, contains_word_lc, fold_look_alikes, host_of, normalize};
 
 /// Outcome of `check_exclusion`. `reason` looks like `domain:harborlight-shipping.com`,
 /// `name:Tidewater Systems` or `category:freight forwarding`.
@@ -51,10 +51,13 @@ pub fn check_exclusion(job: &Job, rules: &Exclusions) -> ExclusionResult {
         }
     }
 
-    let company = normalize(&job.company);
-    let body = normalize(&format!("{} {}", job.title, job.description));
+    // Both sides are read with look-alike letters folded, so a name or phrase spelled with
+    // Cyrillic or Greek letters that look Latin still matches.
+    let folded = |text: &str| fold_look_alikes(&as_read(text));
+    let company = normalize(&folded(&job.company));
+    let body = normalize(&folded(&format!("{} {}", job.title, job.description)));
     for name in &rules.names {
-        let wanted = normalize(name);
+        let wanted = normalize(&folded(name));
         if !wanted.is_empty()
             && (contains_word_lc(&company, &wanted) || contains_word_lc(&body, &wanted))
         {
@@ -62,9 +65,13 @@ pub fn check_exclusion(job: &Job, rules: &Exclusions) -> ExclusionResult {
         }
     }
 
-    let text = format!("{}\n{}\n{}", job.title, job.company, job.description).to_lowercase();
+    let text = folded(&format!(
+        "{}\n{}\n{}",
+        job.title, job.company, job.description
+    ))
+    .to_lowercase();
     for category in &rules.categories {
-        if contains_word_lc(&text, &category.to_lowercase()) {
+        if contains_word_lc(&text, &folded(category).to_lowercase()) {
             return ExclusionResult::excluded(format!("category:{category}"));
         }
     }
@@ -163,6 +170,24 @@ mod tests {
         assert_eq!(
             result.reason.as_deref(),
             Some("category:remote fleet tracking")
+        );
+    }
+
+    #[test]
+    fn a_name_or_category_spelled_with_look_alike_letters_is_still_excluded() {
+        // "Tidewater Systems" with a Cyrillic "Т", "е" and "Ѕ".
+        let job = make_job_with(|j| j.company = "\u{0422}id\u{0435}water \u{0405}ystems".into());
+        let result = check_exclusion(&job, &RULES);
+        assert_eq!(result.reason.as_deref(), Some("name:Tidewater Systems"));
+        // "freight forwarding" with a Cyrillic "е" and "о", hidden in the description.
+        let job = make_job_with(|j| {
+            j.company = "Acme".into();
+            j.description = "We run fr\u{0435}ight f\u{043E}rwarding for retailers.".into();
+        });
+        let result = check_exclusion(&job, &RULES);
+        assert_eq!(
+            result.reason.as_deref(),
+            Some("category:freight forwarding")
         );
     }
 
