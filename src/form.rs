@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use anyhow::Context;
 use playwright_rs::{
-    BrowserContext, BrowserContextOptions, GotoOptions, Page, Playwright, ScreenshotOptions,
-    SelectOption, SelectOptions, WaitUntil,
+    BrowserContext, GotoOptions, Page, Playwright, ScreenshotOptions, SelectOption, SelectOptions,
+    WaitUntil,
 };
 use regex::Regex;
 use serde::Deserialize;
@@ -1556,12 +1556,11 @@ impl BrowserFiller {
         let playwright = Playwright::launch()
             .await
             .context("starting the Playwright driver")?;
-        let options = BrowserContextOptions::builder().headless(!headed).build();
         let context = playwright
             .chromium()
             .launch_persistent_context_with_options(
                 profile_dir.to_string_lossy().into_owned(),
-                options,
+                crate::launch::persistent_options(headed),
             )
             .await
             .context("launching Chromium with the persistent profile")?;
@@ -3138,7 +3137,11 @@ mod tests {
     impl Session {
         async fn start() -> Session {
             let playwright = Playwright::launch().await.unwrap();
-            let browser = playwright.chromium().launch().await.unwrap();
+            let browser = playwright
+                .chromium()
+                .launch_with_options(crate::launch::launch_options())
+                .await
+                .unwrap();
             let page = browser.new_page().await.unwrap();
             Session {
                 _playwright: playwright,
@@ -3921,7 +3924,11 @@ mod tests {
         use playwright_rs::FulfillOptions;
 
         let playwright = Playwright::launch().await.unwrap();
-        let browser = playwright.chromium().launch().await.unwrap();
+        let browser = playwright
+            .chromium()
+            .launch_with_options(crate::launch::launch_options())
+            .await
+            .unwrap();
         let page = browser.new_page().await.unwrap();
 
         // Nothing in this test may reach the internet. The catch-all route is registered first (so
@@ -4099,7 +4106,11 @@ mod tests {
         use playwright_rs::FulfillOptions;
 
         let playwright = Playwright::launch().await.unwrap();
-        let browser = playwright.chromium().launch().await.unwrap();
+        let browser = playwright
+            .chromium()
+            .launch_with_options(crate::launch::launch_options())
+            .await
+            .unwrap();
         let page = browser.new_page().await.unwrap();
         page.route("**/*", |route| async move {
             if route.request().url().starts_with("http://127.0.0.1") {

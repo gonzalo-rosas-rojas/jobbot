@@ -105,7 +105,11 @@ struct Scanner {
 impl Scanner {
     async fn start() -> Scanner {
         let playwright = Playwright::launch().await.unwrap();
-        let browser = playwright.chromium().launch().await.unwrap();
+        let browser = playwright
+            .chromium()
+            .launch_with_options(crate::launch::launch_options())
+            .await
+            .unwrap();
         let page = browser.new_page().await.unwrap();
         Scanner {
             _playwright: playwright,

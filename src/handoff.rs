@@ -520,7 +520,7 @@ impl BrowserInspector {
             .context("starting the Playwright driver")?;
         let browser = playwright
             .chromium()
-            .launch()
+            .launch_with_options(crate::launch::launch_options())
             .await
             .context("launching Chromium")?;
         Ok(BrowserInspector {

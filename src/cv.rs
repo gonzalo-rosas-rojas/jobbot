@@ -254,10 +254,11 @@ impl Renderer for BrowserRenderer {
         let playwright = Playwright::launch()
             .await
             .context("starting the Playwright driver")?;
-        let browser =
-            playwright.chromium().launch().await.context(
-                "launching Chromium (install it once with playwright_rs::install_browsers)",
-            )?;
+        let browser = playwright
+            .chromium()
+            .launch_with_options(crate::launch::launch_options())
+            .await
+            .context("launching Chromium (install it once with playwright_rs::install_browsers)")?;
         let printed = print_pdf(&browser, &html, out_path).await;
         let _ = browser.close().await;
         printed?;

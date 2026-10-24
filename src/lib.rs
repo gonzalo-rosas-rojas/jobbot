@@ -17,6 +17,7 @@ pub mod freelance;
 pub mod gate;
 pub mod handoff;
 pub mod inbox;
+mod launch;
 pub mod open_check;
 pub mod panel;
 pub mod paths;

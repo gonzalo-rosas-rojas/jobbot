@@ -265,7 +265,13 @@ impl Browse {
         let playwright = Playwright::launch().await.unwrap();
         let browser = playwright
             .chromium()
-            .launch_with_options(LaunchOptions::new().args(args))
+            // Sandboxed like every jobbot browser (Playwright passes --no-sandbox otherwise).
+            .launch_with_options(
+                LaunchOptions::new()
+                    .args(args)
+                    .chromium_sandbox(true)
+                    .timeout(30_000.0),
+            )
             .await
             .unwrap();
         let page = browser.new_page().await.unwrap();
