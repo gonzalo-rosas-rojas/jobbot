@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use anyhow::Context;
 use playwright_rs::{
-    BrowserContext, GotoOptions, Page, Playwright, ScreenshotOptions, SelectOption, SelectOptions,
-    WaitUntil,
+    BrowserContext, ClickOptions, GotoOptions, Page, Playwright, ScreenshotOptions, SelectOption,
+    SelectOptions, WaitUntil,
 };
 use regex::Regex;
 use serde::Deserialize;
@@ -1008,19 +1008,46 @@ async fn pick_option(
             .get_attribute("aria-controls")
             .await?
             .unwrap_or_default();
-        if let Some(index) = settled_match(page, &controls, candidate).await? {
-            let arg = serde_json::json!({ "controls": controls, "index": index });
-            let tagged: bool = page.evaluate(TAG_OPTION_JS, Some(&arg)).await?;
-            if tagged {
-                page.locator(r#"[data-jb-opt="1"]"#).click(None).await?;
-                return Ok(());
-            }
+        if click_match(page, &controls, candidate).await? {
+            return Ok(());
         }
         // Nothing for this candidate: clear what was typed and close the list before the next.
         locator.fill("", None).await?;
         locator.press("Escape", None).await?;
     }
     Err(NoOption::NoMatch.into())
+}
+
+/// How long the click on a chosen option may take, and how many times the option is chosen again.
+/// A list can redraw between being read and being clicked (the late answer to an earlier key
+/// replaces its nodes); the tagged node is then gone and the click would wait for it in vain.
+const OPTION_CLICK_MS: f64 = 2_000.0;
+const OPTION_ATTEMPTS: usize = 3;
+
+/// Clicks the option for `wanted` once the menu settles, choosing it again from the redrawn list
+/// when the click times out. False when the menu has no option for `wanted`.
+async fn click_match(page: &Page, controls: &str, wanted: &str) -> anyhow::Result<bool> {
+    for attempt in 1..=OPTION_ATTEMPTS {
+        let Some(index) = settled_match(page, controls, wanted).await? else {
+            return Ok(false);
+        };
+        let arg = serde_json::json!({ "controls": controls, "index": index });
+        let tagged: bool = page.evaluate(TAG_OPTION_JS, Some(&arg)).await?;
+        if !tagged {
+            continue;
+        }
+        let click = ClickOptions::builder().timeout(OPTION_CLICK_MS).build();
+        match page
+            .locator(r#"[data-jb-opt="1"]"#)
+            .click(Some(click))
+            .await
+        {
+            Ok(()) => return Ok(true),
+            Err(playwright_rs::Error::Timeout(_)) if attempt < OPTION_ATTEMPTS => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(false)
 }
 
 /// Waits for the menu to settle (an exact match ends the wait at once) and returns the index of
@@ -4333,6 +4360,36 @@ mod tests {
         // go on changing: an empty list is not "no options".
         apply_action(&session.page, grad[0]).await.unwrap();
         assert_eq!(dropdown_value(&session, "grad").await, "Slow University");
+        session.stop().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs chromium"]
+    async fn a_list_redrawn_between_choosing_and_clicking_is_read_again() {
+        let session = Session::start().await;
+        session
+            .page
+            .goto(&dropdowns_url("redraw"), None)
+            .await
+            .unwrap();
+        let fields = scan_fields(&session.page).await.unwrap();
+        let plan = plan_fields(&fields, &dropdowns_bank(), &session.cv());
+        let grad: Vec<&FillAction> = plan
+            .actions
+            .iter()
+            .filter(|action| action.label.starts_with("Graduate school"))
+            .collect();
+        assert_eq!(grad.len(), 1, "{:?}", plan.actions);
+        // The option chosen is replaced by an identical one just before the click lands: the
+        // filler looks it up again instead of waiting for a node that is gone.
+        let started = std::time::Instant::now();
+        apply_action(&session.page, grad[0]).await.unwrap();
+        assert_eq!(dropdown_value(&session, "grad").await, "Slow University");
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "took {:?}",
+            started.elapsed()
+        );
         session.stop().await;
     }
 

@@ -50,6 +50,11 @@
     // A typeahead that answers 1.5 s after the last key: longer than the settle time of a list.
     slow: [
       { id: 'grad', label: 'Graduate school', typeahead: ['Other', 'Slow University'], delay: 1500 }
+    ],
+    // A typeahead that redraws its list once (new nodes, same options) when the pointer first
+    // reaches an option: the late answer to an earlier key that lands between choosing and clicking.
+    redraw: [
+      { id: 'grad', label: 'Graduate school', typeahead: ['Other', 'Slow University'], redrawOnHover: true }
     ]
   };
   var dropdowns = sets[new URLSearchParams(location.search).get('set') || 'base'];
@@ -75,6 +80,7 @@
     var shell = wrap.querySelector('.select-shell');
     var listId = 'react-select-' + def.id + '-listbox';
     var pool = def.options || def.typeahead;
+    var redrawn = false;
 
     function closeMenu() {
       var menu = shell.querySelector('.select__menu');
@@ -113,6 +119,9 @@
         option.setAttribute('role', 'option');
         option.textContent = text;
         option.addEventListener('click', function () { choose(text); });
+        option.addEventListener('mouseover', function () {
+          if (def.redrawOnHover && !redrawn) { redrawn = true; render(); }
+        });
         list.appendChild(option);
       });
       if (!shown.length) {
