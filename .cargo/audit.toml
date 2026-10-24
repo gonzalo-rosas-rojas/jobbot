@@ -3,10 +3,4 @@
 ignore = [
     # ttf-parser unmaintained; dev-only via pdf-extract -> lopdf, not in the binary. See deny.toml.
     "RUSTSEC-2026-0192",
-    # zip 8.6, build-dependency of playwright-rs 0.19.0 only: its build script copies node.exe out of
-    # the Node.js zip with by_index/read_to_end and never calls the extract() APIs these advisories
-    # concern. The fix needs zip 9, which the pinned playwright-rs cannot take. See deny.toml.
-    "RUSTSEC-2026-0367",
-    "RUSTSEC-2026-0368",
-    "RUSTSEC-2026-0369",
 ]

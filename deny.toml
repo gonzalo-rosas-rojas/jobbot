@@ -9,16 +9,8 @@ ignore = [
     # pdf-extract -> lopdf, a dev-dependency used by the tests to read the CV PDFs the program
     # itself renders; it is not part of the shipped binary. Revisit when pdf-extract moves.
     { id = "RUSTSEC-2026-0192", reason = "dev-only (pdf-extract via lopdf), not in the binary; no safe upgrade exists" },
-    # zip 8.6 enters only as a build-dependency of playwright-rs 0.19.0. When building on Windows,
-    # its build script copies two named entries (node.exe and LICENSE) out of the Node.js zip it
-    # downloads from nodejs.org, reading each with `by_index` + `read_to_end` and writing it to a
-    # fixed path. The three advisories concern `ZipArchive::extract()` and
-    # `ZipStreamReader::extract()` (symlinks, SUID/SGID bits), which playwright-rs never calls, and
-    # zip is not in the binary. The fix is zip 9, which playwright-rs 0.19.0 (pinned with `=`)
-    # cannot take. Revisit when the pin moves.
-    { id = "RUSTSEC-2026-0367", reason = "build-only (playwright-rs build script), which never calls the extract() APIs the advisory concerns; fix needs zip 9, blocked by the pinned playwright-rs" },
-    { id = "RUSTSEC-2026-0368", reason = "build-only (playwright-rs build script), which never calls the extract() APIs the advisory concerns; fix needs zip 9, blocked by the pinned playwright-rs" },
-    { id = "RUSTSEC-2026-0369", reason = "build-only (playwright-rs build script), which never calls the extract() APIs the advisory concerns; fix needs zip 9, blocked by the pinned playwright-rs" },
+    # (The three zip 8 advisories ignored here before are gone: playwright-rs 0.20.1 builds with
+    # zip 9.)
 ]
 
 [licenses]
