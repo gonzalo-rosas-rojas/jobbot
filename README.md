@@ -1,12 +1,12 @@
 # jobbot
 
-[![CI](https://github.com/GonzaloRosas/jobbot/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/GonzaloRosas/jobbot/actions/workflows/ci.yml)
+[![CI](https://github.com/gonzalo-rosas-rojas/jobbot/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gonzalo-rosas-rojas/jobbot/actions/workflows/ci.yml)
 
-**Walkthrough:** [The Night Shift](https://gonzalorosas.github.io/jobbot-showcase/), a scroll-driven story of one
+**Walkthrough:** [The Night Shift](https://gonzalo-rosas-rojas.github.io/jobbot-showcase/), a scroll-driven story of one
 night of jobbot (18:00 to 09:00) on fictional data, ending in a live demo of its panel (an earlier build, in
-Spanish). Source: [jobbot-showcase](https://github.com/GonzaloRosas/jobbot-showcase).
+Spanish). Source: [jobbot-showcase](https://github.com/gonzalo-rosas-rojas/jobbot-showcase).
 
-[![The Night Shift, scrolling from the hero to the panel, the five layers and the dawn](https://raw.githubusercontent.com/GonzaloRosas/jobbot-showcase/main/docs/hero.gif)](https://gonzalorosas.github.io/jobbot-showcase/)
+[![The Night Shift, scrolling from the hero to the panel, the five layers and the dawn](https://raw.githubusercontent.com/gonzalo-rosas-rojas/jobbot-showcase/main/docs/hero.gif)](https://gonzalo-rosas-rojas.github.io/jobbot-showcase/)
 
 A local job-search assistant written in Rust. It finds postings from public sources, drops the ones you
 must not apply to, scores the rest, tailors your CV, fills application forms in a real browser, and keeps
