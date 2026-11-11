@@ -155,7 +155,8 @@ The panel has more than 850 tests that need no browser and about 440 that drive 
 CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs formatting, clippy and the tests
 on Windows (Linux as information), the panel checks on Linux, and `cargo deny` and `cargo audit` on
 every push and pull request and again every Monday. The Chromium tests run on Windows by hand and
-every Monday. Dependabot opens a weekly pull request for GitHub Actions, Cargo and npm updates.
+every Monday. Dependabot alerts are on, and a vulnerable crate, package or action gets a pull
+request; routine version updates are made in the development tree and arrive with the next release.
 
 Contributions: see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 

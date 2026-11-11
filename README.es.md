@@ -164,8 +164,9 @@ panel tiene más de 850 pruebas que no necesitan navegador y unas 440 que maneja
 La integración continua ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) corre formato,
 clippy y las pruebas en Windows (Linux a modo informativo), las comprobaciones del panel en Linux, y
 `cargo deny` y `cargo audit` en cada push y pull request y otra vez cada lunes. Las pruebas con
-Chromium corren en Windows a mano y cada lunes. Dependabot abre cada semana un pull request con las
-actualizaciones de GitHub Actions, Cargo y npm.
+Chromium corren en Windows a mano y cada lunes. Las alertas de Dependabot están activas y una
+dependencia vulnerable recibe su pull request; las actualizaciones de rutina se hacen en el árbol de
+desarrollo y llegan con la siguiente versión.
 
 Para contribuir: [`CONTRIBUTING.md`](CONTRIBUTING.md).
 

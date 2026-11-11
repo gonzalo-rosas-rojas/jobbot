@@ -1,23 +1,28 @@
 version: 2
 
-# A weekly look at everything the project pulls in. The actions are pinned by commit and the
-# crates and packages by exact version, so these updates arrive as pull requests to read, never
-# as a silent change.
+# This repository is a published copy: dependencies are updated in the development tree, where
+# the whole test suite and the release-age quarantine of the panel's packages run, and arrive
+# here with the next release. So routine version updates open no pull requests here
+# (`open-pull-requests-limit: 0`). Security updates are not affected by that limit: Dependabot
+# alerts are on, and a vulnerable crate, package or action still gets its pull request.
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
       day: monday
+    open-pull-requests-limit: 0
 
   - package-ecosystem: cargo
     directory: /
     schedule:
       interval: weekly
       day: monday
+    open-pull-requests-limit: 0
 
   - package-ecosystem: npm
     directory: /panel-src
     schedule:
       interval: weekly
       day: monday
+    open-pull-requests-limit: 0
