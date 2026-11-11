@@ -13,7 +13,7 @@
   "dependencies": {
     "@leeoniya/ufuzzy": "1.0.19",
     "esbuild": "0.28.2",
-    "lenis": "1.3.26",
+    "lenis": "1.3.27",
     "tinykeys": "4.0.1"
   },
   "devDependencies": {
