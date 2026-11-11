@@ -18,7 +18,7 @@ ignore = [
 [licenses]
 version = 2
 confidence-threshold = 0.9
-# jobbot itself has no license yet (the choice is the owner's); it is not published to a registry.
+# jobbot's own crates are MIT (LICENSE) and are not published to a registry, so they are not checked here.
 private = { ignore = true }
 allow = [
     "MIT",
