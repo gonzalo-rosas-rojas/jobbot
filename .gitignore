@@ -1,9 +1,20 @@
 /target
-# Runtime state: the SQLite database, logs, screenshots, dossiers, drafts.
 /data
-# The kill switch file created by `jobbot stop`.
 STOP
-.env
 # Personal values that must not reach a repository that may be published (see profile/claude.toml).
 profile/*.local.toml
+# The strings the demo must never contain (names, mails, companies); test/demo.contract.test.mjs (A12) reads them if the file exists.
+scripts/demo/*.local.txt
 .playwright-mcp/
+.superpowers/
+docs/research/**/shots/
+docs/research/**/*.png
+docs/research/**/*.jpg
+docs/demo/img/legacy-estacion/
+panel-src/node_modules/
+panel-src/dist/
+panel-src/.spike/
+panel-src/.vendor-src/
+# cargo mutants output (docs/engineering/mutation-testing.md).
+mutants.out/
+mutants.out.old/

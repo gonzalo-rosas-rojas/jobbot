@@ -25,12 +25,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use chrono::TimeDelta;
-use jobbot::panel::Panel;
 use jobbot::panel::server::PanelServer;
 use jobbot::paths::Paths;
 use jobbot::prep::PrepStore;
-use jobbot::testing::{NOW, make_job_with};
 use jobbot::tracker::{ApplicationRow, EmailKind, NewEmail, NewTask, State, Tracker};
+use jobbot_testkit::{NOW, make_job_with};
 use playwright_rs::protocol::{KeyboardOptions, Viewport};
 use playwright_rs::{Browser, LaunchOptions, Page, Playwright};
 
@@ -82,12 +81,12 @@ impl Env {
         let paths = Paths::new(dir.path());
         if profile {
             std::fs::create_dir_all(&paths.profile_dir).unwrap();
-            let shipped = jobbot::testing::real_paths().profile_dir;
+            let shipped = jobbot_testkit::real_paths().profile_dir;
             for file in ["criteria.toml", "schedule.toml"] {
                 std::fs::copy(shipped.join(file), paths.profile_dir.join(file)).unwrap();
             }
         }
-        let panel = Panel::open(paths.clone(), Box::new(|| *NOW)).unwrap();
+        let panel = jobbot::panel::open(paths.clone(), Box::new(|| *NOW)).unwrap();
         if seed {
             let t = &panel.tracker;
             let add = |id: &str, title: &str, states: &[State]| {
@@ -263,9 +262,10 @@ impl Browse {
         // The page has a sound engine; a test browser must never play it through the real speakers.
         args.push("--mute-audio".to_string());
         let playwright = Playwright::launch().await.unwrap();
+        // The same launch as jobbot-browser's launch.rs: the sandbox asked for (Playwright passes --no-sandbox otherwise)
+        // and 30 s for the launch instead of Playwright's three minutes.
         let browser = playwright
             .chromium()
-            // Sandboxed like every jobbot browser (Playwright passes --no-sandbox otherwise).
             .launch_with_options(
                 LaunchOptions::new()
                     .args(args)
@@ -431,6 +431,16 @@ impl Browse {
         self.click(selector).await;
         tokio::time::sleep(ARM_PAUSE).await;
         self.click(selector).await;
+    }
+
+    /// Records an answer in the drawer the way he does (ui/detail/mark.js): the pick only asks, and after the
+    /// pause that tells a double click from a decision, "Sí, registrarlo" does it.
+    async fn answer(&self, mark: &str) {
+        self.click(&format!("#detail [data-mark=\"{mark}\"]")).await;
+        self.wait("document.getElementById('mark-yes') !== null")
+            .await;
+        tokio::time::sleep(ARM_PAUSE).await;
+        self.click("#mark-yes").await;
     }
 
     /// A key as the page sees it from the keyboard: it goes to whatever has the focus.
@@ -964,7 +974,8 @@ async fn hoy_says_what_waits_and_hostile_text_stays_text() {
     // Six things are his: the four tasks, the proposal to approve and the form that needs him.
     // The headline speaks with one voice: one run of text, the spelled-out number inside it.
     assert_eq!(b.text_of("#hoy-title").await, "Te tocan seis.");
-    assert_eq!(b.text_of(".ask").await, "1 espera tu aprobación");
+    // The gold count beside the headline only shows on a calm day: on a busy one the "awaiting" figure says it.
+    assert_eq!(b.text_of(".ask").await, "");
     for (fig, n) in [
         ("read", "3"),
         ("above", "3"),
@@ -1189,7 +1200,7 @@ async fn a_card_is_put_aside_from_the_keyboard_and_comes_back_from_the_fold() {
     // It waits in the fold under the list, and one press brings it back.
     b.wait("!document.querySelector('details.snoozed').hidden")
         .await;
-    assert_eq!(b.text_of(".snoozed-title").await.trim(), "Pospuestas · 1");
+    assert_eq!(b.text_of(".snoozed-title").await.trim(), "Pospuestas (1)");
     b.click(".snoozed-title").await;
     b.click("[data-unsnooze=\"test:2\"]").await;
     b.wait("document.querySelector('[data-card=\"test:2\"]') !== null")
@@ -1968,7 +1979,7 @@ async fn a_refused_mark_keeps_the_typed_note() {
     env.tracker()
         .transition("test:3", State::Replied, None, *NOW)
         .unwrap();
-    b.click("#detail [data-mark=\"replied\"]").await;
+    b.answer("replied").await;
     b.wait("document.getElementById('toast').textContent.includes('No se pudo marcar')")
         .await;
     // The drawer is read again and now offers the moves from replied; the note is still in the box, and
@@ -1995,12 +2006,34 @@ async fn the_drawer_records_an_answer_with_its_note() {
         .await;
     b.eval("(() => { const n = document.getElementById('mark-note'); n.value = 'martes 19:00'; n.dispatchEvent(new Event('input')); return 'ok'; })()")
         .await;
+    let before = env.app("test:3");
+    // A pick only asks: nothing reaches the server until the yes.
     b.click("#detail [data-mark=\"replied\"]").await;
-    b.wait("document.querySelector('#detail [data-mark=\"replied\"]') === null")
+    b.wait("document.getElementById('mark-yes') !== null").await;
+    assert_eq!(
+        env.app("test:3").state,
+        before.state,
+        "a pick changed the state"
+    );
+    b.click("#mark-no").await;
+    b.answer("replied").await;
+    // The section turns into a receipt, with the server's way back (POST /api/mark/undo, `undo` on the card).
+    b.wait("document.getElementById('mark-done') !== null && document.getElementById('mark-undo') !== null")
         .await;
     let app = env.app("test:3");
     assert_eq!(app.state, State::Replied);
     assert_eq!(app.note.as_deref(), Some("martes 19:00"));
+    // Deshacer puts the row back as it was, note included; then he records it again.
+    b.click("#mark-undo").await;
+    b.wait("document.querySelector('#detail [data-mark=\"replied\"]') !== null")
+        .await;
+    let undone = env.app("test:3");
+    assert_eq!(undone.state, before.state);
+    assert_eq!(undone.note, before.note);
+    b.answer("replied").await;
+    b.wait("document.getElementById('mark-done') !== null")
+        .await;
+    assert_eq!(env.app("test:3").state, State::Replied);
     // PROCESOS knows it too once the drawer is closed.
     b.key("Escape").await;
     b.wait("!document.getElementById('detail').classList.contains('open')")

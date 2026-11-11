@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Apply - submit click (test fixture)</title>
+<style>
+  #cover { position: fixed; inset: 0; background: rgba(255, 255, 255, 0.01); z-index: 10; }
+</style>
+</head>
+<body>
+<!-- Nothing here is sent anywhere. A full-page layer sits over the Submit button once the form is
+     filled, so the click on it can never land: it waits for the button until its own deadline and
+     then fails. With `?confirm` the page shows a thank-you text a moment after the load, as a
+     board does when the form went out although the click call reported an error. -->
+<h1>Apply for Senior AI Engineer</h1>
+<form id="app" onsubmit="return false">
+  <div><label for="first_name">First name *</label> <input id="first_name" name="first_name" type="text" required></div>
+  <div><label for="resume">Resume/CV *</label> <input id="resume" name="resume" type="file" required></div>
+  <button type="submit" id="send">Submit application</button>
+</form>
+<div id="cover"></div>
+<div id="result"></div>
+<script>
+  if (location.search.includes('confirm')) {
+    setTimeout(() => {
+      document.getElementById('result').textContent = 'Thank you for applying';
+    }, 2500);
+  }
+</script>
+</body>
+</html>

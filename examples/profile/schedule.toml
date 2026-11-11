@@ -1,0 +1,21 @@
+# The user's busy hours. Nothing automatic runs while any block below covers the current moment, so edit this
+# file if your working hours change.
+#
+# zone:  IANA time zone name. Each block follows that zone's own daylight saving time.
+# start: local time in that zone, "HH:MM", inclusive.
+# end:   local time in that zone, "HH:MM", exclusive (must be after start).
+# days:  weekdays the block applies to, by the local weekday of that zone (mon..sun).
+#
+# The run window is everything that no block covers: evenings, nights and weekends.
+
+[[busy]]
+zone = "America/New_York"
+start = "09:00"
+end = "17:00"
+days = ["mon", "tue", "wed", "thu", "fri"]
+
+[[busy]]
+zone = "America/Santiago"
+start = "09:00"
+end = "17:00"
+days = ["mon", "tue", "wed", "thu", "fri"]

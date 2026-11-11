@@ -3,8 +3,8 @@
 
 use std::fmt;
 
-/// Where an application is in its life. Applications start at `Scored`; a
-/// "found" state is implicit (a row in `jobs`).
+/// Where an application is in its life. Applications start at `Scored`; a posting that was only
+/// found has no state of its own: it is a row in `jobs`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum State {
     Scored,

@@ -1,0 +1,47 @@
+# Performance budgets. Written by `cargo bench --bench budgets -- --baseline`;
+# p50_ms and p95_ms are that run's, in milliseconds. A later run fails when a p50 is more
+# than `tolerance` over its baseline or a p95 is over its `max_p95_ms` ceiling.
+tolerance = 0.1
+
+[bench."domain/score_job"]
+p50_ms = 0.473
+p95_ms = 0.841
+
+[bench."domain/check_exclusion"]
+p50_ms = 0.067
+p95_ms = 0.121
+
+[bench."domain/html_to_text"]
+p50_ms = 0.029
+p95_ms = 0.049
+
+[bench."domain/state_moves_10x"]
+p50_ms = 0.040
+p95_ms = 0.046
+
+[bench."store/top_scored_10x"]
+p50_ms = 1.182
+p95_ms = 1.456
+
+[bench."store/list_by_state_10x"]
+p50_ms = 19.161
+p95_ms = 21.739
+
+[bench."store/counts_10x"]
+p50_ms = 0.160
+p95_ms = 0.178
+
+[bench."snapshot/build_10x"]
+p50_ms = 34.914
+p95_ms = 38.819
+max_p95_ms = 50.0
+
+[bench."snapshot/body_1x"]
+p50_ms = 8.875
+p95_ms = 10.064
+max_p95_ms = 100.0
+
+[bench."privacy/redact_json_1x"]
+p50_ms = 0.374
+p95_ms = 0.498
+max_p95_ms = 5.0

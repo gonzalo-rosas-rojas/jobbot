@@ -1,0 +1,28 @@
+[package]
+name = "jobbot-panel"
+description = "jobbot's local panel: the page, its HTTP guards and routes, the snapshot it draws from and the read-only look at the scheduled task, over the application's ports."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+jobbot-app = { path = "../jobbot-app" }
+jobbot-domain = { path = "../jobbot-domain" }
+anyhow.workspace = true
+chrono = { workspace = true, features = ["serde"] }
+chrono-tz.workspace = true
+getrandom.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tiny_http = "0.12.0"
+tracing.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+jobbot-testkit = { path = "../jobbot-testkit" }
+tempfile.workspace = true
+
+[lints]
+workspace = true

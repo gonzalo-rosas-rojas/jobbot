@@ -1,0 +1,48 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>egress probe</title>
+<body>
+<!--
+  A hostile page in miniature: every way a page can make the browser reach this machine, aimed at
+  the listeners the test names (?port=N for 127.0.0.1 and localhost, &port6=M for [::1]), plus the
+  cloud metadata address, then a top-level navigation. The egress tests count what arrives.
+-->
+<script>
+  const params = new URLSearchParams(location.search);
+  const port = params.get("port");
+  const port6 = params.get("port6");
+  const hosts = [`127.0.0.1:${port}`, `localhost:${port}`];
+  if (port6) hosts.push(`[::1]:${port6}`);
+  const quiet = (promise) => promise.catch(() => {});
+
+  hosts.forEach((host, i) => {
+    quiet(fetch(`http://${host}/fetch`, { mode: "no-cors" }));
+    quiet(fetch(`https://${host}/fetch-tls`, { mode: "no-cors" }));
+    new Image().src = `http://${host}/img.png`;
+    const frame = document.createElement("iframe");
+    frame.src = `http://${host}/frame`;
+    document.body.append(frame);
+    navigator.sendBeacon(`http://${host}/beacon`, "x");
+    try {
+      const socket = new WebSocket(`ws://${host}/ws`);
+      socket.onerror = () => {};
+    } catch (e) {}
+    const sink = document.createElement("iframe");
+    sink.name = `sink-${i}`;
+    document.body.append(sink);
+    const form = document.createElement("form");
+    form.method = "post";
+    form.action = `http://${host}/form`;
+    form.target = sink.name;
+    const field = document.createElement("input");
+    field.name = "q";
+    field.value = "x";
+    form.append(field);
+    document.body.append(form);
+    form.submit();
+  });
+  quiet(fetch("http://169.254.169.254/latest/meta-data", { mode: "no-cors" }));
+  window.open(`http://127.0.0.1:${port}/popup`);
+  setTimeout(() => { location = `http://127.0.0.1:${port}/navigate`; }, 1500);
+</script>
+</body>

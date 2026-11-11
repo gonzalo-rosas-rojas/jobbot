@@ -1,0 +1,12 @@
+# Freelance drafts. The program only writes drafts under data/freelance/; it never sends anything to a platform.
+
+# The platforms you will use, in lowercase (for example ["upwork", "fiverr"]).
+# Empty until you decide: the freelance commands refuse to draft.
+platforms = []
+
+# Lowest hourly rate (USD) a draft may state. 0 until you decide; the commands refuse while it is 0.
+min_hourly_usd = 0.0
+
+# Employers, clients or products that must never appear in a freelance draft, for example the ones under an
+# NDA. A CV entry that mentions one of these is not even sent to Claude, and a draft that mentions one is rejected.
+never_name = []

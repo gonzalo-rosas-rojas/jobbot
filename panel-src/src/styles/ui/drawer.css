@@ -1,0 +1,28 @@
+/* The drawer container (spec §3.6, §6.3): one application opens right of the sheet, at the same height, as the second glass surface of the
+   frame (at most two are on screen, §3.10). It takes its colours from the sheet's tokens, so Papel changes it as it changes the sheet,
+   and it never takes width from the sheet: it starts 22 px after the sheet's right edge (--gutter + --sheet + 22px, --drawer wide). Closed
+   it is invisible and inert, so nothing in it can take the focus.
+   --solid is the colour of the two bands that stick while the drawer scrolls (the bar and the actions row): a glass cannot stick, what
+   scrolls under it would show through. So the drawer's glass is the sheet's, denser (--glass, 88 % of --solid), and the bands run to the
+   edges of the drawer: they read as bands of the same material, not as boxes laid on it. Papel's sheet is paper, solid already.
+   A window with no room beside the sheet (a laptop, under about 1480 px) lets the drawer cover the right edge of the sheet instead of
+   leaving the window; it is then solid, so the list under it does not show through. Under 760 px (the flat page, §3.11) it covers the
+   page, under the toast (z 40) so that an error still shows. */
+.detail { --solid: var(--night-1); --glass: color-mix(in srgb, var(--solid) 88%, transparent); --bar: 52px; --pad: 24px; position: absolute; z-index: 20; top: calc(var(--hud) + 22px); bottom: 26px;
+  width: var(--drawer); max-width: calc(100% - 2 * var(--gutter)); left: min(calc(var(--gutter) + var(--sheet) + 22px), calc(100% - var(--drawer) - var(--gutter)));
+  padding: 0 var(--pad) 24px; overflow-y: auto; overscroll-behavior: contain; color: var(--ink); background: var(--glass); -webkit-backdrop-filter: var(--sheet-filter); backdrop-filter: var(--sheet-filter);
+  outline: none; opacity: 0; visibility: hidden; transform: translateX(16px); transition: opacity 220ms var(--ease), transform 220ms var(--ease), visibility 0s 220ms; }
+:root[data-theme="light"] .detail { --solid: var(--paper); --glass: var(--sheet-bg); }
+.detail.open { opacity: 1; visibility: visible; transform: none; transition-delay: 0s; }
+.detail-bar { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: flex-end; gap: 12px; height: var(--bar); margin: 0 calc(-1 * var(--pad)) 14px; padding: 8px var(--pad);
+  background: var(--solid); border-bottom: 1px solid var(--line); }
+.detail-bar .seq { display: inline-flex; align-items: center; gap: 4px; margin-right: auto; }
+.detail-bar .seq .num { min-width: 7ch; text-align: center; }
+.detail-body { min-width: 0; }
+@media (max-width: 1480px) {
+  .detail { background: var(--solid); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+@media (max-width: 759px) {
+  .detail { --bar: 61px; --pad: 16px; position: fixed; z-index: 30; inset: 0; width: auto; max-width: none; padding-bottom: 24px; background: var(--solid); }
+  .detail-bar { margin-bottom: 12px; }
+}

@@ -1,0 +1,278 @@
+/* PROCESOS, the stable place (spec §5.2, §6.3; board/relay2/procesos-1920.png): the field of piles by stage, the table, and the page of one
+   application in the drawer (.pd). Everything is under .procesos or .pd, so a generic name such as `.cell` or `.act` never leaks from one
+   moment into another. Text is --ink, --ink-dim and --ink-accent (Papel swaps them with the sheet, §2.2); never --text-faint, never opacity on
+   a text (A18: every text keeps 4.5:1). No hex colour and no font size outside the closed scale of tokens.css: sizes are var(--fs-N).
+   Hairlines, never boxes: a pile is five bars, a name and an age on the sheet itself. Text that comes from outside wraps or is cut at the edge
+   of its box and never pushes the sheet wider. */
+
+/* ---------------------------------------------------------------- the page: head, list, foot */
+.procesos { --cols: 6; --cell-h: 30px; --row-h: 38px; --gap: clamp(8px, 1.3vh, 16px); flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: var(--gap); color: var(--ink); }
+.procesos .head { flex: none; display: grid; gap: 6px; }
+.procesos .head-line { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 24px; }
+.procesos .eyebrow { color: var(--ink-dim); outline: none; }
+.procesos .runline { color: var(--ink-dim); text-align: right; }
+.procesos .runline[data-stale="true"] { color: var(--ink-alert); }   /* old data is a thing that is wrong, not a thing that is his to do: not gold */
+.procesos .head-main { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 8px 32px; }
+.procesos .big { display: flex; align-items: flex-end; gap: 18px; min-width: 0; flex: 1 1 360px; }
+.procesos .mega { font-size: var(--fs-6); line-height: 0.9; letter-spacing: -0.012em; color: var(--ink); }
+.procesos .pieces { color: var(--ink-dim); max-width: 58ch; padding-bottom: 6px; line-height: 1.7; }
+.procesos .pieces .gold { font-weight: 600; }
+
+.procesos .controls { display: grid; gap: 6px; justify-items: end; color: var(--ink-dim); }
+.procesos .crow-wrap { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px 14px; }
+.procesos .crow { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 14px; }
+.procesos .lab { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-dim); }
+.procesos .chip { display: inline-flex; align-items: center; gap: 6px; min-height: 24px; padding: 0 0 2px; color: var(--ink-dim); text-transform: inherit; letter-spacing: inherit; border-bottom: 1px solid transparent; white-space: nowrap; }
+.procesos .chip:hover { color: var(--ink); }
+.procesos .chip[aria-pressed="true"] { color: var(--ink); font-weight: 600; border-bottom-color: var(--ink); }
+.procesos .chip .k { color: var(--ink-dim); }
+.procesos .mode { gap: 8px; }
+.procesos .find { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-dim); }
+.procesos .find-input { width: 19ch; min-height: 24px; padding: 0 2px 2px; color: var(--ink); background: none; border: 0; border-bottom: 1px solid var(--line-strong); border-radius: 0; font-family: inherit; font-size: inherit; letter-spacing: 0; }
+.procesos .find-input::placeholder { color: var(--ink-dim); opacity: 1; }
+.procesos .find-input:focus { border-bottom-color: var(--ink-accent); }
+/* The mark is the underline turning to the accent, 2 px (the border and an inset line, no layout shift). The global ring's dark band must not
+   frame the field (on the paper of Papel it was a black box), and the transparent outline is what Windows high contrast repaints. */
+.procesos .find-input:focus-visible { outline: 2px solid transparent; outline-offset: -2px; box-shadow: inset 0 -1px 0 var(--ink-accent); }
+.procesos .find:focus-within .lab { color: var(--ink); }
+
+.procesos .viewbox { position: relative; flex: 1 1 0; min-height: 0; }
+.procesos .scroller { position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
+.procesos .scroller::-webkit-scrollbar { display: none; }
+.procesos .field { display: flex; flex-direction: column; gap: clamp(6px, 1.2vh, 14px); }
+
+/* What is above and below fades out of the list (a mask, not a veil: the sheet is glass, so a veil would let the text under it show through,
+   and a row cut in half at the edge would be a stray stripe), and the cue sits on the clear edge at the bottom. */
+.procesos .scroll-cue { position: absolute; left: 0; right: 0; bottom: 0; height: 22px; display: none; align-items: flex-end; pointer-events: none; color: var(--ink-dim); }
+.procesos .viewbox[data-can-scroll="true"][data-at-end="false"] .scroll-cue { display: flex; }
+/* The three lengths of the fade are the scroller's own and nothing below it reads them, so they are registered NOT to inherit: a custom property
+   that inherits restyles every element under the one that changes it (the ~1,000 of the piles: 16 ms at CPU x4 each time the cue appeared or the list
+   reached an end, in the frame right after a trip's swap, ACEPTACION A7). */
+@property --ft { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@property --fb-a { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@property --fb-b { syntax: "<length>"; inherits: false; initial-value: 0px; }
+.procesos .viewbox[data-can-scroll="true"] .scroller {
+  --ft: 0px; --fb-a: 0px; --fb-b: 0px;
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, var(--ink) var(--ft), var(--ink) calc(100% - var(--fb-a)), transparent calc(100% - var(--fb-b)));
+  mask-image: linear-gradient(180deg, transparent 0, var(--ink) var(--ft), var(--ink) calc(100% - var(--fb-a)), transparent calc(100% - var(--fb-b)));
+}
+.procesos .viewbox[data-can-scroll="true"][data-at-start="false"] .scroller { --ft: 22px; }
+.procesos .viewbox[data-can-scroll="true"][data-at-end="false"] .scroller { --fb-a: 64px; --fb-b: 24px; }
+.procesos .track { display: none; position: absolute; right: -16px; top: 0; bottom: 0; width: 2px; background: var(--line); }
+.procesos .viewbox[data-can-scroll="true"] .track { display: block; }
+.procesos .thumb { position: absolute; left: -1px; width: 4px; min-height: 6px; background: var(--ink-dim); }
+
+.procesos .foot { flex: none; min-height: calc(var(--fs-1) * 3.4); }
+.procesos .legend { color: var(--ink-dim); line-height: 1.7; }
+.procesos .legend kbd { margin: 0 1px; }
+.procesos .legend .you-mark { font-weight: 600; }
+.procesos .armed { line-height: 1.7; font-weight: 600; }
+
+/* ---------------------------------------------------------------- the field: one lane per stage */
+.procesos .lane { display: flex; flex-direction: column; gap: 4px; flex: none; }
+.procesos .lane-h { display: flex; align-items: baseline; gap: 10px; padding-bottom: 4px; border-bottom: 1px solid var(--line); color: var(--ink-dim); font-weight: 500; }
+.procesos .lane-name { color: var(--ink-dim); }
+.procesos .lane-n { color: var(--ink); font-weight: 600; }
+.procesos .lane-you { font-weight: 600; }
+.procesos .lane-note { margin-left: auto; min-width: 0; text-align: right; letter-spacing: 0; color: var(--ink-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.procesos .lane[data-quiet="true"] .lane-name, .procesos .lane[data-quiet="true"] .lane-n { color: var(--ink-dim); }
+.procesos .cells { display: grid; grid-template-columns: repeat(var(--cols), minmax(0, 1fr)); gap: 2px 8px; }
+.procesos .slot { display: block; min-width: 0; }
+.procesos .slot[data-travel] { position: relative; z-index: 2; }
+
+.procesos .cell { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; column-gap: 7px; align-items: center; width: 100%; height: var(--cell-h); padding: 0 6px 0 7px; text-align: left; color: var(--ink); border-left: 2px solid transparent; }
+.procesos .cell[data-turn="you"] { border-left-color: var(--ink-accent); }
+.procesos .cell[data-turn="quiet"] .nm, .procesos .cell[data-turn="snoozed"] .nm { color: var(--ink-dim); font-weight: 500; }
+.procesos .cell:hover .nm, .procesos .trow:hover .p { text-decoration: underline; text-underline-offset: 3px; }
+.procesos .trow[data-row] { cursor: pointer; }   /* a click on a row of the table opens it, like a pile of the field */
+.procesos .cell[data-cursor="true"], .procesos .trow[data-cursor="true"] { background: var(--line); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.procesos .nm { min-width: 0; font-size: var(--fs-2); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; unicode-bidi: isolate; }
+.procesos .age { color: var(--ink-dim); letter-spacing: 0.02em; text-transform: none; }
+.procesos mark.hit { color: var(--ink-accent); background: none; text-decoration: underline; text-underline-offset: 3px; }
+.procesos [data-pending] { opacity: 0.35; pointer-events: none; }
+.procesos [data-armed] { box-shadow: inset 0 0 0 1px var(--ink-accent); }
+
+/* a pile: the posting, the score (as long as the points), the CV, the answers, the gate (solid you approved it, hollow you sent it by hand) */
+.procesos .stk { display: flex; flex-direction: column; gap: 2px; width: 26px; }
+.procesos .stk i { display: block; height: 3px; width: 100%; background: var(--ink-dim); opacity: 0.6; }
+.procesos .stk i[data-s="todo"] { opacity: 0.22; }
+.procesos .stk i[data-s="here"] { background: var(--ink); opacity: 1; }
+.procesos .stk i:nth-child(2) { width: var(--w, 100%); }
+.procesos .stk i:nth-child(5)[data-gate="clear"] { background: var(--ink); opacity: 1; }
+.procesos .stk i:nth-child(5)[data-gate="hollow"] { background: none; opacity: 1; box-shadow: inset 0 0 0 1px var(--ink-dim); }
+.procesos .stk.demo { display: inline-flex; flex-direction: column; vertical-align: middle; margin-right: 10px; width: 24px; }
+
+/* the place of the pile that left: a dotted gap of the same size, until the page is loaded again */
+.procesos .slot.tomb { height: var(--cell-h); display: flex; align-items: center; padding-left: 37px; border-bottom: 1px dashed var(--line-strong); }
+.procesos .tomb-text { color: var(--ink-dim); text-transform: none; letter-spacing: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------------------------------------------------------------- the table */
+.procesos .table { display: flex; flex-direction: column; }
+.procesos .tbody { display: block; }
+.procesos .trow { display: grid; grid-template-columns: minmax(0, 2fr) 104px 52px minmax(0, 1.5fr) minmax(0, 1.7fr) minmax(0, 1.9fr) 118px; gap: 0 12px; padding-left: 10px; align-items: center; height: var(--row-h); border-bottom: 1px solid var(--line); border-left: 0; font-size: var(--fs-2); text-align: left; }
+.procesos .trow > span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.procesos .trow .dim, .procesos .trow .role { color: var(--ink-dim); }
+.procesos .trow .p { font-size: var(--fs-3); unicode-bidi: isolate; }
+.procesos .trow .co { font-weight: 600; }
+.procesos .trow .c-age, .procesos .trow .c-turn { text-align: right; justify-self: end; }
+.procesos .trow .c-cadence { text-transform: none; letter-spacing: 0; }
+.procesos .trow.thead > span { letter-spacing: 0; }
+/* the header is above the list, not in it: what scrolls under a glass header would show through, so the list starts below it and fades at its own edge */
+.procesos .viewbox > .trow.thead { position: absolute; top: 0; left: 0; right: 0; height: var(--head-h); color: var(--ink-dim); font-weight: 500; }
+.procesos[data-mode="table"] { --head-h: calc(var(--row-h) * 0.74); }
+.procesos[data-mode="table"] .scroller { top: var(--head-h); }
+.procesos .trow[data-turn="you"] { box-shadow: inset 2px 0 0 var(--ink-accent); }
+.procesos .trow[data-turn="you"]:hover, .procesos .trow[data-cursor="true"][data-turn="you"] { box-shadow: inset 2px 0 0 var(--ink-accent), inset 0 0 0 1px var(--line-strong); }
+.procesos .trow[data-turn="quiet"] .p, .procesos .trow[data-turn="quiet"] .co { color: var(--ink-dim); font-weight: 500; }
+.procesos .c-turn .turn-open { display: inline-flex; align-items: center; gap: 8px; color: var(--ink); font-weight: 600; }
+.procesos .c-turn .k { color: var(--ink-accent); border-color: var(--ink-accent); }
+.procesos .c-turn .dimtxt { color: var(--ink-dim); }
+
+/* ---------------------------------------------------------------- the ones that ended, the empty page, the skeleton, the failure */
+.procesos .closed { padding-top: clamp(6px, 1vh, 12px); }
+.procesos .closedline { padding-top: 8px; border-top: 1px solid var(--line); color: var(--ink-dim); letter-spacing: 0; line-height: 1.7; }
+.procesos .closed-title { color: var(--ink-dim); font-weight: 600; letter-spacing: 0; }
+.procesos .closed-toggle { color: var(--ink); font-family: inherit; font-size: inherit; letter-spacing: inherit; text-decoration: underline; text-underline-offset: 3px; }
+.procesos .closed-toggle:hover { color: var(--ink-accent); }
+.procesos .closed-cells { padding-top: 8px; }
+.procesos .closed-more { padding-top: 6px; color: var(--ink-dim); letter-spacing: 0; }
+.procesos .empty { display: grid; justify-items: center; gap: 14px; padding: clamp(24px, 6vh, 64px) 0; text-align: center; font-size: var(--fs-3); color: var(--ink); }
+.procesos .empty-text { max-width: 60ch; }
+.procesos .skeleton { display: grid; gap: 22px; }
+.procesos .skel-lane { display: grid; grid-template-columns: repeat(var(--cols), minmax(0, 1fr)); gap: 2px 8px; }
+.procesos .skel-cell { display: block; height: var(--cell-h); background: var(--line); opacity: 0.5; }
+.procesos .fail { display: grid; justify-items: start; gap: 12px; padding: 24px 0; color: var(--ink); font-size: var(--fs-3); }
+
+/* ---------------------------------------------------------------- sizes: the same objects, a notch tighter or looser */
+@media (max-height: 1100px) { .procesos { --cell-h: 29px; --row-h: 36px; } }
+@media (max-height: 1010px) { .procesos .mega { font-size: var(--fs-5); line-height: 1; } .procesos .pieces { padding-bottom: 2px; } }
+@media (max-width: 1500px) and (max-height: 940px) { .procesos { --cell-h: 27px; --row-h: 33px; } }
+@media (max-width: 1499px) and (min-width: 1280px) { .procesos { --cols: 5; } }
+@media (max-width: 1279px) and (min-width: 760px) { .procesos { --cols: 4; } }
+/* a low window (a small laptop): the key of the piles is one short line (render.js), so the list keeps its room */
+@media (max-height: 760px) and (min-width: 760px) { .procesos .foot { min-height: 0; } }
+@media (min-width: 2400px) {
+  .procesos { --cols: 7; --cell-h: 42px; --row-h: 48px; }
+  .procesos .cells { gap: 4px 12px; }
+  .procesos .cell { grid-template-columns: 34px minmax(0, 1fr) auto; column-gap: 9px; }
+  .procesos .stk { width: 32px; gap: 3px; }
+  .procesos .stk i { height: 4px; }
+  .procesos .stk.demo { width: 30px; }
+  .procesos .field { gap: 24px; }
+  .procesos .lane { gap: 8px; }
+  .procesos .lane-h { padding-bottom: 7px; }
+  .procesos .slot.tomb { padding-left: 45px; }
+}
+
+/* a phone (flat tabs, no travel): the list is the page itself, two piles to a line, buttons of 44 px */
+@media (max-width: 759px) {
+  .procesos { --cols: 2; --cell-h: 44px; --row-h: auto; flex: none; }
+  .procesos .viewbox { flex: none; }
+  .procesos .scroller { position: static; overflow: visible; }
+  .procesos .scroll-cue, .procesos .track { display: none !important; }
+  .procesos .mega { font-size: var(--fs-5); }
+  .procesos .head-main { align-items: stretch; }
+  .procesos .controls { justify-items: start; }
+  .procesos .crow-wrap, .procesos .crow { justify-content: flex-start; }
+  .procesos .chip { min-height: 44px; }
+  .procesos .find-input { min-height: 44px; width: 18ch; }
+  .procesos .lane-note { display: none; }
+  .procesos .runline { text-align: left; }
+  .procesos .lab .k, .procesos .find .k, .procesos .mode .k { display: none; }
+  .procesos .trow.thead { display: none; }
+  .procesos .trow { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "p p" "s a" "n t"; gap: 2px 12px; padding: 8px 0 8px 10px; height: auto; min-height: 44px; }
+  .procesos .trow .c-process { grid-area: p; }
+  .procesos .trow .c-stage { grid-area: s; }
+  .procesos .trow .c-age { grid-area: a; }
+  .procesos .trow .c-next { grid-area: n; }
+  .procesos .trow .c-turn { grid-area: t; }
+  .procesos .trow .c-last, .procesos .trow .c-cadence { display: none; }
+}
+
+/* ---------------------------------------------------------------- the drawer: the page of one application */
+.pd { display: flex; flex-direction: column; gap: 10px; min-height: 100%; color: var(--ink); }
+.pd-eyebrow { color: var(--ink-dim); }
+.pd-title { margin-top: -4px; font-family: var(--body); font-size: var(--fs-4); font-weight: 600; line-height: 1.2; letter-spacing: -0.01em; outline: none; }
+.pd-sub { margin-top: -8px; font-size: var(--fs-2); color: var(--ink-dim); }
+.pd-none { color: var(--ink-dim); font-size: var(--fs-2); }
+.pd-h { color: var(--ink-dim); padding-bottom: 6px; margin-bottom: 8px; border-bottom: 1px solid var(--line); font-weight: 500; }
+.pd-sec { display: block; }
+
+.pd-score { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0 20px; align-items: center; }
+.pd-score .n { font-size: var(--fs-6); line-height: 0.9; color: var(--ink); }
+.pd .bars { display: grid; gap: 3px; }
+.pd .bars li { display: grid; grid-template-columns: minmax(64px, 112px) minmax(0, 1fr) 36px; gap: 10px; align-items: center; color: var(--ink-dim); }
+.pd .bk { font-family: var(--body); font-size: var(--fs-1); letter-spacing: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pd .bm { display: block; position: relative; height: 3px; background: var(--line); }
+.pd .bm::after { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: calc(var(--k, 0) * 100%); background: var(--ink-dim); }
+.pd .bm[data-top="true"]::after { background: var(--ink); }
+.pd .bv { text-align: right; font-family: var(--mono); font-size: var(--fs-1); letter-spacing: 0.01em; }
+
+.pd .plates { display: grid; --plate-w: 150px; --plate-pitch: 44px; }
+.pd .plate { display: grid; grid-template-columns: var(--plate-w) 24px minmax(0, 1fr); align-items: center; min-height: var(--plate-pitch); }
+.pd .pl-art { position: relative; display: block; width: var(--plate-w); aspect-ratio: 5 / 1; }
+.pd .pl-svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.pd .pl-num { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -46%); font-size: var(--fs-4); line-height: 1; color: var(--ink); }
+.pd .pl-face { fill: var(--line); stroke: var(--line-strong); stroke-width: 1; stroke-linejoin: round; }
+.pd .pl-ink { stroke: var(--ink-dim); stroke-width: 1.5; stroke-linecap: round; fill: none; }
+.pd .pl-ink.dim { opacity: 0.5; }
+.pd .pl-dot { fill: var(--ink-dim); }
+.pd .pl-dash { stroke: var(--ink-accent); stroke-width: 1.6; stroke-dasharray: 4 3; fill: none; }
+.pd .pl-gate { stroke: var(--ink-accent); stroke-width: 2.4; stroke-linecap: round; fill: none; }
+.pd .pl-gate.hollow { stroke-dasharray: 1 5; }
+.pd .plate[data-state="todo"] .pl-face { fill: none; stroke-dasharray: 3 3; }
+.pd .plate[data-state="here"] .pl-face { stroke: var(--ink); }
+.pd .plate[data-you="true"] .pl-face { fill: var(--ink-accent); fill-opacity: 0.12; stroke: var(--ink-accent); }
+.pd .pl-guide { position: relative; display: block; height: 1px; margin-right: 6px; background: var(--line-strong); }
+.pd .pl-guide::before { content: ""; position: absolute; left: -2px; top: -2px; width: 5px; height: 5px; border-radius: 50%; background: var(--ink-dim); }
+.pd .plate[data-you="true"] .pl-guide::before { background: var(--ink-accent); }
+.pd .pl-text { display: grid; gap: 1px; min-width: 0; }
+.pd .pl-name { color: var(--ink); font-weight: 600; }
+.pd .plate[data-you="true"] .pl-name, .pd .pl-you { color: var(--ink-accent); }
+.pd .pl-you { font-weight: 400; }
+.pd .pl-state, .pd .pl-when { font-family: var(--body); font-size: var(--fs-1); letter-spacing: 0; color: var(--ink-dim); }
+
+.pd .trail { display: grid; gap: 2px; }
+.pd .trail li { display: grid; grid-template-columns: minmax(84px, 108px) minmax(0, 1fr); gap: 0 10px; padding: 2px 0 2px 8px; font-size: var(--fs-2); }
+.pd .tr-when { color: var(--ink-dim); text-transform: none; letter-spacing: 0.04em; }
+.pd .tr-note { grid-column: 2; color: var(--ink-dim); font-size: var(--fs-1); }
+.pd .trail li[data-you="true"] { box-shadow: inset 2px 0 0 var(--ink-accent); }
+.pd .trail li[data-you="true"] .tr-text, .pd .trail li[data-you="true"] .tr-when { color: var(--ink-accent); }
+
+.pd .ruler { position: relative; height: 54px; margin: 2px 8px 0; }
+.pd .rl-line { position: absolute; left: 0; right: 0; top: 28px; height: 1px; background: var(--line-strong); }
+.pd .rl-done { position: absolute; left: 0; top: 27px; height: 2px; width: var(--to, 0); background: var(--ink-dim); }
+.pd .rl-band { position: absolute; top: 23px; height: 11px; left: var(--from, 0); width: var(--w, 0); background: var(--line-strong); }
+.pd .rl-tick { position: absolute; top: 40px; left: var(--at, 0); transform: translateX(-50%); color: var(--ink-dim); white-space: nowrap; letter-spacing: 0.01em; }
+.pd .rl-start { left: 0; transform: none; }
+.pd .rl-end { left: auto; right: 0; transform: none; }
+.pd .rl-now { position: absolute; top: 23px; left: var(--at, 0); width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; background: var(--ink-accent); }
+.pd .rl-now-l { position: absolute; top: 4px; left: var(--at, 0); transform: translateX(-50%); color: var(--ink-accent); white-space: nowrap; font-weight: 600; }
+.pd .pd-rule { margin-top: 4px; color: var(--ink-dim); line-height: 1.6; text-transform: none; letter-spacing: 0; }
+
+.pd .mails { display: grid; gap: 8px; }
+.pd .mails li { display: grid; gap: 2px; font-size: var(--fs-2); }
+.pd .ml-head { color: var(--ink-dim); }
+.pd .ml-subject { color: var(--ink); }
+.pd .ml-summary { color: var(--ink-dim); }
+.pd .gaps li { padding: 2px 0; font-size: var(--fs-2); color: var(--ink); }
+.pd .gaps li[data-seen="true"] { color: var(--ink-dim); }
+.pd .pd-fold summary { cursor: pointer; color: var(--ink-dim); width: fit-content; }
+.pd .pd-pre { margin-top: 8px; font-family: var(--body); font-size: var(--fs-2); line-height: 1.5; white-space: pre-wrap; color: var(--ink-dim); }
+
+.pd .pd-next { position: sticky; bottom: 0; margin-top: auto; padding: 12px 0 8px 18px; background: var(--solid); border-left: 2px solid transparent; }
+.pd .pd-next[data-you="true"] { border-left-color: var(--ink-accent); } /* the gold rule only when the next step is his */
+.pd .pd-next-head { color: var(--ink-dim); line-height: 1.7; }
+.pd .pd-next[data-you="true"] .pd-next-head { color: var(--ink-accent); }
+.pd .pd-next-title { margin: 6px 0 0; font-family: var(--body); font-size: var(--fs-3); font-weight: 600; line-height: 1.3; letter-spacing: 0; text-transform: none; color: var(--ink); }
+.pd .acts { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 10px; }
+
+@media (min-width: 2400px) {
+  .pd { gap: 22px; }
+  .pd .plates { --plate-w: 188px; --plate-pitch: 62px; }
+  .pd .bars li { grid-template-columns: minmax(64px, 124px) minmax(0, 1fr) 40px; }
+  .pd .trail li { padding: 5px 0 5px 8px; }
+}
+@media (max-width: 759px) {
+  .pd .pd-fold summary { min-height: 44px; display: inline-flex; align-items: center; }
+}

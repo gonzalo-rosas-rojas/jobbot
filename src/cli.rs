@@ -4,7 +4,7 @@
 //! Exit codes: 0 ok, 1 error (including a usage error), 2 CV not ready, 3 STOP file present,
 //! 4 outside the execution window.
 
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -23,16 +23,19 @@ use crate::cv::{BrowserRenderer, CvError, Renderer};
 use crate::digest::build_digest;
 use crate::discovery::{DiscoveryReport, discover, rescore};
 use crate::dossier::{build_dossier, dossier_path};
-use crate::form::{BrowserFiller, FormFiller, SubmitMode, SubmitResult};
+use crate::form::{BrowserFiller, FillMode, FormFiller, SubmitMode, SubmitResult};
 use crate::freelance::{draft_profile, draft_proposal, load_freelance_config};
 use crate::handoff::{BrowserInspector, FormInspector, is_handoff_job, is_handoff_reason};
+use crate::http::Http;
 use crate::inbox;
 use crate::models::Job;
 use crate::open_check::{NetworkOpenChecker, OpenChecker};
 use crate::outbound;
-use crate::panel::{Panel, scheduler::WindowsTasks, server::PanelServer};
+use crate::panel::{scheduler::WindowsTasks, server::PanelServer};
 use crate::paths::Paths;
-use crate::pipeline::{prepare_report, submit_all_while};
+use crate::pipeline::{
+    REPLACED_CV_DIR, Relocation, prepare_report_relocating, refresh_cvs, submit_all_while,
+};
 use crate::prep::PrepStore;
 use crate::results::{format_table, read_last, results_path};
 use crate::rules::{load_criteria, load_exclusions};
@@ -40,12 +43,80 @@ use crate::sources::{Source, build_sources, load_sources_config};
 use crate::today::build_today;
 use crate::tracker::{ApplicationRow, State, Tracker};
 use crate::window::{Schedule, in_run_window, load_schedule, next_window_start};
+use jobbot_app::privacy::{LineFilter, UserPaths};
+use jobbot_app::reporting::status::{
+    DISCOVER_COOLDOWN_HOURS, RunEnd, StepLog, describe_auto_approve, describe_last_account,
+    describe_last_run, record_run,
+};
 
-/// `run-daily` fires every hour, but the boards do not change that fast: discovery is skipped
-/// while the last one (`meta.last_discover_at`) is younger than this. `jobbot discover` itself
-/// always runs. Six hours keeps the scheduled runs to four a day at most: Remotive's terms ask
-/// for no more than four requests a day, and the other boards do not change faster than that.
-const DISCOVER_COOLDOWN_HOURS: i64 = 6;
+/// Discovery's time for the job boards: past it no new request leaves, and the run goes on with
+/// what came back. A run reads every board in a few minutes; this only stops a host that answers
+/// slowly request after request from holding the hourly task.
+const BOARDS_DEADLINE: std::time::Duration = std::time::Duration::from_secs(20 * 60);
+
+/// Turns on the run's trace: each use case's span is written to stderr when it closes, with its
+/// counts and outcome and how long it was busy and idle. Unset, empty or `0`, nothing new is
+/// printed.
+pub const TRACE_VAR: &str = "JOBBOT_TRACE";
+
+fn trace_requested(value: Option<&str>) -> bool {
+    value.is_some_and(|value| !matches!(value.trim(), "" | "0"))
+}
+
+/// Installs the trace writer on stderr when `JOBBOT_TRACE` asks for it, behind the one privacy
+/// filter (the profile under `root` names Gonza's own addresses). `main` calls it once.
+pub fn init_trace(root: &Path) {
+    if trace_requested(std::env::var(TRACE_VAR).ok().as_deref()) {
+        let user = UserPaths::for_profile(&Paths::new(root).profile_dir);
+        // Only fails when a subscriber is already installed, and then that one stays.
+        let _ = tracing::subscriber::set_global_default(filtered_trace(std::io::stderr, user));
+    }
+}
+
+/// The trace writer with every line through `UserPaths::redact`: a trace is a log.
+fn filtered_trace<W>(
+    make: impl Fn() -> W + Send + Sync + 'static,
+    user: UserPaths,
+) -> impl tracing::Subscriber + Send + Sync
+where
+    W: Write + 'static,
+{
+    trace_subscriber(move || LineFilter::new(make(), user.clone()))
+}
+
+/// Where a run writes: a terminal as it is (Gonza can open the paths it names); anything else, the
+/// scheduled task's log or a pipe, through the one privacy filter. `user` is only read for a log.
+fn log_output<'a, W: Write + 'a>(
+    stdout: W,
+    terminal: bool,
+    user: impl FnOnce() -> UserPaths,
+) -> Box<dyn Write + 'a> {
+    if terminal {
+        Box::new(stdout)
+    } else {
+        Box::new(LineFilter::new(stdout, user()))
+    }
+}
+
+/// The plain text writer: one line per span as it closes, at INFO (the use cases' level; the HTTP
+/// libraries write below it), without the module path.
+fn trace_subscriber<W>(writer: W) -> impl tracing::Subscriber + Send + Sync
+where
+    W: for<'w> tracing_subscriber::fmt::MakeWriter<'w> + Send + Sync + 'static,
+{
+    use tracing_subscriber::layer::SubscriberExt;
+    // Only jobbot's own spans, whose fields are counts and outcomes: a dependency's span (a page
+    // the browser opens, a request) may carry a link with a token in it.
+    let own =
+        tracing_subscriber::filter::Targets::new().with_target("jobbot", tracing::Level::INFO);
+    tracing_subscriber::fmt()
+        .with_writer(writer)
+        .with_max_level(tracing::Level::INFO)
+        .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE)
+        .with_target(false)
+        .finish()
+        .with(own)
+}
 
 pub const EXIT_OK: i32 = 0;
 pub const EXIT_ERROR: i32 = 1;
@@ -69,6 +140,15 @@ struct WindowArgs {
     /// Corre aunque sea horario laboral de Gonza. No salta el archivo STOP.
     #[arg(long)]
     ignore_window: bool,
+}
+
+#[derive(Args, Debug, Clone, Copy)]
+struct PrepareArgs {
+    #[command(flatten)]
+    window: WindowArgs,
+    /// Vuelve a generar, en su mismo lugar, el CV de lo preparado y de lo que espera tu decisión, desde el CV maestro de hoy (tras editarlo). No cambia estados; lo enviado nunca se toca, y el PDF anterior se guarda en data/cv/replaced.
+    #[arg(long)]
+    refresh: bool,
 }
 
 #[derive(Args, Debug, Clone, Copy)]
@@ -191,7 +271,7 @@ enum Command {
     /// Busca avisos, filtra, puntúa y deja la cola (--rescore repuntúa lo guardado antes).
     Discover(DiscoverArgs),
     /// Adapta el CV de cada aviso en cola y genera los PDF.
-    Prepare(WindowArgs),
+    Prepare(PrepareArgs),
     /// Llena los formularios (prueba en seco), envía (--live) o te deja lo que falta y el clic a ti (--assist).
     Submit(SubmitArgs),
     /// Aprueba postulaciones probadas en seco.
@@ -254,6 +334,8 @@ enum Command {
         #[arg(long)]
         note: Option<String>,
     },
+    /// Deshace tu última marca de una postulación, dentro de 10 minutos y si nada más la cambió después.
+    Unmark { key: String },
     /// Registra una postulación que se envió a mano (tú, o Claude con Playwright): queda como enviada con su hora real.
     Record(RecordArgs),
     /// Bandeja de correo: importa los correos que Claude leyó de tu Gmail (jobbot nunca toca Gmail).
@@ -287,7 +369,7 @@ enum InboxCommand {
     /// Importa un archivo JSON con los correos (una lista de mensajes). Importar el mismo archivo
     /// dos veces no cambia nada. Solo escribe en la base: ignora STOP y la ventana.
     Import {
-        /// El archivo JSON (ver «Inbox file» en el README).
+        /// El archivo JSON (ver «Bandeja de correo» en el README).
         file: PathBuf,
     },
 }
@@ -372,13 +454,19 @@ impl Deps {
     }
 }
 
-/// Entry point used by `main`: real dependencies, output on stdout. `args` includes the
-/// program name as its first element, exactly like `std::env::args().collect()`.
-pub async fn run(args: Vec<String>, root: &Path, now: DateTime<Utc>) -> i32 {
-    run_with(args, root, now, Deps::real(), &mut std::io::stdout()).await
+/// Entry point used by `main`: the run's layout (`Paths::for_run`), real dependencies, output on
+/// stdout. `args` includes the program name as its first element, exactly like
+/// `std::env::args().collect()`.
+pub async fn run(args: Vec<String>, paths: &Paths, now: DateTime<Utc>) -> i32 {
+    let stdout = std::io::stdout();
+    let terminal = stdout.is_terminal();
+    let mut out = log_output(stdout, terminal, || {
+        UserPaths::for_profile(&paths.profile_dir)
+    });
+    run_in(args, paths, now, Deps::real(), &mut out).await
 }
 
-/// Same as `run` with injected dependencies and output, which is what the tests call.
+/// Same as `run` with the layout of `root`, injected dependencies and output: what the tests call.
 pub async fn run_with(
     args: Vec<String>,
     root: &Path,
@@ -386,6 +474,69 @@ pub async fn run_with(
     deps: Deps,
     out: &mut dyn Write,
 ) -> i32 {
+    run_in(args, &Paths::new(root), now, deps, out).await
+}
+
+/// What a run prints, cleaned line by line before it reaches the terminal or the log: postings,
+/// e-mails and notes are strangers' text, and an escape sequence, a bidirectional control or a
+/// hidden character in them must not move the cursor, recolour or hide what Gonza reads. Every
+/// control character but the newline becomes a space; the invisible format characters go.
+struct PlainText<'a> {
+    inner: &'a mut dyn Write,
+    held: Vec<u8>,
+}
+
+impl<'a> PlainText<'a> {
+    fn new(inner: &'a mut dyn Write) -> Self {
+        PlainText {
+            inner,
+            held: Vec::new(),
+        }
+    }
+
+    fn write_clean(&mut self, line: &[u8]) -> std::io::Result<()> {
+        let text = String::from_utf8_lossy(line);
+        let clean: String = outbound::strip_invisible(&text)
+            .chars()
+            .map(|c| if c.is_control() { ' ' } else { c })
+            .collect();
+        self.inner.write_all(clean.as_bytes())
+    }
+}
+
+impl Write for PlainText<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.held.extend_from_slice(buf);
+        while let Some(end) = self.held.iter().position(|&byte| byte == b'\n') {
+            let line: Vec<u8> = self.held.drain(..=end).collect();
+            self.write_clean(&line[..end])?;
+            self.inner.write_all(b"\n")?;
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        let rest = std::mem::take(&mut self.held);
+        self.write_clean(&rest)?;
+        self.inner.flush()
+    }
+}
+
+impl Drop for PlainText<'_> {
+    fn drop(&mut self) {
+        let _ = self.flush();
+    }
+}
+
+async fn run_in(
+    args: Vec<String>,
+    paths: &Paths,
+    now: DateTime<Utc>,
+    deps: Deps,
+    out: &mut dyn Write,
+) -> i32 {
+    let mut plain = PlainText::new(out);
+    let out: &mut dyn Write = &mut plain;
     let cli = match Cli::try_parse_from(args) {
         Ok(cli) => cli,
         Err(err) => {
@@ -398,7 +549,7 @@ pub async fn run_with(
             };
         }
     };
-    match dispatch(cli.command, root, now, deps, out).await {
+    match dispatch(cli.command, paths, now, deps, out).await {
         Ok(code) => code,
         Err(err) => {
             let _ = writeln!(out, "Error: {err:#}");
@@ -409,35 +560,38 @@ pub async fn run_with(
 
 async fn dispatch(
     command: Command,
-    root: &Path,
+    paths: &Paths,
     now: DateTime<Utc>,
     deps: Deps,
     out: &mut dyn Write,
 ) -> Result<i32> {
-    let paths = Paths::new(root);
     match command {
         Command::Discover(args) => {
-            let _run = match start_run(&paths, now, args.window.ignore_window, out)? {
+            let _run = match start_run(paths, now, args.window.ignore_window, out)? {
                 Ok(run) => run,
                 Err(code) => return Ok(code),
             };
-            cmd_discover(&paths, &deps, now, args.rescore, out).await
+            cmd_discover(paths, &deps, now, args.rescore, out).await
         }
-        Command::Prepare(w) => {
-            let _run = match start_run(&paths, now, w.ignore_window, out)? {
+        Command::Prepare(args) => {
+            let _run = match start_run(paths, now, args.window.ignore_window, out)? {
                 Ok(run) => run,
                 Err(code) => return Ok(code),
             };
-            cmd_prepare(&paths, &deps, now, out).await
+            if args.refresh {
+                cmd_prepare_refresh(paths, &deps, now, out).await
+            } else {
+                cmd_prepare(paths, &deps, now, out).await
+            }
         }
         Command::Submit(args) => {
-            let run = match start_run(&paths, now, args.window.ignore_window, out)? {
+            let run = match start_run(paths, now, args.window.ignore_window, out)? {
                 Ok(run) => run,
                 Err(code) => return Ok(code),
             };
             // Assist needs a window Gonza can see.
             cmd_submit(
-                &paths,
+                paths,
                 &deps,
                 now,
                 args.headed || args.assist,
@@ -448,64 +602,65 @@ async fn dispatch(
             .await
         }
         Command::RunDaily(w) => {
-            let run = match start_run(&paths, now, w.ignore_window, out)? {
+            let run = match start_run(paths, now, w.ignore_window, out)? {
                 Ok(run) => run,
                 Err(code) => return Ok(code),
             };
-            cmd_run_daily(&paths, &deps, now, &run.watch, out).await
+            cmd_run_daily(paths, &deps, now, &run.watch, out).await
         }
         Command::ClaudeCheck(w) => {
-            let _run = match start_run(&paths, now, w.ignore_window, out)? {
+            let _run = match start_run(paths, now, w.ignore_window, out)? {
                 Ok(run) => run,
                 Err(code) => return Ok(code),
             };
-            cmd_claude_check(&paths, &deps, now, out).await
+            cmd_claude_check(paths, &deps, now, out).await
         }
         // Setup Gonza does once, by hand: it ignores STOP and the window like `mark` does.
-        Command::ClaudeLogin => cmd_claude_login(&paths, &deps, now, out).await,
+        Command::ClaudeLogin => cmd_claude_login(paths, &deps, now, out).await,
         Command::Dossier(args) => {
-            let _run = match start_run(&paths, now, args.window.ignore_window, out)? {
+            let _run = match start_run(paths, now, args.window.ignore_window, out)? {
                 Ok(run) => run,
                 Err(code) => return Ok(code),
             };
-            cmd_dossier(&paths, &deps, now, &args.keys, out).await
+            cmd_dossier(paths, &deps, now, &args.keys, out).await
         }
         Command::Mark { key, state, note } => {
-            cmd_mark(&paths, &key, &state, note.as_deref(), now, out)
+            cmd_mark(paths, &key, &state, note.as_deref(), now, out)
         }
-        Command::Record(args) => cmd_record(&paths, args, now, out),
+        Command::Unmark { key } => cmd_unmark(paths, &key, now, out),
+        Command::Record(args) => cmd_record(paths, args, now, out),
         Command::Inbox { command } => match command {
-            InboxCommand::Import { file } => cmd_inbox_import(&paths, &file, now, out),
+            InboxCommand::Import { file } => cmd_inbox_import(paths, &file, now, out),
         },
-        Command::Today => cmd_today(&paths, now, out),
+        Command::Today => cmd_today(paths, now, out),
         Command::Task { command } => match command {
-            TaskCommand::Add(args) => cmd_task_add(&paths, args, now, out),
-            TaskCommand::Done { id } => cmd_task_done(&paths, id, out),
+            TaskCommand::Add(args) => cmd_task_add(paths, args, now, out),
+            TaskCommand::Done { id } => cmd_task_done(paths, id, out),
         },
         Command::Freelance { command } => {
             let ignore_window = match &command {
                 FreelanceCommand::Profile(a) => a.window.ignore_window,
                 FreelanceCommand::Proposal(a) => a.window.ignore_window,
             };
-            let _run = match start_run(&paths, now, ignore_window, out)? {
+            let _run = match start_run(paths, now, ignore_window, out)? {
                 Ok(run) => run,
                 Err(code) => return Ok(code),
             };
-            cmd_freelance(&paths, &deps, now, command, out).await
+            cmd_freelance(paths, &deps, now, command, out).await
         }
-        Command::Approve { keys } => cmd_approve(&paths, &keys, out),
-        Command::Resolve { keys } => cmd_resolve(&paths, &keys, now, out),
-        Command::Confirm { keys } => cmd_confirm(&paths, &keys, now, out),
-        Command::Digest => cmd_digest(&paths, now, out),
-        Command::Top { n } => cmd_top(&paths, n, out),
-        Command::Status => cmd_status(&paths, now, out),
-        Command::Results { last } => cmd_results(&paths, last, out),
-        Command::AutoApprove { value } => cmd_auto_approve(&paths, value.as_deref(), out),
-        Command::Stop => cmd_stop(&paths, out),
-        Command::Resume => cmd_resume(&paths, out),
+        Command::Approve { keys } => cmd_approve(paths, &keys, out),
+        Command::Resolve { keys } => cmd_resolve(paths, &keys, now, out),
+        Command::Confirm { keys } => cmd_confirm(paths, &keys, now, out),
+        Command::Digest => cmd_digest(paths, now, out),
+        Command::Top { n } => cmd_top(paths, n, out),
+        Command::Status => cmd_status(paths, now, out),
+        Command::Results { last } => cmd_results(paths, last, out),
+        Command::AutoApprove { value } => cmd_auto_approve(paths, value.as_deref(), out),
+        Command::Stop => cmd_stop(paths, out),
+        Command::Resume => cmd_resume(paths, out),
         Command::InstallBrowsers => cmd_install_browsers(out).await,
-        Command::Prep { command } => cmd_prep(&paths, command, now, out),
-        Command::Panel(args) => cmd_panel(&paths, now, args, out).await,
+        Command::Prep { command } => cmd_prep(paths, command, now, out),
+        Command::Panel(args) => cmd_panel(paths, now, args, out).await,
     }
 }
 
@@ -628,7 +783,7 @@ const WINDOW_CLOSED_MESSAGE: &str =
 
 fn open_tracker(paths: &Paths) -> Result<Tracker> {
     std::fs::create_dir_all(&paths.data_dir)?;
-    Tracker::open(&paths.data_dir.join("jobbot.db"))
+    Ok(Tracker::open(&paths.data_dir.join("jobbot.db"))?)
 }
 
 /// The injected runner (tests) or the real `claude.exe`, started in the empty `data/claude-cwd`.
@@ -640,13 +795,13 @@ fn claude_runner(
     if let Some(injected) = &deps.claude {
         return Ok(injected.clone());
     }
-    let cli = CliClaude::locate(config.clone(), paths.data_dir.join("claude-cwd"))?;
+    let cli = CliClaude::locate(config.clone(), paths.claude_work.clone())?;
     Ok(Arc::new(cli))
 }
 
 fn open_prep_store(paths: &Paths) -> Result<PrepStore> {
     std::fs::create_dir_all(&paths.data_dir)?;
-    PrepStore::open(&paths.data_dir.join("prep.db"))
+    Ok(PrepStore::open(&paths.data_dir.join("prep.db"))?)
 }
 
 async fn cmd_claude_check(
@@ -660,7 +815,7 @@ async fn cmd_claude_check(
     let runner = claude_runner(paths, deps, &config)?;
     if deps.claude.is_none() {
         // Only the real program has a path and a version to report.
-        let real = CliClaude::locate(config.clone(), paths.data_dir.join("claude-cwd"))?;
+        let real = CliClaude::locate(config.clone(), paths.claude_work.clone())?;
         writeln!(out, "Programa: {}", real.program().display())?;
         match real.version().await {
             Some(v) if v == TESTED_CLAUDE_VERSION => writeln!(out, "Versión: {v} (la probada)")?,
@@ -672,7 +827,8 @@ async fn cmd_claude_check(
             None => writeln!(out, "Aviso: no pude leer la versión de claude.")?,
         }
     }
-    let gate = ClaudeGate::new(runner.as_ref(), &tracker, &config);
+    let gate = ClaudeGate::new(runner.as_ref(), &tracker, config.daily_budget_usd)
+        .with_per_call_cap(config.per_call_budget_usd);
     let seen = gate.check_account(now).await?;
     writeln!(out, "Cuenta: {}", seen.describe())?;
     print_account_warnings(&seen, out)?;
@@ -734,11 +890,12 @@ async fn cmd_claude_login(
     let tracker = open_tracker(paths)?;
     let runner = claude_runner(paths, deps, &config)?;
     if deps.claude.is_none() {
-        let real = CliClaude::locate(config.clone(), paths.data_dir.join("claude-cwd"))?;
+        let real = CliClaude::locate(config.clone(), paths.claude_work.clone())?;
         writeln!(out, "{}", login_notice(&config, real.config_dir()))?;
         real.login().await?;
     }
-    let gate = ClaudeGate::new(runner.as_ref(), &tracker, &config);
+    let gate = ClaudeGate::new(runner.as_ref(), &tracker, config.daily_budget_usd)
+        .with_per_call_cap(config.per_call_budget_usd);
     match gate.check_account(now).await {
         Ok(seen) => {
             writeln!(out, "Sesión verificada. Cuenta: {}", seen.describe())?;
@@ -790,11 +947,11 @@ async fn cmd_claude_login(
 /// it, and one careless click would authorize Claude Code for that organization from this PC).
 /// The address is shown masked: it is only there so Gonza knows which account to pick.
 fn login_notice(config: &ClaudeConfig, config_dir: &Path) -> String {
-    let which = match config.expected_email.trim() {
+    let which = match config.expected_email.expose().trim() {
         "" => "Elige tu cuenta personal (y tu organización personal, si te pregunta).".to_string(),
         email => format!(
             "Elige la cuenta {} (y tu organización personal, si te pregunta).",
-            crate::claude::mask_email(email)
+            crate::privacy::mask_email(email)
         ),
     };
     format!(
@@ -823,6 +980,12 @@ fn format_report(r: &DiscoveryReport) -> String {
         r.pruned_stale,
         r.pruned_region
     );
+    if r.rate_limited > 0 {
+        text.push_str(&format!(
+            "\n  {} consultas en pausa: el sitio pidió esperar y se retoman en otra corrida",
+            r.rate_limited
+        ));
+    }
     for error in &r.errors {
         text.push_str(&format!("\n  ERROR {error}"));
     }
@@ -838,10 +1001,11 @@ async fn cmd_discover(
 ) -> Result<i32> {
     let criteria = load_criteria(&paths.profile_dir.join("criteria.toml"))?;
     let exclusions = load_exclusions(&paths.profile_dir.join("exclusions.toml"))?;
-    let tracker = open_tracker(paths)?;
+    // Shared with the job boards' GETs, which keep their rests and pages in it for the next run.
+    let tracker = Arc::new(open_tracker(paths)?);
     if rescore_first {
         // After a change to criteria.toml: stored jobs without an application get today's score.
-        let r = rescore(&criteria, &tracker, now)?;
+        let r = rescore(&criteria, &*tracker, now)?;
         writeln!(
             out,
             "Repuntuación: {} avisos revisados · {} nuevos en cola · {} bajo el piso (excepción)",
@@ -853,15 +1017,19 @@ async fn cmd_discover(
     let sources: &[Box<dyn Source>] = match &deps.sources {
         Some(injected) => injected,
         None => {
-            let config = load_sources_config(&paths.profile_dir.join("sources.toml"))?;
+            let mut config = load_sources_config(&paths.profile_dir.join("sources.toml"))?;
+            config.relevant_title_words = criteria.extra_open_title_words.clone();
             let client = reqwest::Client::builder()
                 .user_agent("jobbot/0.1")
                 .build()?;
-            built = build_sources(&config, &client);
+            // One client, one board of resting hosts and one deadline for the whole discovery.
+            let deadline = std::time::Instant::now() + BOARDS_DEADLINE;
+            let http = Http::remembering(client, deadline, tracker.clone());
+            built = build_sources(&config, &http);
             &built
         }
     };
-    let report = discover(sources, &criteria, &exclusions, &tracker, now).await?;
+    let report = discover(sources, &criteria, &exclusions, &*tracker, now).await?;
     writeln!(out, "{}", format_report(&report))?;
     // run-daily reads this to skip discovery while the last one is recent. A run where every
     // source failed fetched nothing and is not "done": the next hourly run must try again.
@@ -877,13 +1045,15 @@ async fn cmd_prepare(
     now: DateTime<Utc>,
     out: &mut dyn Write,
 ) -> Result<i32> {
+    let criteria = load_criteria(&paths.profile_dir.join("criteria.toml"))?;
     let tracker = open_tracker(paths)?;
     let cv_dir = paths.data_dir.join("cv");
-    match prepare_report(
+    match prepare_report_relocating(
         &tracker,
         &paths.cv_master,
         &cv_dir,
         deps.renderer.as_ref(),
+        Relocation::from_criteria(&criteria),
         now,
     )
     .await
@@ -893,6 +1063,44 @@ async fn cmd_prepare(
             for skip in &report.skipped {
                 writeln!(out, "{}", skip.line())?;
             }
+            Ok(EXIT_OK)
+        }
+        Err(CvError::NotReady) => {
+            writeln!(
+                out,
+                "CV no listo: cv/cv-master.md todavía tiene marcas ⟦ ⟧ sin completar."
+            )?;
+            Ok(EXIT_CV_NOT_READY)
+        }
+        Err(other) => Err(other.into()),
+    }
+}
+
+/// `prepare --refresh`: the CVs of the prepared and waiting applications, rendered again from
+/// today's master (see `refresh_cvs`).
+async fn cmd_prepare_refresh(
+    paths: &Paths,
+    deps: &Deps,
+    now: DateTime<Utc>,
+    out: &mut dyn Write,
+) -> Result<i32> {
+    let criteria = load_criteria(&paths.profile_dir.join("criteria.toml"))?;
+    let tracker = open_tracker(paths)?;
+    match refresh_cvs(
+        &tracker,
+        &paths.cv_master,
+        deps.renderer.as_ref(),
+        Relocation::from_criteria(&criteria),
+        now,
+    )
+    .await
+    {
+        Ok(keys) => {
+            writeln!(
+                out,
+                "{} CV generados de nuevo desde el CV maestro (los anteriores quedan en data/cv/{REPLACED_CV_DIR})",
+                keys.len()
+            )?;
             Ok(EXIT_OK)
         }
         Err(CvError::NotReady) => {
@@ -962,7 +1170,7 @@ impl FormFiller for NoBrowser {
         job: &Job,
         _cv_pdf: &Path,
         _bank: &crate::answers::AnswerBank,
-        _mode: SubmitMode,
+        _mode: FillMode,
         _shots_dir: &Path,
     ) -> Result<SubmitResult> {
         anyhow::bail!(
@@ -1021,11 +1229,17 @@ async fn cmd_submit(
         // An injected filler stands for the whole outside world of a test: no network either.
         (None, Some(_)) => None,
         (None, None) => {
+            // A host discovery left resting (a 429) is not asked whether its postings are open.
+            let resting = tracker
+                .resting_hosts(now)?
+                .into_iter()
+                .map(|(host, _)| host);
             network_checker = NetworkOpenChecker::new(
                 reqwest::Client::builder()
                     .user_agent("jobbot/0.1")
                     .build()?,
-            );
+            )
+            .with_rests(resting);
             Some(&network_checker)
         }
     };
@@ -1144,7 +1358,8 @@ async fn cmd_dossier(
     let cv_md = std::fs::read_to_string(&paths.cv_master)
         .with_context(|| format!("leyendo {}", paths.cv_master.display()))?;
     let exclusions = load_exclusions(&paths.profile_dir.join("exclusions.toml"))?;
-    let gate = ClaudeGate::new(runner.as_ref(), &tracker, &config);
+    let gate = ClaudeGate::new(runner.as_ref(), &tracker, config.daily_budget_usd)
+        .with_per_call_cap(config.per_call_budget_usd);
     // Before any prompt: a wrong login stops the whole command, not one dossier.
     gate.check_account(now).await?;
     let dir = paths.data_dir.join("dossiers");
@@ -1190,7 +1405,8 @@ async fn cmd_freelance(
     }
     let tracker = open_tracker(paths)?;
     let runner = claude_runner(paths, deps, &config)?;
-    let gate = ClaudeGate::new(runner.as_ref(), &tracker, &config);
+    let gate = ClaudeGate::new(runner.as_ref(), &tracker, config.daily_budget_usd)
+        .with_per_call_cap(config.per_call_budget_usd);
     gate.check_account(now).await?;
     let cv_md = std::fs::read_to_string(&paths.cv_master)
         .with_context(|| format!("leyendo {}", paths.cv_master.display()))?;
@@ -1238,7 +1454,7 @@ async fn cmd_freelance(
     Ok(EXIT_OK)
 }
 
-/// Records a company's answer until Gmail does it (plan 1b-3).
+/// Records a company's answer by hand: nothing reads the mailbox for it.
 fn cmd_mark(
     paths: &Paths,
     key: &str,
@@ -1249,6 +1465,14 @@ fn cmd_mark(
 ) -> Result<i32> {
     let tracker = open_tracker(paths)?;
     let outcome = actions::mark(&tracker, key, state_text, note, now)?;
+    writeln!(out, "{}", outcome.message)?;
+    Ok(if outcome.ok { EXIT_OK } else { EXIT_ERROR })
+}
+
+/// Takes back the last mark of an application, the same way the panel's undo does.
+fn cmd_unmark(paths: &Paths, key: &str, now: DateTime<Utc>, out: &mut dyn Write) -> Result<i32> {
+    let tracker = open_tracker(paths)?;
+    let outcome = actions::unmark(&tracker, key, now)?;
     writeln!(out, "{}", outcome.message)?;
     Ok(if outcome.ok { EXIT_OK } else { EXIT_ERROR })
 }
@@ -1412,7 +1636,8 @@ async fn run_dossier_step(
     let runner = claude_runner(paths, deps, &config)?;
     let store = open_prep_store(paths)?;
     let exclusions = load_exclusions(&paths.profile_dir.join("exclusions.toml"))?;
-    let gate = ClaudeGate::new(runner.as_ref(), &tracker, &config);
+    let gate = ClaudeGate::new(runner.as_ref(), &tracker, config.daily_budget_usd)
+        .with_per_call_cap(config.per_call_budget_usd);
     // A wrong login is an account error: `run_daily_steps` turns it into exit 1.
     let seen = gate.check_account(now).await?;
     print_account_warnings(&seen, out)?;
@@ -1520,139 +1745,6 @@ fn cmd_status(paths: &Paths, now: DateTime<Utc>, out: &mut dyn Write) -> Result<
     Ok(EXIT_OK)
 }
 
-/// A stamp for Gonza: his clock (Santiago) and how long ago, e.g. `2026-10-14 19:00 (hace 2 h)`;
-/// `name_the_zone` makes it `(hora de Santiago, hace 2 h)`.
-fn stamp_with_age(at: DateTime<Utc>, now: DateTime<Utc>, name_the_zone: bool) -> String {
-    let age = now - at;
-    let ago = if age < TimeDelta::minutes(1) {
-        "hace un momento".to_string()
-    } else if age < TimeDelta::hours(1) {
-        format!("hace {} min", age.num_minutes())
-    } else if age < TimeDelta::days(2) {
-        format!("hace {} h", age.num_hours())
-    } else {
-        format!("hace {} días", age.num_days())
-    };
-    let zone = if name_the_zone {
-        "hora de Santiago, "
-    } else {
-        ""
-    };
-    format!(
-        "{} ({zone}{ago})",
-        at.with_timezone(&Santiago).format("%Y-%m-%d %H:%M")
-    )
-}
-
-/// The `Última corrida` lines of `status`, from `meta.last_run_*`.
-fn describe_last_run(tracker: &Tracker, now: DateTime<Utc>) -> Result<String> {
-    let at = tracker
-        .get_meta("last_run_at")?
-        .and_then(|text| DateTime::parse_from_rfc3339(&text).ok())
-        .map(|time| time.with_timezone(&Utc));
-    let Some(at) = at else {
-        return Ok("Última corrida: ninguna todavía (la tarea programada la anota al terminar cada run-daily).".to_string());
-    };
-    let result = tracker.get_meta("last_run_result")?.unwrap_or_default();
-    let result = match result.as_str() {
-        "ok" => "ok".to_string(),
-        "stopped" => "se detuvo por STOP".to_string(),
-        "window_closed" => "se cerró la ventana de ejecución".to_string(),
-        other => other.to_string(),
-    };
-    let mut text = format!(
-        "Última corrida: {}: {result}",
-        stamp_with_age(at, now, true)
-    );
-    let steps = tracker
-        .get_meta("last_run_steps")?
-        .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok());
-    if let Some(steps) = steps {
-        text.push_str("\n  ");
-        text.push_str(&describe_steps(&steps));
-    }
-    Ok(text)
-}
-
-/// `descubrir: 1 nuevas · preparar: 1 preparadas · ...` from the JSON of `meta.last_run_steps`.
-fn describe_steps(steps: &serde_json::Value) -> String {
-    let count = |step: &str, key: &str| steps[step][key].as_i64().unwrap_or(0);
-    let mut parts = Vec::new();
-    for (step, label) in RUN_STEPS {
-        let entry = &steps[step];
-        if entry.is_null() {
-            continue;
-        }
-        let what = if entry["ran"].as_bool() != Some(true) {
-            match entry["skipped"].as_str().unwrap_or_default() {
-                "cooldown" => format!("omitido (hace menos de {DISCOVER_COOLDOWN_HOURS} h)"),
-                "stop" => "omitido (STOP)".to_string(),
-                "window_closed" => "omitido (ventana cerrada)".to_string(),
-                "after_error" => "omitido (tras un error)".to_string(),
-                "error" => "con error".to_string(),
-                other => format!("omitido ({other})"),
-            }
-        } else {
-            match step {
-                "discover" => format!("{} nuevas", count(step, "new")),
-                "prepare" => format!("{} preparadas", count(step, "prepared")),
-                "submit" => format!(
-                    "{} enviadas, {} para ti",
-                    count(step, "submitted"),
-                    count(step, "needs_gonza")
-                ),
-                _ => format!("{} escritos", count(step, "written")),
-            }
-        };
-        parts.push(format!("{label}: {what}"));
-    }
-    parts.join(" · ")
-}
-
-/// The `Cuenta de Claude` line of `status`, from what the last preflight left in `meta`.
-fn describe_last_account(tracker: &Tracker, now: DateTime<Utc>) -> Result<String> {
-    let record = tracker
-        .get_meta("claude_account_last")?
-        .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok());
-    let Some(record) = record else {
-        return Ok(
-            "Cuenta de Claude: sin verificar todavía (jobbot claude-login, o jobbot claude-check)."
-                .to_string(),
-        );
-    };
-    let when = record["checked_at"]
-        .as_str()
-        .and_then(|text| DateTime::parse_from_rfc3339(text).ok())
-        .map(|time| stamp_with_age(time.with_timezone(&Utc), now, false))
-        .unwrap_or_else(|| "—".to_string());
-    // What the check noticed without refusing (a managed policy on this PC), under either verdict.
-    let warnings: String = record["warnings"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|warning| warning.as_str())
-        .map(|warning| format!("\n  Aviso: {warning}"))
-        .collect();
-    if record["ok"].as_bool() != Some(true) {
-        return Ok(format!(
-            "Cuenta de Claude: la última verificación falló ({when}): {}{warnings}",
-            record["message"].as_str().unwrap_or("sin detalle")
-        ));
-    }
-    let field = |key: &str| match record[key].as_str() {
-        Some(text) if !text.is_empty() => text.to_string(),
-        _ => "—".to_string(),
-    };
-    Ok(format!(
-        "Cuenta de Claude: verificada {when} · método {} · proveedor {} · suscripción {} · correo {} · org {}{warnings}",
-        field("auth_method"),
-        field("api_provider"),
-        field("subscription"),
-        field("email"),
-        field("org_id"),
-    ))
-}
-
 /// Read-only, like `top` and `status`: it works under STOP and outside the window.
 fn cmd_results(paths: &Paths, last: u64, out: &mut dyn Write) -> Result<i32> {
     let last = usize::try_from(last).unwrap_or(usize::MAX);
@@ -1690,14 +1782,6 @@ fn cmd_auto_approve(paths: &Paths, value: Option<&str>, out: &mut dyn Write) -> 
     };
     writeln!(out, "{}", outcome.message)?;
     Ok(if outcome.ok { EXIT_OK } else { EXIT_ERROR })
-}
-
-/// The `Auto-aprobación` line of `status` and of `jobbot auto-approve`.
-fn describe_auto_approve(tracker: &Tracker) -> Result<String> {
-    Ok(match actions::auto_approve_min(tracker)? {
-        None => "Auto-aprobación: apagada.".to_string(),
-        Some(min) => format!("Auto-aprobación: desde {min} puntos."),
-    })
 }
 
 fn cmd_stop(paths: &Paths, out: &mut dyn Write) -> Result<i32> {
@@ -1745,114 +1829,18 @@ async fn cmd_run_daily(
     };
     // The record is a convenience for `status` and the panel: failing to write it must not cost
     // the run its digest or its exit code.
-    if let Err(err) = record_run(paths, watch.now(), &end, &mut log) {
+    let recorded =
+        open_tracker(paths).and_then(|tracker| record_run(&tracker, watch.now(), &end, &mut log));
+    if let Err(err) = recorded {
         writeln!(out, "No pude anotar la corrida: {err:#}")?;
     }
     let digest = cmd_digest(paths, now, out)?;
     Ok(if steps != EXIT_OK { steps } else { digest })
 }
 
-/// The steps of `run-daily`, in order: the key in `meta.last_run_steps` and the word `status` uses.
-const RUN_STEPS: [(&str, &str); 4] = [
-    ("discover", "descubrir"),
-    ("prepare", "preparar"),
-    ("submit", "enviar"),
-    ("dossiers", "dossiers"),
-];
-
-/// Longest error text kept in `meta.last_run_result`: one line the panel can show whole.
-const RUN_ERROR_CHARS: usize = 300;
-
-/// How a `run-daily` ended: the value of `meta.last_run_result`.
-enum RunEnd {
-    /// Every step that was due ran (a failure of the dossiers alone does not count).
-    Done,
-    /// A STOP file appeared between two steps.
-    Stopped,
-    /// The execution window closed between two steps.
-    WindowClosed,
-    /// A step failed; the text is its error, cut and on one line when written.
-    Failed(String),
-}
-
-impl RunEnd {
-    fn as_meta(&self) -> String {
-        match self {
-            RunEnd::Done => "ok".to_string(),
-            RunEnd::Stopped => "stopped".to_string(),
-            RunEnd::WindowClosed => "window_closed".to_string(),
-            RunEnd::Failed(why) => format!(
-                "error: {}",
-                outbound::plain_line(why)
-                    .chars()
-                    .take(RUN_ERROR_CHARS)
-                    .collect::<String>()
-            ),
-        }
-    }
-
-    /// Why a step that never started did not: the `skipped` of its entry in the log.
-    fn skip_reason(&self) -> &'static str {
-        match self {
-            RunEnd::Done => "not_due",
-            RunEnd::Stopped => "stop",
-            RunEnd::WindowClosed => "window_closed",
-            RunEnd::Failed(_) => "after_error",
-        }
-    }
-}
-
-/// What each step of one `run-daily` did, as the JSON of `meta.last_run_steps`.
-#[derive(Default)]
-struct StepLog(serde_json::Map<String, serde_json::Value>);
-
-impl StepLog {
-    fn ran(&mut self, step: &str, mut items: serde_json::Value) {
-        items["ran"] = serde_json::Value::Bool(true);
-        self.0.insert(step.to_string(), items);
-    }
-
-    fn skipped(&mut self, step: &str, why: &str) {
-        self.0.insert(
-            step.to_string(),
-            serde_json::json!({"ran": false, "skipped": why}),
-        );
-    }
-
-    /// The steps the run never reached say why, so the record always lists all four.
-    fn close(&mut self, end: &RunEnd) {
-        for (step, _) in RUN_STEPS {
-            if !self.0.contains_key(step) {
-                self.skipped(step, end.skip_reason());
-            }
-        }
-    }
-}
-
-/// Writes `meta.last_run_at` (the end of the run), `last_run_result` and `last_run_steps`. Only a
-/// run that got past STOP, the window and the lock gets here: the hourly task turned away at the
-/// door writes nothing, so the last real run stays visible and `run-daily.cmd` keeps its log empty.
-/// The stamp goes last, so whoever sees a new one finds the result that belongs to it.
-fn record_run(
-    paths: &Paths,
-    finished: DateTime<Utc>,
-    end: &RunEnd,
-    log: &mut StepLog,
-) -> Result<()> {
-    log.close(end);
-    let tracker = open_tracker(paths)?;
-    tracker.set_meta("last_run_result", &end.as_meta())?;
-    tracker.set_meta(
-        "last_run_steps",
-        &serde_json::Value::Object(log.0.clone()).to_string(),
-    )?;
-    tracker.set_meta("last_run_at", &finished.to_rfc3339())?;
-    Ok(())
-}
-
 /// Transitions into `states` ever recorded; what a step moved is the difference across it.
 fn transitions_into(paths: &Paths, states: &[State]) -> Result<i64> {
-    open_tracker(paths)?.count_events(states, DateTime::UNIX_EPOCH)
+    Ok(open_tracker(paths)?.count_events(states, DateTime::UNIX_EPOCH)?)
 }
 
 /// When the window closes in the middle of a run (a slow board, a long queue of CVs) the rest of
@@ -2023,7 +2011,7 @@ fn cmd_prep(
 /// Serves the local panel until the process is stopped (Ctrl+C). Like `prep` and `approve`, it
 /// ignores STOP and the window: it only reads and writes the tracker and the prep store, on this
 /// PC, and starts no discovery, browser or Claude. The clock is the start time plus the time
-/// elapsed since, so it follows `main`'s reading of the real one. The one thing it
+/// elapsed since, which keeps `main` the only place that reads the real one. The one thing it
 /// asks of Windows is, read-only and in the background, whether the scheduled task is registered
 /// and when it fires next (`panel::scheduler`).
 async fn cmd_panel(
@@ -2037,8 +2025,8 @@ async fn cmd_panel(
         let clock = Box::new(move || {
             now + TimeDelta::from_std(started.elapsed()).unwrap_or_else(|_| TimeDelta::zero())
         });
-        Panel::open(paths.clone(), clock)
-            .map(|panel| panel.with_task_query(WindowsTasks::default_task()))
+        crate::panel::open(paths.clone(), clock)
+            .map(|panel| panel.with_task_query(WindowsTasks::daily()))
     };
     let server = match args.port {
         Some(port) => PanelServer::start(open_panel()?, port)?,
@@ -2088,11 +2076,11 @@ mod tests {
     use crate::answers::AnswerBank;
     use crate::claude::{ClaudeError, ClaudeReply, ClaudeRequest, ClaudeRunner};
     use crate::form::{SubmitMode, SubmitResult, SubmitStatus};
-    use crate::models::{FetchResult, Job};
+    use crate::models::{FetchError, FetchResult, Job};
     use crate::open_check::OpenStatus;
     use crate::testing::{FakeClaude, SAMPLE_CV, make_job, make_job_with, sample_dossier_json};
 
-    // Two instants chosen like the ones in the window tests (the same schedule file is used):
+    // Two instants chosen with the window tests (the same schedule file is used):
     // Wednesday 2026-10-14 15:00 UTC is 11:00 in New York, a busy hour; 22:00 UTC is 18:00 there
     // and 19:00 in Santiago, so the execution window is open.
     fn busy_now() -> DateTime<Utc> {
@@ -2161,9 +2149,10 @@ mod tests {
             _job: &Job,
             _cv: &Path,
             _bank: &AnswerBank,
-            mode: SubmitMode,
+            mode: FillMode,
             _shots: &Path,
         ) -> anyhow::Result<SubmitResult> {
+            let mode = mode.submit_mode();
             self.0.lock().unwrap().push(mode);
             let status = if mode == SubmitMode::DryRun {
                 SubmitStatus::DryRun
@@ -2347,6 +2336,9 @@ mod tests {
     async fn approve_marks_the_application() {
         let root = temp_root();
         seed(root.path(), &make_job(), &[State::Prepared]);
+        tracker_of(root.path())
+            .set_screenshot("test:1", Path::new("shots/a.png"))
+            .unwrap();
         let (_, out) = plain(root.path(), open_now(), &["approve", "test:1"]).await;
         assert!(out.contains("Aprobada: test:1"), "{out}");
         assert!(
@@ -2437,6 +2429,56 @@ mod tests {
         assert!(out.contains("Acme AI — Senior AI Engineer"), "{out}");
     }
 
+    /// The hostile corpus in every state a list shows, with hostile notes and hostile e-mails: what
+    /// the terminal prints holds no escape sequence, control or invisible character.
+    #[tokio::test]
+    async fn hostile_postings_and_emails_print_as_plain_text() {
+        use crate::testing::hostile::{MARK, emails, hidden_chars, postings};
+
+        let root = temp_root();
+        let t = tracker_of(root.path());
+        let walks: [&[State]; 4] = [
+            &[],
+            &[State::Prepared],
+            &[State::NeedsGonza],
+            &[State::Prepared, State::Submitted],
+        ];
+        for (i, (_, job)) in postings().into_iter().enumerate() {
+            t.add_job(&job, 80.0, &BTreeMap::new(), open_now()).unwrap();
+            t.create_application(&job.key(), open_now()).unwrap();
+            for state in walks[i % walks.len()] {
+                t.transition(&job.key(), *state, Some(&job.title), open_now())
+                    .unwrap();
+            }
+        }
+        let items: Vec<serde_json::Value> = emails(open_now())
+            .into_iter()
+            .map(|(_, item)| item)
+            .collect();
+        let file = root.path().join("emails.json");
+        std::fs::write(&file, serde_json::to_string(&items).unwrap()).unwrap();
+
+        let mut printed = String::new();
+        for command in [
+            vec!["inbox", "import", file.to_str().unwrap()],
+            vec!["top", "--n", "50"],
+            vec!["digest"],
+            vec!["status"],
+            vec!["today"],
+        ] {
+            let (code, out) = plain(root.path(), open_now(), &command).await;
+            assert_eq!(code, 0, "{command:?}: {out}");
+            let hidden = hidden_chars(&out);
+            assert!(hidden.is_empty(), "{command:?} printed {hidden:?}");
+            printed.push_str(&out);
+        }
+        assert!(printed.contains(MARK), "the lists showed the corpus");
+        let digest =
+            std::fs::read_to_string(root.path().join("data").join("digest-2026-10-14.md")).unwrap();
+        let hidden = hidden_chars(&digest);
+        assert!(hidden.is_empty(), "the digest file holds {hidden:?}");
+    }
+
     #[tokio::test]
     async fn discover_prints_the_report_with_fake_sources() {
         let root = temp_root();
@@ -2464,7 +2506,8 @@ mod tests {
             refreshed: 8,
             pruned_stale: 9,
             pruned_region: 11,
-            errors: vec!["ashby:acme: boom".into()],
+            rate_limited: 0,
+            errors: vec![FetchError::failed("ashby", "acme", "boom")],
         };
         assert_eq!(
             format_report(&report),
@@ -2472,6 +2515,160 @@ mod tests {
              4 excluidos · 5 fuera de región · 6 vencidos · 7 ya vistos · 8 actualizados · \
              podados: 9 vencidos, 11 fuera de región\n  ERROR ashby:acme: boom"
         );
+    }
+
+    #[test]
+    fn the_trace_is_asked_for_by_any_value_but_empty_or_zero() {
+        for (value, asked) in [
+            (None, false),
+            (Some(""), false),
+            (Some("  "), false),
+            (Some("0"), false),
+            (Some("1"), true),
+            (Some("yes"), true),
+        ] {
+            assert_eq!(trace_requested(value), asked, "{value:?}");
+        }
+    }
+
+    /// What the trace writer wrote, shared with the test.
+    #[derive(Clone, Default)]
+    struct Written(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Written {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn the_trace_writes_each_span_when_it_closes_with_its_fields_and_time() {
+        jobbot_testkit::spans::quiet_default();
+        let written = Written::default();
+        let sink = written.clone();
+        let tracker = Tracker::in_memory().unwrap();
+        tracing::subscriber::with_default(trace_subscriber(move || sink.clone()), || {
+            jobbot_app::actions::approve(&tracker, "nope:1").unwrap();
+        });
+        let text = String::from_utf8(written.0.lock().unwrap().clone()).unwrap();
+        assert!(
+            text.contains("approve") && text.contains("ok=false") && text.contains("time.busy"),
+            "{text}"
+        );
+        assert!(!text.contains("nope:1"), "the key stays out: {text}");
+    }
+
+    fn ana() -> UserPaths {
+        UserPaths::new(Some(r"C:\Users\ana"), None, None)
+    }
+
+    fn text_of(written: &Written) -> String {
+        String::from_utf8(written.0.lock().unwrap().clone()).unwrap()
+    }
+
+    #[test]
+    fn a_run_writes_to_a_log_through_the_privacy_filter_and_to_a_terminal_as_it_is() {
+        for (terminal, expected) in [
+            (false, "%USERPROFILE%\\x.json\n"),
+            (true, "C:\\Users\\ana\\x.json\n"),
+        ] {
+            let written = Written::default();
+            {
+                let mut out = log_output(written.clone(), terminal, ana);
+                writeln!(out, r"C:\Users\ana\x.json").unwrap();
+            }
+            assert_eq!(text_of(&written), expected, "terminal: {terminal}");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_error_of_a_logged_run_loses_the_user_folder() {
+        let root = temp_root();
+        let written = Written::default();
+        let code = {
+            let mut log = log_output(written.clone(), false, ana);
+            let args = [
+                "jobbot",
+                "inbox",
+                "import",
+                r"C:\Users\ana\Desktop\correos.json",
+            ]
+            .map(String::from)
+            .to_vec();
+            run_with(args, root.path(), open_now(), fake_deps(vec![]).0, &mut log).await
+        };
+        let text = text_of(&written);
+        assert_eq!(code, EXIT_ERROR, "{text}");
+        assert!(
+            text.contains(r"%USERPROFILE%\Desktop\correos.json") && !text.contains("ana"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn the_trace_goes_through_the_privacy_filter() {
+        jobbot_testkit::spans::quiet_default();
+        let written = Written::default();
+        let sink = written.clone();
+        tracing::subscriber::with_default(filtered_trace(move || sink.clone(), ana()), || {
+            let span = tracing::info_span!("probe", file = r"C:\Users\ana\x.json");
+            drop(span.enter());
+        });
+        // The trace prints a text field escaped (`C:\\Users\\...`); the filter knows that form too.
+        let text = text_of(&written);
+        assert!(
+            text.contains("%USERPROFILE%") && !text.contains("ana"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn the_trace_shows_only_jobbots_own_spans() {
+        jobbot_testkit::spans::quiet_default();
+        let written = Written::default();
+        let sink = written.clone();
+        tracing::subscriber::with_default(filtered_trace(move || sink.clone(), ana()), || {
+            // A dependency's span may carry a link with a token in it.
+            let url = "https://jobs.example/apply?token=abc";
+            drop(tracing::info_span!(target: "playwright_rs::page", "goto", url).entered());
+            drop(
+                tracing::info_span!(target: "jobbot_app::discovery", "discover", sources = 1)
+                    .entered(),
+            );
+        });
+        let text = text_of(&written);
+        assert!(
+            text.contains("discover") && !text.contains("goto"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn format_report_says_how_many_queries_a_host_asked_to_pause() {
+        let limited = FetchError::rate_limited(
+            "himalayas",
+            "rust",
+            120,
+            "himalayas.app:443 asked us to slow down; not asking again for 120 s",
+        );
+        let report = DiscoveryReport {
+            fetched: 1,
+            rate_limited: 2,
+            errors: vec![limited.clone(), limited],
+            ..DiscoveryReport::default()
+        };
+        let text = format_report(&report);
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(
+            lines[1],
+            "  2 consultas en pausa: el sitio pidió esperar y se retoman en otra corrida"
+        );
+        assert_eq!(lines.len(), 4, "{text}");
     }
 
     #[tokio::test]
@@ -2604,7 +2801,7 @@ mod tests {
         async fn fetch(&self) -> FetchResult {
             FetchResult {
                 jobs: vec![],
-                errors: vec!["down: HTTP 503".to_string()],
+                errors: vec![FetchError::failed("down", "api", "HTTP 503")],
             }
         }
     }
@@ -2733,7 +2930,7 @@ mod tests {
             _job: &Job,
             _cv: &Path,
             _bank: &AnswerBank,
-            _mode: SubmitMode,
+            _mode: FillMode,
             _shots: &Path,
         ) -> anyhow::Result<SubmitResult> {
             Ok(SubmitResult {
@@ -3956,6 +4153,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn unmark_takes_back_the_last_mark_once() {
+        let root = temp_root();
+        seed(
+            root.path(),
+            &make_job(),
+            &[State::Prepared, State::Submitted],
+        );
+        let (code, _) = plain(root.path(), busy_now(), &["mark", "test:1", "rejected"]).await;
+        assert_eq!(code, 0);
+        let (code, out) = plain(root.path(), busy_now(), &["unmark", "test:1"]).await;
+        assert_eq!(code, 0, "unmark needs no window: {out}");
+        assert!(out.contains("Deshecho: test:1 vuelve a submitted"), "{out}");
+        let row = tracker_of(root.path())
+            .get_application("test:1")
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.state, State::Submitted);
+        let (code, out) = plain(root.path(), busy_now(), &["unmark", "test:1"]).await;
+        assert_eq!(code, 1, "{out}");
+        assert!(
+            out.contains("No hay una marca reciente que deshacer"),
+            "{out}"
+        );
+    }
+
+    #[tokio::test]
     async fn record_registers_a_hand_sent_application_with_its_real_time_inside_work_hours() {
         let root = temp_root();
         let (code, out) = plain(
@@ -3964,15 +4187,15 @@ mod tests {
             &[
                 "record",
                 "--company",
-                "Globex",
+                "Toku",
                 "--title",
                 "Senior Software Engineer",
                 "--url",
-                "https://jobs.ashbyhq.com/globex/abc/application",
+                "https://jobs.ashbyhq.com/toku/abc/application",
                 "--at",
                 "2026-10-05T05:21:42Z",
                 "--cv",
-                "data/cv/globex.pdf",
+                "data/cv/toku.pdf",
                 "--note",
                 "enviada con Playwright",
                 "--salary-min",
@@ -3981,10 +4204,10 @@ mod tests {
         )
         .await;
         assert_eq!(code, 0, "record needs no window: {out}");
-        assert!(out.contains("Registrada como enviada: Globex"), "{out}");
+        assert!(out.contains("Registrada como enviada: Toku"), "{out}");
         let tracker = tracker_of(root.path());
         let row = tracker
-            .get_application("manual:jobs.ashbyhq.com_globex_abc")
+            .get_application("manual:jobs.ashbyhq.com_toku_abc")
             .unwrap()
             .unwrap();
         assert_eq!(row.state, State::Submitted);
@@ -3992,7 +4215,7 @@ mod tests {
             row.submitted_at,
             Some(Utc.with_ymd_and_hms(2026, 10, 5, 5, 21, 42).unwrap())
         );
-        assert_eq!(row.cv_path.as_deref(), Some("data/cv/globex.pdf"));
+        assert_eq!(row.cv_path.as_deref(), Some("data/cv/toku.pdf"));
         assert_eq!(row.note.as_deref(), Some("enviada con Playwright"));
         assert!(!row.approved);
         assert!(
@@ -4013,17 +4236,17 @@ mod tests {
             &[
                 "record",
                 "--company",
-                "Initech",
+                "Railway",
                 "--title",
                 "Senior Full-Stack Engineer",
                 "--url",
-                "https://jobs.ashbyhq.com/initech/xyz",
+                "https://jobs.ashbyhq.com/railway/xyz",
             ],
         )
         .await;
         assert_eq!(code, 0, "recording a fact is not blocked by STOP: {out}");
         let row = tracker_of(root.path())
-            .get_application("manual:jobs.ashbyhq.com_initech_xyz")
+            .get_application("manual:jobs.ashbyhq.com_railway_xyz")
             .unwrap()
             .unwrap();
         assert_eq!(row.submitted_at, Some(open_now()));
@@ -4035,11 +4258,11 @@ mod tests {
         let base = [
             "record",
             "--company",
-            "Globex",
+            "Toku",
             "--title",
             "SE",
             "--url",
-            "https://jobs.ashbyhq.com/globex/abc",
+            "https://jobs.ashbyhq.com/toku/abc",
         ];
         let with = |extra: &[&'static str]| {
             let mut parts: Vec<&str> = base.to_vec();
@@ -4060,7 +4283,7 @@ mod tests {
         let (code, out) = plain(
             root.path(),
             open_now(),
-            &["record", "--key", "test:1", "--company", "Globex"],
+            &["record", "--key", "test:1", "--company", "Toku"],
         )
         .await;
         assert_eq!(code, 1, "{out}");
@@ -4271,7 +4494,7 @@ mod tests {
         reply["summary"] = "Quiere hablar de sueldo".into();
         let mut video = inbox_msg("m2", "action_required");
         video["task"] = serde_json::json!({
-            "text": "Grabar el video de Acme AI",
+            "text": "Grabar el video de Acme",
             "due_at": "2026-10-16T15:00:00Z"
         });
         let file = write_inbox_file(root.path(), &serde_json::json!([reply, video]));
@@ -4290,7 +4513,7 @@ mod tests {
         assert!(
             out.contains("Tu lista de hoy — 2026-10-14")
                 && out.contains("Tareas abiertas (1)")
-                && out.contains("Grabar el video de Acme AI — vence en")
+                && out.contains("Grabar el video de Acme — vence en")
                 && out.contains("Esperan tu decisión (1)")
                 && out.contains("Acme AI — Senior AI Engineer · test:1: falta email")
                 && out.contains("Respuestas recientes, últimos 7 días (2)")
@@ -4313,7 +4536,7 @@ mod tests {
             &[
                 "task",
                 "add",
-                "Llamar a Globex",
+                "Llamar a Toku",
                 "--due",
                 "2026-10-16T12:00:00-03:00",
                 "--job-key",
@@ -4325,7 +4548,7 @@ mod tests {
         .await;
 
         assert_eq!(code, 0, "adding a task only writes the tracker: {out}");
-        assert!(out.contains("Tarea agregada: #1 Llamar a Globex"), "{out}");
+        assert!(out.contains("Tarea agregada: #1 Llamar a Toku"), "{out}");
         let row = tracker_of(root.path()).get_task(1).unwrap().unwrap();
         assert_eq!(
             (
@@ -4345,14 +4568,14 @@ mod tests {
         assert!(
             today.contains("Tareas abiertas (1)")
                 && today.contains(
-                    "#1 Llamar a Globex · https://example.com/oferta [test:1] — vence en 2 días"
+                    "#1 Llamar a Toku · https://example.com/oferta [test:1] — vence en 2 días"
                 ),
             "{today}"
         );
 
         let (code, out) = plain(root.path(), busy_now(), &["task", "done", "1"]).await;
         assert_eq!(code, 0, "{out}");
-        assert!(out.contains("Hecha: #1 Llamar a Globex"), "{out}");
+        assert!(out.contains("Hecha: #1 Llamar a Toku"), "{out}");
         let (_, today) = plain(root.path(), busy_now(), &["today"]).await;
         assert!(today.contains("Tareas abiertas (0)"), "{today}");
     }
@@ -4362,7 +4585,7 @@ mod tests {
         let root = temp_root();
         seed(root.path(), &make_job(), &[]);
         let go = |extra: &'static [&'static str]| {
-            let mut parts = vec!["task", "add", "Llamar a Globex"];
+            let mut parts = vec!["task", "add", "Llamar a Toku"];
             parts.extend_from_slice(extra);
             parts
         };
@@ -4516,7 +4739,7 @@ mod tests {
         let good = root.path().join("rag-job.txt");
         std::fs::write(&good, "Need a RAG engineer for a small internal tool.").unwrap();
         let bad = root.path().join("freight-job.txt");
-        std::fs::write(&bad, "Dashboard for a freight forwarding company.").unwrap();
+        std::fs::write(&bad, "Dashboard for a freight forwarding desk.").unwrap();
         let fake = Arc::new(FakeClaude::new(vec![FakeClaude::structured(
             serde_json::json!({"proposal": "I would start with a spike.", "questions_for_client": ["Scope?"]}),
             0.03,
@@ -4977,7 +5200,7 @@ mod tests {
         );
 
         // The panel reads back exactly what the run wrote, key for key.
-        let panel = Panel::open(Paths::new(root.path()), Box::new(open_now)).unwrap();
+        let panel = crate::panel::open(Paths::new(root.path()), Box::new(open_now)).unwrap();
         let controls = crate::panel::snapshot::build_snapshot(&panel)
             .map(|snapshot| serde_json::to_value(snapshot.controls).unwrap())
             .unwrap();

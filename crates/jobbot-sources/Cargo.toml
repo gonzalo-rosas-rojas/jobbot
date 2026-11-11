@@ -1,0 +1,33 @@
+[package]
+name = "jobbot-sources"
+description = "jobbot's job boards: one adapter per public job API or feed, the check that a posting is still open and the reader of an application form's questions."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+jobbot-app = { path = "../jobbot-app" }
+jobbot-domain = { path = "../jobbot-domain" }
+anyhow.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+getrandom.workspace = true
+html-escape.workspace = true
+regex.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["time"] }
+toml.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "time"] }
+wiremock.workspace = true
+
+[lints]
+workspace = true

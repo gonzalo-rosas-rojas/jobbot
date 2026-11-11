@@ -1,0 +1,46 @@
+[package]
+name = "jobbot-fuzz"
+description = "cargo-fuzz targets over the entry points that read strangers' input. Their bodies live in jobbot_testkit::fuzz, where proptest runs them on every platform."
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4.9"
+jobbot-browser = { path = "../crates/jobbot-browser" }
+jobbot-testkit = { path = "../crates/jobbot-testkit" }
+
+# Its own workspace: the main one excludes this folder.
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "form_plan"
+path = "fuzz_targets/form_plan.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "email_import"
+path = "fuzz_targets/email_import.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "address"
+path = "fuzz_targets/address.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "cv_markdown"
+path = "fuzz_targets/cv_markdown.rs"
+test = false
+doc = false
+bench = false

@@ -1,5 +1,5 @@
 //! Exclusion engine: decides whether a posting belongs to an entity or category
-//! the user must never apply to (`profile/exclusions.toml`).
+//! Gonza must never apply to.
 
 use crate::models::Job;
 use crate::rules::Exclusions;
@@ -121,16 +121,12 @@ mod tests {
         });
         let result = check_exclusion(&job, &RULES);
         assert!(result.excluded);
-        assert_eq!(
-            result.reason.as_deref(),
-            Some("domain:harborlight-shipping.com")
-        );
+        assert_eq!(result.reason.as_deref(), Some("domain:harborlight-shipping.com"));
     }
 
     #[test]
     fn domain_match_requires_a_label_boundary() {
-        let job =
-            make_job_with(|j| j.apply_url = "https://notharborlight-shipping.com/apply".into());
+        let job = make_job_with(|j| j.apply_url = "https://notharborlight-shipping.com/apply".into());
         assert!(!check_exclusion(&job, &RULES).excluded);
     }
 
@@ -148,8 +144,8 @@ mod tests {
     #[test]
     fn category_freight_forwarding_excluded() {
         let job = make_job_with(|j| {
-            j.company = "Harborwise".into();
-            j.description = "We run remote fleet tracking for freight forwarding companies.".into();
+            j.company = "Wavecrest".into();
+            j.description = "We run remote fleet tracking for freight forwarding desks.".into();
         });
         let result = check_exclusion(&job, &RULES);
         assert!(result.excluded);
@@ -162,7 +158,7 @@ mod tests {
     }
 
     #[test]
-    fn category_fleet_tracking_excluded_without_the_word_freight_forwarding() {
+    fn category_fleet_tracking_excluded_without_the_words_freight_forwarding() {
         let job = make_job_with(|j| {
             j.description = "We build Remote Fleet Tracking software.".into();
         });
@@ -174,33 +170,15 @@ mod tests {
     }
 
     #[test]
-    fn a_name_or_category_spelled_with_look_alike_letters_is_still_excluded() {
-        // "Tidewater Systems" with a Cyrillic "Т", "е" and "Ѕ".
-        let job = make_job_with(|j| j.company = "\u{0422}id\u{0435}water \u{0405}ystems".into());
-        let result = check_exclusion(&job, &RULES);
-        assert_eq!(result.reason.as_deref(), Some("name:Tidewater Systems"));
-        // "freight forwarding" with a Cyrillic "е" and "о", hidden in the description.
-        let job = make_job_with(|j| {
-            j.company = "Acme".into();
-            j.description = "We run fr\u{0435}ight f\u{043E}rwarding for retailers.".into();
-        });
-        let result = check_exclusion(&job, &RULES);
-        assert_eq!(
-            result.reason.as_deref(),
-            Some("category:freight forwarding")
-        );
-    }
-
-    #[test]
     fn unrelated_company_not_excluded() {
         assert!(!check_exclusion(&make_job(), &RULES).excluded);
     }
 
     #[test]
-    fn a_company_sharing_a_word_with_an_excluded_name_is_not_excluded() {
+    fn harbor_lighthouse_museum_is_not_excluded() {
         let job = make_job_with(|j| {
-            j.company = "Harbor Foods".into();
-            j.description = "Grocery delivery software.".into();
+            j.company = "Harbor Lighthouse Museum".into();
+            j.description = "Museum IT.".into();
         });
         assert!(!check_exclusion(&job, &RULES).excluded);
     }
@@ -217,6 +195,49 @@ mod tests {
         let result = check_exclusion(&job, &RULES);
         assert!(!result.excluded);
         assert_eq!(result.reason, None);
+    }
+
+    #[test]
+    fn a_name_or_category_split_by_an_invisible_character_or_written_wide_is_still_excluded() {
+        let rules = Exclusions {
+            names: vec!["Blocked Industries".into()],
+            domains: vec![],
+            categories: vec!["gambling".into()],
+        };
+        for company in ["Blo\u{200B}cked Industries", "Ｂｌｏｃｋｅｄ Industries"] {
+            let job = make_job_with(|j| j.company = company.into());
+            assert!(check_exclusion(&job, &rules).excluded, "{company:?}");
+        }
+        for word in ["gam\u{00AD}bling", "ｇａｍｂｌｉｎｇ"] {
+            let job = make_job_with(|j| j.description = format!("A {word} platform."));
+            assert!(check_exclusion(&job, &rules).excluded, "{word:?}");
+        }
+    }
+
+    #[test]
+    fn a_name_or_category_spelled_with_look_alike_letters_is_still_excluded() {
+        let rules = Exclusions {
+            names: vec!["Blocked Industries".into()],
+            domains: vec![],
+            categories: vec!["gambling".into()],
+        };
+        // Cyrillic Ve; Cyrillic o, es and ie; Greek Beta; mathematical bold B.
+        for company in [
+            "\u{0412}locked Industries",
+            "Bl\u{043E}\u{0441}k\u{0435}d Industries",
+            "\u{0392}locked Industries",
+            "\u{1D401}locked Industries",
+        ] {
+            let job = make_job_with(|j| j.company = company.into());
+            assert!(check_exclusion(&job, &rules).excluded, "{company:?}");
+        }
+        let job = make_job_with(|j| j.description = "A g\u{0430}mbling platform.".into());
+        assert!(check_exclusion(&job, &rules).excluded);
+        // Look-alikes do not join words that differ: neither of these is the excluded name.
+        for company in ["Locked Industries", "Blocker Industries"] {
+            let job = make_job_with(|j| j.company = company.into());
+            assert!(!check_exclusion(&job, &rules).excluded, "{company:?}");
+        }
     }
 
     #[test]

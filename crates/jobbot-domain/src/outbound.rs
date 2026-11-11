@@ -234,11 +234,32 @@ mod tests {
     }
 
     #[test]
+    fn dash_and_star_bullets_after_a_stray_blank_line_leave_with_their_entry() {
+        let exclusions = Exclusions {
+            names: vec!["Acme Hidden Corp".into()],
+            domains: vec![],
+            categories: vec![],
+        };
+        let cv = "## EXPERIENCE\n\nAcme Hidden Corp, Engineer\n• Led the team\n\n\
+                  - Built the private billing system\n* Ran the private operations\n\n\
+                  Other Co, Developer\n• Shipped the app";
+        let out = strip_excluded_entries(cv, &exclusions);
+        assert!(
+            !out.contains("billing") && !out.contains("operations"),
+            "{out}"
+        );
+        assert!(
+            out.contains("Other Co") && out.contains("## EXPERIENCE"),
+            "{out}"
+        );
+    }
+
+    #[test]
     fn the_current_employer_entry_is_removed_with_its_title_and_bullets() {
         let out = strip_excluded_entries(SAMPLE_CV, &exclusions());
         assert!(!out.contains("Harbor Light"), "{out}");
         assert!(!out.contains("Fractional Operations Contractor"), "{out}");
-        assert!(!out.contains("multi-office logistics operation"), "{out}");
+        assert!(!out.contains("multi-office healthcare practice"), "{out}");
         for kept in [
             "stackwave.io",
             "## KEY PROJECTS",
@@ -275,7 +296,7 @@ mod tests {
         );
         let out = strip_excluded_entries(&cv, &exclusions());
         assert!(!out.contains("Harbor Light"), "{out}");
-        assert!(!out.contains("multi-office logistics operation"), "{out}");
+        assert!(!out.contains("multi-office healthcare practice"), "{out}");
         assert!(
             out.contains("stackwave.io") && out.contains("Local LLM Lab"),
             "{out}"

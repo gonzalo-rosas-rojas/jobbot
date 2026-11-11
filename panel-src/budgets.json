@@ -1,0 +1,26 @@
+{
+  "note": "Per-area baseline of the minified script (bytes). node build.mjs refuses to write the page when an area, or the total, grows past its margin over this file (tools/budgets.mjs, MARGIN). To accept growth on purpose: node build.mjs --update-budgets, and commit this file with the reason. The global caps live in guard.mjs.",
+  "total": 465456,
+  "areas": {
+    "core": 24582,
+    "i18n": 2864,
+    "i18n/en": 60341,
+    "i18n/es": 63224,
+    "lib/lenis": 18643,
+    "lib/tinykeys": 1669,
+    "lib/ufuzzy": 9347,
+    "main": 2947,
+    "moments/aprender": 31919,
+    "moments/cola": 35127,
+    "moments/hoy": 22170,
+    "moments/procesos": 42854,
+    "moments/prologo": 2225,
+    "moments/registry": 88,
+    "moments/shared": 3081,
+    "moments/sistema": 25630,
+    "scene": 10839,
+    "sound": 21378,
+    "stage": 20536,
+    "ui": 65980
+  }
+}

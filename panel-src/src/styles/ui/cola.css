@@ -1,0 +1,250 @@
+/* COLA, the gate of 18:00 (spec §5.3, board/relay2/cola-1920.png and cola-3440.png). It lives under styles/ui/ (build.mjs takes every file of that
+   folder whose name does not start with "_"), and every rule is under `.cola`, so a generic name such as `.row` or `.meta` never leaks into
+   another moment. Text on the sheet is --ink, --ink-dim and --ink-accent (Papel swaps them with the sheet, §2.2); the one thing that is NOT on the
+   sheet is the capture of the dry run (the plane at its right, over the sky), which therefore keeps the dark-theme tokens (--text, --gold).
+   No hex colour, no font size outside the closed scale of tokens.css, no border around a button, no pill: words, weight, colour, a hairline.
+   Text that comes from outside (a company, a role, a posting's location) wraps at the edge of its box and is isolated for bidi. */
+
+.sheet[data-moment="cola"] { padding-top: 28px; }
+.cola { flex: none; position: static; display: flex; flex-direction: column; gap: clamp(8px, 1.15vh, 16px); color: var(--ink); }
+.cola .facts, .cola .role-title, .cola .why-text, .cola .co, .cola .role, .cola .meta, .cola .l-note, .cola .f-name, .cola .block-title, .cola .none, .cola .warn { overflow-wrap: anywhere; unicode-bidi: isolate; }
+.cola .eyebrow, .cola .engine, .cola .block-title, .cola .fig-l, .cola .foot-line, .cola .q-more, .cola .none, .cola .dim, .cola .sub { color: var(--ink-dim); }
+
+/* the head: where the stop stands, how the engine is, and the question */
+.cola .head-row { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 28px; }
+.cola .engine { display: inline-flex; align-items: baseline; gap: 8px; min-width: 0; text-align: right; }
+.cola .engine .dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--ink-dim); transform: translateY(-1px); }
+.cola .engine .dot[data-engine="recent"] { background: var(--ink); }
+.cola .engine .dot[data-engine="stale"], .cola .engine .dot[data-engine="never"], .cola .engine .dot[data-stopped="true"] { background: var(--ink-accent); }
+.cola .headline { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 4px 32px; }
+.cola .mega { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 0.22em; font-size: var(--fs-6); line-height: 0.92; letter-spacing: -0.012em; color: var(--ink); outline: none; }
+.cola .mega .n { font-weight: 700; } /* the count is in the ink of the headline: gold is what is his to do, and the count is not a verb */
+.cola .mega .of { font-size: var(--fs-5); font-weight: 400; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+.cola .ask { font-size: var(--fs-5); line-height: 1; padding-bottom: 6px; text-align: right; color: var(--ink); }
+.cola .sub { max-width: 70ch; }
+.cola .warn { color: var(--ink-accent); max-width: 110ch; text-transform: none; letter-spacing: 0; font-size: var(--fs-2); }
+
+/* the proposal: facts, role, score with its six bars, the five layers, why it is yours, the verbs */
+.cola .prop { display: grid; gap: 6px; padding: 2px 0 2px 22px; border-left: 2px solid var(--ink-accent); }
+.cola .facts { color: var(--ink-dim); letter-spacing: 0; }
+.cola .role-title { font-family: var(--body); font-size: var(--fs-5); font-weight: 600; line-height: 1.1; letter-spacing: -0.014em; color: var(--ink); max-width: 56ch; }
+.cola .score-row { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0 22px; align-items: center; max-width: 880px; }
+.cola .score { font-size: var(--fs-6); line-height: 0.9; letter-spacing: -0.01em; color: var(--ink); }
+.cola .bars { display: grid; grid-auto-flow: column; grid-template-rows: repeat(3, auto); grid-auto-columns: minmax(0, 1fr); gap: 5px 36px; }
+.cola .f-bar { display: grid; grid-template-columns: minmax(80px, 100px) minmax(0, 1fr) 62px; gap: 10px; align-items: center; color: var(--ink-dim); }
+.cola .f-bar .f-name { letter-spacing: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cola .f-bar .f-val { text-align: right; white-space: nowrap; letter-spacing: 0.01em; color: var(--ink-dim); }
+.cola .f-bar .track { display: block; position: relative; height: 3px; background: var(--line); }
+.cola .f-bar .track b { position: absolute; left: 0; top: 0; bottom: 0; width: calc(var(--k, 0) * 100%); background: var(--ink-dim); }
+.cola .f-bar[data-factor="fit"] .track b { background: var(--ink); }
+.cola .f-bar.skel .f-name, .cola .f-bar.skel .f-val { height: 8px; background: var(--line); opacity: 0.6; }
+.cola .bars-msg { grid-row: 1 / -1; color: var(--ink-dim); text-transform: none; letter-spacing: 0; font-size: var(--fs-2); }
+.cola .bars-msg .plane-retry, .cola .plane-retry { margin-left: 10px; color: var(--ink-accent); text-decoration: underline; text-underline-offset: 3px; }
+
+.cola .path { display: flex; margin-top: 8px; color: var(--ink-dim); }
+.cola .path li { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 4px; padding: 7px 10px 0 0; border-top: 1px solid var(--line-strong); }
+.cola .path li .l-name { font-weight: 600; color: var(--ink); }
+.cola .path li .l-note { font-family: var(--body); font-size: var(--fs-1); letter-spacing: 0; color: var(--ink-dim); }
+.cola .path li[data-state="here"] { border-top-color: var(--ink-accent); }
+.cola .path li[data-state="here"] .l-name, .cola .path li[data-state="here"] .l-note .gold { color: var(--ink-accent); }
+.cola .path li[data-state="here"] .l-note { color: var(--ink); }
+.cola .path li[data-state="missing"] .l-name { color: var(--ink-dim); }
+.cola .path li[data-state="missing"] { border-top-style: dashed; }
+.cola .why { margin-top: 4px; max-width: 96ch; font-size: var(--fs-2); color: var(--ink-dim); }
+.cola .why-label { margin-right: 10px; font-weight: 600; letter-spacing: 0; }
+.cola .why-text { color: var(--ink-dim); }
+
+.cola .verbs { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 28px; padding-top: 6px; }
+.cola .acts { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px 28px; }
+.cola .batch-btn { color: var(--ink); }
+.cola .batch-btn[data-none="true"] { color: var(--ink-dim); cursor: default; }
+.cola .batch-btn[data-none="true"] .act-label { font-weight: 400; }
+.cola .step { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; color: var(--ink-dim); }
+.cola .step .step-btn { display: inline-flex; }
+.cola .step .step-text { margin-left: 4px; letter-spacing: 0; }
+.cola .confirm { flex-basis: 100%; display: block; margin-top: 4px; padding: 8px 0 0; border-top: 1px dashed var(--ink-accent); color: var(--ink-dim); font-size: var(--fs-1); text-transform: none; letter-spacing: 0; line-height: 1.7; }
+.cola .confirm .gold { font-weight: 600; letter-spacing: 0; }
+.cola .confirm .names { color: var(--ink); overflow-wrap: anywhere; unicode-bidi: isolate; }
+.cola .confirm .ck { display: inline-flex; align-items: center; gap: 8px; margin-left: 14px; color: var(--ink); white-space: nowrap; font-weight: 600; }
+.cola .confirm .ck .k { color: var(--ink-accent); border-color: var(--ink-accent); }
+.cola .confirm .ck:hover span:last-child { text-decoration: underline; text-underline-offset: 3px; }
+.cola .prop[data-enter="true"] { animation: cola-in 260ms var(--ease) both; }
+.cola .prop[data-pending="true"] .acts { opacity: 0.3; pointer-events: none; }
+.cola[data-state="loading"] > :not(.skeleton) { display: none; }
+.cola .skeleton { display: grid; gap: 10px; padding: 8px 0 8px 24px; border-left: 2px solid var(--line); }
+.cola .skel-line { height: 14px; width: 62%; background: var(--line); opacity: 0.6; }
+.cola .skel-line.wide { height: 30px; width: 40%; }
+
+/* from the posting to the send: five figures and the band that narrows between them */
+.cola .funnel { display: grid; gap: 4px; }
+.cola .block-title { margin-bottom: 2px; }
+.cola .fn { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+/* in the markup the label comes first (what a reader of the page hears first); on the screen the number does */
+.cola .fig { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.cola .fig-n { order: 0; }
+.cola .fig-l { order: 1; }
+.cola .fig-s { order: 2; }
+.cola .fig-n { font-size: var(--fs-5); line-height: 1; letter-spacing: -0.01em; color: var(--ink-dim); }
+.cola .fig-n[data-last="true"] { color: var(--mint); }
+.cola .fig-l { margin-top: 4px; }
+.cola .fig-s { margin-top: 2px; font-family: var(--body); font-size: var(--fs-1); letter-spacing: 0; color: var(--ink-dim); }
+.cola .band { display: block; width: 100%; height: 28px; margin-top: 6px; }
+.cola .band path { fill: var(--line); stroke: var(--line-strong); stroke-width: 1; vector-effect: non-scaling-stroke; }
+
+/* the queue: rows of one line, the kind in mono, the key and its verb at the right */
+.cola .queue { display: grid; gap: 4px; }
+.cola .q-rows { display: block; max-height: calc(7 * 34px); overflow-y: auto; overscroll-behavior-y: contain; border-bottom: 1px solid var(--line); }
+.cola .q-row { display: grid; grid-template-columns: calc(var(--fs-1) * 10) minmax(0, 1fr) auto minmax(128px, auto); align-items: center; gap: 4px 18px; min-height: 34px; padding: 1px 0; border-top: 1px solid var(--line); font-size: var(--fs-3); }
+.cola .q-kind { color: var(--ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cola .q-row .what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cola .q-row .co { font-weight: 600; }
+.cola .q-row .co:not([hidden]) + .role::before { content: " · "; color: var(--ink-dim); }
+.cola .q-row .meta { white-space: nowrap; color: var(--ink-dim); }
+.cola .q-row .acts { justify-self: end; flex-wrap: nowrap; }
+.cola .q-row[data-kind="sent"] .what, .cola .q-row[data-kind="sent"] .co { color: var(--ink-dim); font-weight: 400; }
+.cola .q-row[data-kind="blocked"] .co { color: var(--ink-dim); }
+.cola .q-row[data-opens="true"] { cursor: pointer; }
+.cola .q-row[data-opens="true"]:hover:not(:has(button:hover)) :is(.co, .role) { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.cola .q-row[data-cursor="true"], .cola .prop[data-cursor="true"] { background: linear-gradient(90deg, var(--line), transparent 78%); }
+.cola [data-pending="true"].q-row { opacity: 0.3; pointer-events: none; }
+.cola .q-more { padding: 2px 0; }
+
+/* trust: how many approvals are his, how many sends the cap holds */
+.cola .trust { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 40px; }
+.cola .trust .label { margin: 0; }
+.cola .trust .sq { display: flex; gap: 6px; margin: 7px 0 6px; }
+.cola .trust .sq i { display: block; width: 18px; height: 10px; border: 1px solid var(--line-strong); }
+.cola .trust .sq i[data-on="true"] { background: var(--ink); border-color: var(--ink); }
+.cola .trust .cap-meter { display: block; position: relative; height: 4px; margin: 9px 0 8px; background: var(--line); }
+.cola .trust .cap-meter i { position: absolute; left: 0; top: 0; bottom: 0; width: calc(var(--k, 0) * 100%); background: var(--ink); }
+
+.cola .foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 24px; margin-top: auto; padding-top: 2px; }
+.cola .engine-ctl { display: inline-flex; align-items: center; gap: 14px; }
+.cola .stop-state { color: var(--ink-dim); }
+.cola .stop-state[data-on="true"] { color: var(--ink-accent); }
+@media (min-width: 760px) { .cola .stop-btn { min-height: 24px; } }
+
+/* the capture of the dry run: a sheet of paper, tilted, at the right of the glass (its own surface, over the sky, so it keeps the dark tokens).
+   It is a child of the section but not of its box: its containing block is the sheet (the section and the host are not positioned), so the
+   scrolling host never clips it and never moves it. */
+.cola .plane-wrap { position: absolute; left: calc(100% + 40px); top: 128px; width: calc(100vw - 2 * var(--gutter) - var(--sheet) - 40px); max-width: 760px; height: calc(100vh - var(--hud) - 150px - 18vh - 8px); --plane-w: min(86%, 460px, calc((100vh - var(--hud) - 150px - 18vh - 8px - 70px) * 0.8036)); --plane-t: rotateY(-17deg) rotateX(3deg); display: grid; align-content: center; justify-items: center; gap: 14px; pointer-events: none; z-index: 1; color: var(--text); }
+/* The plane and its two shades share one cell (the stack), the same size and the same tilt. The shades are the soft shadows of the paper: a dark one and
+   a warm glow, 140 and 120 px of blur. Each is a big blur to rasterize the first time (70 ms and more where the GPU is soft, which is a long frame in the middle of
+   the arrival), so they are not part of the plane's own paint: shot.js brings them in one after the other (data-halo 1, 2), a frame of their own each, and the
+   picture arriving does not paint them again. */
+.cola .plane-stack { display: grid; justify-items: center; width: 100%; perspective: 1800px; perspective-origin: 36% 50%; } /* the perspective is the plane's parent's: it only reaches children */
+.cola .plane, .cola .plane-shade { grid-area: 1 / 1; width: var(--plane-w); aspect-ratio: 900 / 1120; border-radius: 6px; transform: var(--plane-t); transform-origin: 50% 50%; }
+.cola .plane { position: relative; overflow: hidden; background: rgb(228, 225, 218); box-shadow: 0 0 0 1px rgba(233, 239, 247, 0.08); }
+.cola .plane-shade { opacity: 0; pointer-events: none; transition: opacity 420ms var(--ease); }
+.cola .plane-shade[data-k="dark"] { box-shadow: 0 60px 140px rgba(6, 8, 14, 0.7); }
+.cola .plane-shade[data-k="warm"] { box-shadow: 0 50px 120px rgba(255, 130, 60, 0.14); }
+.cola .plane-wrap[data-halo="1"] .plane-shade[data-k="dark"], .cola .plane-wrap[data-halo="2"] .plane-shade { opacity: 1; }
+.cola .plane::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(0deg, rgba(255, 150, 70, 0.2) 0%, rgba(255, 150, 70, 0) 34%), linear-gradient(100deg, rgba(10, 14, 25, 0.26) 0%, rgba(10, 14, 25, 0) 40%); }
+.cola .plane .shot { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: cover; object-position: top center; filter: saturate(0.55) sepia(0.1) brightness(0.9); }
+/* In Papel the capture is a white form on a dusk blue beside a paper sheet: the brightest thing on the screen, and the eye goes to it before the
+   headline. Dimmer, same hue (brightness 0.9 -> 0.8; 0.74 read as dingy). Reversible: delete this line. */
+:root[data-theme="light"] .cola .plane .shot { filter: saturate(0.5) sepia(0.12) brightness(0.8); }
+.cola .plane .shot-skel { position: absolute; inset: 0; background: var(--paper-dim); opacity: 0.14; }
+/* the labels of the capture are the only text over the bare sky: a scrim keeps them at 4.5:1 at any hour of the day (A18), the way the prologue keeps its copy over its veil.
+   The scrim's own edge is feathered by a shadow of the same colour (the text sits inside the solid part) so it reads as a shadow on the sky and not as a black bar */
+.cola .plane-cap, .cola .plane-note, .cola .plane-wrap .plane-retry { padding: 5px 12px; text-align: center; line-height: 1.6; color: var(--text); background: rgba(6, 8, 14, 0.8); box-shadow: 0 0 14px 8px rgba(6, 8, 14, 0.8); }
+.cola .plane-cap { max-width: 92%; }
+.cola .plane-note { max-width: 36ch; letter-spacing: 0; font-size: var(--fs-2); }
+.cola .plane-wrap .plane-retry { pointer-events: auto; color: var(--gold); margin-left: 0; text-decoration: underline; text-underline-offset: 3px; }
+.cola .plane-wrap[data-state="none"] .plane, .cola .plane-wrap[data-state="error"] .plane { display: none; }
+/* The drawer (aside#detail.open, ui/drawer.js) opens right of the sheet, in the plane's own place, and shows this same capture, larger, with its
+   own Ampliar. So while it is open the plane steps back (it would be cut by the drawer and seen through its glass, twice the same picture) and it
+   comes back when the drawer closes, the same node and the same blob, so nothing is fetched again. Hidden, it also leaves the reading order and
+   the tab order (its retry button), so the drawer owns the focus. */
+.cola .plane-wrap { transition: opacity 260ms var(--ease) 120ms; }
+:root:has(#detail.open) .cola .plane-wrap { opacity: 0; visibility: hidden; transition: opacity 160ms var(--ease), visibility 0s 160ms; }
+
+.cola .q-row[data-enter="true"] { animation: cola-row-in 420ms var(--ease) both; }
+@keyframes cola-row-in { from { opacity: 0; transform: translateY(-14px); } to { opacity: 1; transform: none; } }
+@keyframes cola-in { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: none; } }
+
+/* Papel: the figures that were mint (a colour that does not read on paper) take the ink; the sheet's own tokens do the rest */
+:root[data-theme="light"] .cola .fig-n[data-last="true"] { color: var(--ink); }
+
+/* a laptop (1440): the sheet keeps its 960 and the plane narrows into what is left at its right; the strip of the five layers loses its notes */
+@media (max-width: 1500px) {
+  .cola .plane-wrap { left: calc(100% + 24px); width: calc(100vw - 2 * var(--gutter) - var(--sheet) - 24px); --plane-w: min(94%, 340px, calc((100vh - var(--hud) - 150px - 18vh - 8px - 70px) * 0.8036)); }
+  .cola .facts { letter-spacing: 0; }
+  .cola .block-title { letter-spacing: 0; }
+  .cola .fig-l { letter-spacing: 0; }
+  .cola .path li[data-state="here"] { flex: 1.5 1 0; }
+  .cola .fig-s, .cola .path li .l-note { letter-spacing: 0; }
+  .cola .f-bar { grid-template-columns: minmax(80px, 92px) minmax(0, 1fr) 54px; gap: 8px; }
+  .cola .q-row { grid-template-columns: calc(var(--fs-1) * 8) minmax(0, 1fr) auto minmax(100px, auto); gap: 4px 12px; }
+  .cola .q-row .meta { letter-spacing: 0; }
+  .cola .why { max-width: none; }
+}
+@media (max-width: 1300px) {
+  .cola .plane-wrap { display: none; }
+}
+@media (min-width: 2400px) {
+  .cola .plane-wrap { max-width: 1100px; --plane-w: min(86%, 720px, calc((100vh - var(--hud) - 150px - 18vh - 8px - 70px) * 0.8036)); --plane-t: rotateY(-20deg) rotateX(4deg); }
+  .cola .why { max-width: 110ch; }
+  .cola .q-row { min-height: 44px; }
+  .cola .q-rows { max-height: calc(7 * 44px); }
+}
+
+/* a browser window is rarely as tall as the screen: as it gets lower the rows tighten and then the headline and the score shrink */
+@media (min-width: 760px) and (max-height: 1010px) {
+  .cola .score { font-size: var(--fs-5); line-height: 1; }
+  .cola .q-row { min-height: 30px; }
+  .cola .q-rows { max-height: calc(7 * 30px); }
+  .cola .fig-n { font-size: var(--fs-4); }
+  .cola .band { height: 20px; margin-top: 2px; }
+  .cola .trust .sq { margin: 5px 0 4px; }
+  .cola .trust .cap-meter { margin: 7px 0 6px; }
+}
+@media (min-width: 760px) and (max-height: 900px) {
+  .cola .mega { font-size: var(--fs-5); line-height: 1; }
+  .cola .mega .of { font-size: var(--fs-4); }
+  .cola .ask { font-size: var(--fs-4); padding-bottom: 2px; }
+  .cola .role-title { font-size: var(--fs-4); }
+  /* the proposal and its path keep their parts but breathe less: 1366x768 and 1536x864 scrolled the sheet by 29 and 32 px before */
+  .cola .prop { gap: 3px; }
+  .cola .path { margin-top: 4px; }
+  .cola .path li { padding-top: 4px; }
+  .cola .band { height: 14px; }
+  .cola .why { margin-top: 0; }
+  .cola .funnel, .cola .queue { gap: 2px; }
+  .cola .q-rows { max-height: calc(5 * 30px); }
+}
+@media (min-width: 760px) and (max-height: 780px) {
+  .cola .trust { display: none; }
+  .cola .q-rows { max-height: calc(4 * 30px); }
+}
+
+/* under 760 px (§3.11): the sheet is a block of the page; the proposal comes first, then its capture (in the flow, flat), then the rest */
+@media (max-width: 759px) {
+  .cola .mega { font-size: var(--fs-6); }
+  .cola .ask { text-align: left; }
+  .cola .engine { text-align: left; }
+  .cola .prop { padding-left: 14px; }
+  .cola .role-title { font-size: var(--fs-4); }
+  .cola .score-row { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .cola .score { font-size: var(--fs-5); }
+  .cola .bars { grid-auto-flow: row; grid-template-rows: none; grid-template-columns: minmax(0, 1fr); }
+  .cola .f-bar { grid-template-columns: minmax(80px, 110px) minmax(0, 1fr) 56px; }
+  .cola .path { flex-direction: column; }
+  .cola .path li { flex: none; flex-direction: row; flex-wrap: wrap; gap: 4px 10px; padding: 6px 0 4px; }
+  .cola .verbs { gap: 4px 18px; }
+  .cola .step .step-btn .k { display: none; }
+  .cola .step .step-btn { min-width: 40px; min-height: 40px; justify-content: center; align-items: center; }
+  .cola .step { margin-left: 0; }
+  .cola .fn { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; }
+  .cola .fig-n { font-size: var(--fs-4); }
+  .cola .q-rows { max-height: none; }
+  .cola .q-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "kind kind" "what acts" "meta acts"; padding: 8px 0; }
+  .cola .q-kind { grid-area: kind; }
+  .cola .q-row .what { grid-area: what; white-space: normal; }
+  .cola .q-row .meta { grid-area: meta; white-space: normal; max-width: none; }
+  .cola .q-row .acts { grid-area: acts; }
+  .cola .trust { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .cola .plane-wrap { display: grid; position: static; order: 1; width: auto; max-width: none; height: auto; padding: 6px 0; --plane-w: min(100%, 340px); --plane-t: none; }
+  .cola .plane-stack { perspective: none; }
+  .cola .funnel, .cola .queue, .cola .trust, .cola .foot { order: 2; }
+}

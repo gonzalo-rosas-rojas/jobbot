@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Apply - which button sends (test fixture)</title></head>
+<body>
+<!-- Nothing here is sent anywhere. Every button records its click in `window.clicked`. A search box
+     in the header comes first, with its own "Apply filter" button; the application form has a
+     "Apply with LinkedIn" button of type submit before the real Submit button. Only the real one
+     shows the thank-you text. -->
+<form id="search" onsubmit="return false">
+  <input type="text" name="q" aria-label="Search jobs">
+  <button type="submit" id="filter">Apply filter</button>
+</form>
+<h1>Apply for Senior AI Engineer</h1>
+<form id="app" onsubmit="return false">
+  <div><label for="first_name">First name *</label> <input id="first_name" name="first_name" type="text" required></div>
+  <div><label for="resume">Resume/CV *</label> <input id="resume" name="resume" type="file" required></div>
+  <button type="submit" id="linkedin">Apply with LinkedIn</button>
+  <button type="button" id="dont">Don't apply</button>
+  <button type="button" id="send">Submit application</button>
+</form>
+<div id="result"></div>
+<script>
+  window.clicked = [];
+  document.querySelectorAll('button').forEach((button) => {
+    button.addEventListener('click', () => window.clicked.push(button.id));
+  });
+  document.getElementById('send').addEventListener('click', () => {
+    document.getElementById('result').textContent = 'Thank you for applying';
+  });
+</script>
+</body>
+</html>

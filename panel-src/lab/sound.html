@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sound lab</title>
+<style nonce="__NONCE__">
+/*__STYLE__*/
+/* the lab's own layout */
+main { max-width: 1120px; margin: 0 auto; padding: 24px 16px 56px; display: grid; gap: 20px; }
+h1 { font-size: 26px; }
+h2 { font-size: 15px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-variation-settings: normal; }
+.lab-bar { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+.lab-bar label { display: inline-flex; gap: 8px; align-items: center; }
+button { font: inherit; color: var(--ink); background: var(--raise); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; min-height: 36px; cursor: pointer; }
+button:hover { border-color: var(--track); }
+button.lab-primary { background: var(--track); color: var(--on-bad); border-color: var(--track); font-weight: 600; }
+button[aria-pressed="true"] { background: var(--track-soft); color: var(--track-ink); border-color: var(--track); }
+.lab-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+.lab-card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px; display: grid; gap: 6px; }
+.lab-card canvas { width: 100%; height: 52px; display: block; background: var(--paper); border-radius: 4px; }
+.lab-meta { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.lab-scopes { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.lab-scopes canvas { width: 100%; height: 150px; display: block; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+#log { font: 12px/1.55 ui-monospace, Consolas, monospace; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; min-height: 120px; margin: 0; white-space: pre-wrap; }
+.lab-note { color: var(--muted); font-size: 13px; max-width: 80ch; }
+.lab-num { font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<main id="lab"></main>
+<script nonce="__NONCE__">
+/*__SCRIPT__*/
+</script>
+</body>
+</html>

@@ -1,0 +1,3015 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Panel</title>
+<script nonce="__NONCE__">
+/* The theme before the first paint: ?theme=dark|light wins (the demo on a site asks for it), then the choice
+   made here with the T key, otherwise the system decides. */
+(function () {
+  try {
+    var q = new URLSearchParams(location.search).get("theme");
+    var t = q === "dark" || q === "light" ? q : localStorage.getItem("panel.theme");
+    if (t === "dark" || t === "light") document.documentElement.setAttribute("data-theme", t);
+  } catch (e) { /* the system theme stays */ }
+})();
+</script>
+<style nonce="__NONCE__">
+/* A station for a job search. Every application is a train going through the same five stops, the
+   board at the top says at a glance what is waiting for Gonza, and gold means "your turn". The
+   board is the one loud thing; everything under it is a quiet printed timetable. */
+/* Two themes from one set of rules (docs/COLOR.md). Papel is the light one, Tinta the dark one; both follow the
+   system until the T key or the button chooses. Colours are built in OKLCH: one blue (hue 262) for ink and
+   structure because blue is the colour people read as trustworthy, its complement amber (hue 85) reserved for
+   "your turn", a green only for what is confirmed and a red only for what is late. Every text pair passes
+   WCAG AAA or AA, and the four meanings stay apart for the three kinds of colour blindness. */
+:root {
+  color-scheme: light dark;
+  --paper: #edf0f6; --surface: #f7f9fc; --raise: #ffffff; --ink: #131f35; --muted: #4c596c; --line: #cbd2da; --line-soft: #dfe3ea;
+  --track: #2063b0; --track-soft: #d5e9fe; --track-ink: #173c70;
+  --gold: #fbc024; --gold-ink: #131f35; --gold-soft: #fcf0cb; --gold-text: #704500;
+  --bad: #c72d31; --bad-soft: #fee9e7; --on-bad: #ffffff; --ok: #00563a; --ok-soft: #d7f8e8;
+  --board: #131f35; --board-hi: #212e45; --board-lo: #0c1628; --board-edge: #2d384d; --chalk: #edf2f9; --chalk-dim: #99a6b8; --gap: #020511;
+  --urgent: #d02b31;
+  --on-board-ok: #5bf0b8;
+  --shade: color-mix(in srgb, var(--gap) 45%, transparent);
+  --mood: var(--track);
+  --display: "Bahnschrift", "DIN Alternate", "Segoe UI Semibold", "Arial Narrow", system-ui, sans-serif;
+  --cond: "Bahnschrift Condensed", "Bahnschrift", "DIN Condensed", "Arial Narrow", system-ui, sans-serif;
+  --body: "Segoe UI", system-ui, -apple-system, sans-serif;
+  --ease: cubic-bezier(.23, 1, .32, 1);
+  --ease-expo: cubic-bezier(.16, 1, .3, 1);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0a101c; --surface: #121926; --raise: #1b2331; --ink: #e9eff7; --muted: #9eacbe; --line: #2b3648; --line-soft: #1d2634;
+    --track: #61afee; --track-soft: #192f46; --track-ink: #abd7fd;
+    --gold: #fbc024; --gold-ink: #101a2d; --gold-soft: #3a2c01; --gold-text: #fed25f;
+    --bad: #ef6661; --bad-soft: #391716; --on-bad: #060d1a; --ok: #5bf0b8; --ok-soft: #013424;
+    --board: #101a2d; --board-hi: #1d283b; --board-lo: #091121; --board-edge: #2f3b50; --chalk: #edf2f9; --chalk-dim: #99a6b8; --gap: #01030c;
+    --urgent: #fa6863;
+  }
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --paper: #0a101c; --surface: #121926; --raise: #1b2331; --ink: #e9eff7; --muted: #9eacbe; --line: #2b3648; --line-soft: #1d2634;
+  --track: #61afee; --track-soft: #192f46; --track-ink: #abd7fd;
+  --gold: #fbc024; --gold-ink: #101a2d; --gold-soft: #3a2c01; --gold-text: #fed25f;
+  --bad: #ef6661; --bad-soft: #391716; --on-bad: #060d1a; --ok: #5bf0b8; --ok-soft: #013424;
+  --board: #101a2d; --board-hi: #1d283b; --board-lo: #091121; --board-edge: #2f3b50; --chalk: #edf2f9; --chalk-dim: #99a6b8; --gap: #01030c;
+  --urgent: #fa6863;
+}
+* { box-sizing: border-box; }
+html { background: var(--paper); }
+body { margin: 0; color: var(--ink); font: 15px/1.5 var(--body); background: var(--paper); }
+:focus-visible { outline: 3px solid var(--track); outline-offset: 2px; }
+a { color: var(--track); text-underline-offset: 3px; text-decoration-thickness: 1px; }
+h1, h2, h3, h4 { font-family: var(--display); font-weight: 600; margin: 0; letter-spacing: .005em; }
+h2 { font-size: 28px; line-height: 1.1; font-variation-settings: "wdth" 88; }
+h3 { font-size: 17px; }
+h4 { font-size: 15px; }
+p { margin: 0; }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+.num { font-variant-numeric: tabular-nums; }
+.wrap-any { overflow-wrap: anywhere; }
+.sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* ---- The board: split-flap counters. Each flap is four halves; the letters are painted by CSS from
+   data-c, so no text sits in the page and a screen reader reads the plain numbers instead. */
+.board { background: var(--board); color: var(--chalk); border-bottom: 1px solid var(--board-edge); }
+.board-in { max-width: 1240px; margin: 0 auto; padding: 18px 20px 14px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px 36px; align-items: end; }
+.b-info { display: grid; gap: 9px; justify-self: center; align-self: end; padding-bottom: 8px; font: 600 13px/1 var(--cond); letter-spacing: .1em; text-transform: uppercase; color: var(--chalk-dim); }
+.b-info .led::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 9px; border-radius: 50%; background: color-mix(in srgb, var(--chalk-dim) 45%, var(--board)); vertical-align: 1px; }
+.b-info .led.on::before { background: var(--on-board-ok); }
+.b-info .led.off::before { background: var(--gold); }
+.b-counters { display: flex; flex-wrap: wrap; gap: 14px 34px; }
+.b-group { display: grid; gap: 7px; justify-items: start; }
+.plate { font: 600 12px/1 var(--cond); letter-spacing: .14em; text-transform: uppercase; color: var(--chalk-dim); padding-left: 2px; }
+.b-clock { display: flex; align-items: flex-end; gap: 18px; }
+.b-time { display: grid; gap: 7px; justify-items: end; }
+.b-dial { display: block; width: 92px; height: 92px; flex: none; }
+.dl-face { fill: color-mix(in srgb, var(--chalk) 5%, transparent); stroke: var(--board-edge); stroke-width: 1; }
+.dl-busy { fill: none; stroke: var(--chalk-dim); stroke-opacity: .5; stroke-width: 5; stroke-dasharray: 1.3 1.7; }
+.dl-rail { fill: none; stroke: var(--board-edge); stroke-width: 3; }
+.dl-lit { fill: none; stroke: var(--on-board-ok); stroke-width: 3; stroke-linecap: round; }
+.dl-tick { stroke: var(--chalk-dim); stroke-width: 1; stroke-opacity: .75; }
+.dl-hand line { stroke: var(--chalk); stroke-width: 1.6; stroke-linecap: round; }
+.dl-tip { fill: var(--gold); }
+.dl-hub { fill: var(--chalk); }
+.flaps { display: inline-flex; align-items: center; font-family: var(--cond); font-weight: 700; }
+.flaps.big { font-size: 56px; }
+.flaps.mid { font-size: 56px; }
+.flaps.small { font-size: 22px; }
+.fl { position: relative; display: inline-block; width: .62em; height: 1.12em; margin: 0 .04em; perspective: 520px; font-size: 1em; line-height: 1.12; }
+.fl.colon { width: .3em; }
+.fl > i { position: absolute; left: 0; right: 0; height: 50%; overflow: hidden; font-style: normal; backface-visibility: hidden; }
+.fl > i::before { content: attr(data-c); position: absolute; left: 0; right: 0; height: 200%; text-align: center; line-height: 1.12em; color: var(--chalk); }
+.fl .t, .fl .ft { top: 0; border-radius: .09em .09em 0 0; background: linear-gradient(180deg, var(--board-edge), var(--board-hi)); transform-origin: 50% 100%; }
+.fl .b, .fl .fb { bottom: 0; border-radius: 0 0 .09em .09em; background: linear-gradient(180deg, color-mix(in srgb, var(--board-hi) 70%, var(--board)), var(--board-hi)); transform-origin: 50% 0; }
+.fl .t::before, .fl .ft::before { top: 0; }
+.fl .b::before, .fl .fb::before { top: -100%; }
+.fl .ft, .fl .fb { visibility: hidden; z-index: 3; }
+.fl .fb { transform: rotateX(90deg); }
+.flaps.zero .fl > i::before { color: var(--chalk-dim); }
+.fl.go .ft, .fl.go .fb { visibility: visible; }
+.fl::after { content: ""; position: absolute; left: 0; right: 0; top: calc(50% - .5px); height: 1px; background: var(--gap); z-index: 4; }
+.fl::before { content: ""; position: absolute; top: calc(50% - .04em); left: -.02em; width: .08em; height: .08em; border-radius: 50%; background: var(--gap);
+  box-shadow: calc(.62em - .04em) 0 0 var(--gap); z-index: 5; }
+.fl.colon::before { box-shadow: none; left: 50%; }
+.fl.colon > i::before { color: var(--chalk-dim); }
+.fl.dim > i::before { color: var(--chalk-dim); }
+.b-line { max-width: 1240px; margin: 0 auto; padding: 0 20px 16px; }
+.b-line .flaps { max-width: 100%; overflow: hidden; }
+.b-line .fl .t, .b-line .fl .ft { background: linear-gradient(180deg, var(--board-hi), color-mix(in srgb, var(--board-hi) 70%, var(--board))); }
+
+/* The edge of the platform: its colour is the state of the day, readable from across the room. */
+.platform { height: 6px; background-color: var(--mood); position: relative; overflow: hidden; }
+.platform[data-mood="stop"] { background-image: repeating-linear-gradient(135deg, var(--gold) 0 8px, var(--board) 8px 16px); }
+.platform::after { content: ""; position: absolute; top: 0; bottom: 0; width: 38%; left: -45%; opacity: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .85), transparent); }
+.platform.ceremony::after { animation: sweep 2.2s var(--ease) 1; }
+@keyframes sweep { 0% { left: -45%; opacity: .9; } 100% { left: 110%; opacity: 0; } }
+
+/* ---- Bar: sections and controls */
+header.top { position: sticky; top: 0; z-index: 2; background: var(--paper);
+  border-bottom: 1px solid var(--line); }
+.top-in { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 28px; max-width: 1240px; margin: 0 auto; padding: 0 20px; }
+.brand { font: 600 18px var(--display); padding: 12px 0; letter-spacing: .02em; }
+nav.tabs { display: flex; gap: 4px; position: relative; }
+.tab-ink { position: absolute; left: 0; bottom: 0; width: 0; height: 3px; background: var(--track); pointer-events: none;
+  transition: transform .34s var(--ease), width .34s var(--ease); }
+nav.tabs button { border: 0; border-bottom: 3px solid transparent; border-radius: 0; background: none; padding: 13px 12px 10px;
+  font: 600 16px var(--display); color: var(--muted); cursor: pointer; display: inline-flex; gap: 8px; align-items: baseline; }
+nav.tabs button:hover { color: var(--ink); }
+nav.tabs button[aria-selected="true"] { color: var(--ink); }
+nav.tabs button.pop .count { animation: pop .32s var(--ease) 1; }
+.count { font: 600 13px var(--display); min-width: 22px; text-align: center; padding: 0 6px; border-radius: 10px;
+  background: var(--paper); color: var(--ink); border: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+.count.hot { background: var(--gold); color: var(--gold-ink); border-color: var(--gold); }
+#controls { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; margin-left: auto; padding: 8px 0; }
+
+main { max-width: 1240px; margin: 0 auto; padding: 28px 20px 90px; background: var(--paper); }
+@media (max-width: 700px) {
+  header.top { position: static; }
+  .top-in { padding: 0 12px; gap: 0 12px; }
+  .brand { padding: 10px 0 0; }
+  nav.tabs { order: 3; width: 100%; overflow-x: auto; }
+  nav.tabs button { flex: 1 0 auto; justify-content: center; padding: 10px 6px 8px; font-size: 14px; gap: 4px; }
+  #controls { margin-left: 0; padding: 4px 0 10px; width: 100%; }
+  main { padding: 18px 12px 60px; }
+  .detail { padding: 14px; }
+  .board-in { padding: 12px 12px 8px; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .b-clock { display: none; }
+  .b-info { justify-self: start; gap: 6px; padding-bottom: 0; font-size: 11px; }
+  .b-counters { flex-wrap: nowrap; gap: 8px 14px; justify-content: space-between; }
+  .plate { font-size: 10px; letter-spacing: .08em; }
+  .flaps.big, .flaps.mid { font-size: 34px; }
+  .flaps.small { font-size: 12px; }
+  .b-line { padding: 0 12px 12px; }
+}
+
+/* ---- Buttons and chips */
+button { font: inherit; color: inherit; background: var(--raise); border: 1px solid var(--line); border-radius: 6px; padding: 6px 14px; cursor: pointer;
+  transition: border-color .15s, background-color .15s, transform .15s var(--ease); }
+button:hover:not(:disabled) { border-color: var(--ink); }
+button:active:not(:disabled) { transform: translateY(1px); }
+button:disabled { opacity: .5; cursor: default; }
+button.primary { background: var(--ink); color: var(--surface); border-color: var(--ink); font-weight: 600; }
+button.danger { color: var(--bad); border-color: var(--bad); }
+button.link { border: 0; background: none; padding: 0; color: inherit; text-align: left; font-weight: 600; }
+button.link:hover { text-decoration: underline; }
+.chip { display: inline-block; padding: 0 8px; border-radius: 4px; border: 1px solid var(--line); font-size: 13px; line-height: 20px; white-space: nowrap; }
+.chip.turn { background: var(--gold); border-color: var(--gold); color: var(--gold-ink); font-weight: 700; }
+.chip.check { border: 1px dashed var(--gold); background: var(--gold-soft); }
+.chip.wait { border-color: var(--track); color: var(--track); }
+.chip.late { background: var(--bad-soft); border-color: var(--bad); color: var(--bad); font-weight: 700; }
+.chip.good { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); font-weight: 700; }
+.chip.late::before { content: "! "; }
+.chip.good::before { content: "\2713  "; }
+.badge { display: inline-block; padding: 0 8px; border-radius: 10px; border: 1px solid var(--line); font-size: 13px; line-height: 20px; }
+.badge.ok { color: var(--ok); border-color: var(--ok); }
+.badge.bad { color: var(--bad); border-color: var(--bad); }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.row.between { justify-content: space-between; }
+
+/* ---- Hoy */
+.hoy { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 20px 48px; align-items: start; }
+@media (max-width: 1000px) { .hoy { grid-template-columns: minmax(0, 1fr); } }
+/* The ticket and the list share the left column; the decisions take the right one from the top. */
+.hoy h2 { font-size: 22px; }
+@media (min-width: 1001px) {
+  .hoy { grid-template-rows: auto 1fr; }
+  .hoy > :nth-child(1) { grid-column: 1; grid-row: 1; }
+  .hoy > :nth-child(2) { grid-column: 1; grid-row: 2; }
+  .hoy > :nth-child(3) { grid-column: 2; grid-row: 1 / span 2; }
+}
+.hoy > :nth-child(3) > section { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px 12px; }
+.hoy > :nth-child(3) > .block { margin-top: 16px; }
+.lead { font: 600 15px var(--display); color: var(--muted); margin-top: 6px; text-wrap: balance; }
+.block { margin-top: 30px; }
+.block > h3 { padding-bottom: 8px; border-bottom: 2px solid var(--ink); display: flex; gap: 10px; align-items: baseline; }
+.block > h3 .count { align-self: center; }
+.items { list-style: none; margin: 0; padding: 0; }
+.item { display: grid; grid-template-columns: 6px minmax(0, 1fr) auto; gap: 0 14px; padding: 12px 0; border-bottom: 1px solid var(--line-soft); align-items: start; }
+.item::before { content: ""; align-self: stretch; border-radius: 3px; background: var(--line); }
+.item.now::before { background: var(--gold); }
+.item.late::before { background: var(--bad); }
+.item.plain { grid-template-columns: minmax(0, 1fr) auto; }
+.item.plain::before { display: none; }
+.item.stack { grid-template-columns: minmax(0, 1fr); }
+.item.next .item-title::after { content: "  \00B7  en el ticket"; font-weight: 500; font-size: 12px; color: var(--muted); }
+.act-row { margin-top: 6px; gap: 8px 14px; }
+.item-main { display: grid; gap: 3px; min-width: 0; }
+.item-title { font-weight: 600; overflow-wrap: anywhere; }
+.item-side { display: grid; gap: 6px; justify-items: end; text-align: right; }
+.when { font: 600 15px var(--cond); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.when.late { color: var(--bad); }
+.when.soon { color: var(--gold-ink); background: var(--gold); padding: 0 8px; border-radius: 4px; }
+.group { border-bottom: 1px solid var(--line); }
+.group > summary { cursor: pointer; padding: 11px 0; font: 600 16px var(--display); display: flex; gap: 10px; align-items: center; list-style: none; }
+.group > summary::-webkit-details-marker { display: none; }
+.group > summary::before { content: "+"; width: 18px; color: var(--muted); }
+.group[open] > summary::before { content: "\2212"; }
+.group > .items { padding-bottom: 8px; }
+.group .item { padding: 9px 0; }
+.fold { margin-top: 4px; }
+.fold > summary { cursor: pointer; color: var(--track); font-size: 13px; }
+pre.wrap { white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow: auto; background: var(--paper);
+  border: 1px solid var(--line); border-radius: 4px; padding: 8px; font: 13px/1.45 var(--body); margin: 6px 0 0; }
+.mail { padding: 10px 0; border-bottom: 1px solid var(--line-soft); display: grid; gap: 2px; }
+.empty { padding: 14px 0; color: var(--muted); }
+.fresh { animation: fresh 2.6s var(--ease) 1; }
+@keyframes fresh { 0% { background-color: color-mix(in srgb, var(--track) 24%, transparent); } 100% { background-color: transparent; } }
+
+/* ---- The ticket: the one thing to do now. Its colour says what kind of ask it is (gold: your
+   move, teal: the bot waits for your stamp, red: late or stuck), and doing it punches it. */
+.ticket-slot { margin: 22px 0 6px; min-height: 0; }
+.ticket-wrap { filter: drop-shadow(0 10px 16px var(--shade)); }
+.ticket { --tk: var(--gold-soft); --tk-ink: var(--gold-text); --stub: 150px; position: relative; display: grid; grid-template-columns: var(--stub) minmax(0, 1fr);
+  color: var(--tk-ink); border-radius: 14px; overflow: hidden;
+  -webkit-mask: radial-gradient(circle 10px at var(--stub) 0, transparent 97%, #000) top / 100% 51% no-repeat, radial-gradient(circle 10px at var(--stub) 100%, transparent 97%, #000) bottom / 100% 51% no-repeat;
+  mask: radial-gradient(circle 10px at var(--stub) 0, transparent 97%, #000) top / 100% 51% no-repeat, radial-gradient(circle 10px at var(--stub) 100%, transparent 97%, #000) bottom / 100% 51% no-repeat; }
+.ticket[data-tone="approve"] { --tk: var(--track-soft); --tk-ink: var(--track-ink); }
+.ticket[data-tone="late"] { --tk: var(--bad-soft); --tk-ink: var(--ink); }
+.ticket[data-tone="late"] .t-kind, .ticket[data-tone="late"] .t-when { color: var(--bad); }
+.ticket-stub, .ticket-body { background: var(--tk); }
+.ticket-stub { position: relative; padding: 16px 16px 14px; display: grid; align-content: space-between; gap: 8px; min-height: 150px; }
+.ticket-stub::after { content: ""; position: absolute; right: 0; top: 14px; bottom: 14px; border-right: 2px dashed color-mix(in srgb, var(--tk-ink) 38%, transparent); }
+.t-kind { font: 600 14px var(--display); }
+.t-when { font: 700 44px/1 var(--cond); font-variant-numeric: tabular-nums; letter-spacing: .01em; overflow-wrap: anywhere; }
+.t-when.small-text { font-size: 32px; letter-spacing: 0; }
+.t-sub { font-size: 13px; opacity: .92; }
+.ticket-body { padding: 16px 22px 14px 24px; display: grid; gap: 8px; align-content: start; min-width: 0; }
+.t-title { font: 600 28px/1.15 var(--display); overflow-wrap: anywhere; text-wrap: balance; }
+.t-title button.link { font: inherit; }
+.t-why { font-size: 15px; opacity: .94; overflow-wrap: anywhere; }
+.t-acts { margin-top: 4px; }
+.ticket button { background: color-mix(in srgb, var(--tk-ink) 7%, transparent); border-color: color-mix(in srgb, var(--tk-ink) 45%, transparent); color: var(--tk-ink); }
+.ticket button:hover:not(:disabled) { border-color: var(--tk-ink); background: color-mix(in srgb, var(--tk-ink) 14%, transparent); }
+.ticket button.primary { background: var(--tk-ink); color: var(--tk); border-color: var(--tk-ink); }
+.ticket button.ghost { background: none; border-color: transparent; text-decoration: underline; padding-left: 4px; padding-right: 4px; }
+.t-after { margin-top: auto; padding-top: 8px; font-size: 13px; opacity: .92; border-top: 1px solid color-mix(in srgb, var(--tk-ink) 18%, transparent); }
+.t-link { align-self: center; font-size: 14px; color: var(--tk-ink); }
+.ticket-clear { display: flex; gap: 18px; align-items: center; padding: 22px 24px; border: 2px dashed var(--line); border-radius: 14px; background: var(--surface); }
+.clear-mark { flex: none; width: 46px; height: 46px; border-radius: 50%; border: 4px solid var(--ok); position: relative; }
+.clear-mark::after { content: ""; position: absolute; left: 12px; top: 5px; width: 11px; height: 20px; border: solid var(--ok); border-width: 0 4px 4px 0; transform: rotate(40deg); }
+.clear-title { font: 600 22px var(--display); }
+.punch { position: absolute; left: calc(var(--stub) / 2 - 11px); top: 50%; width: 22px; height: 22px; margin-top: -11px; border-radius: 50%; background: var(--paper);
+  box-shadow: inset 0 2px 3px rgba(0, 0, 0, .35); transform: scale(0); z-index: 2; }
+.ticket.punched .punch { animation: punch .26s var(--ease) forwards; }
+.ticket.punched { animation: press .26s var(--ease); }
+.ticket-wrap { transform: perspective(1100px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)); transition: transform .18s ease-out; }
+.ticket::before { content: none; }
+.ticket-wrap.in { animation: ticket-in .42s var(--ease) 1; }
+.ticket-wrap.out { animation: ticket-out .24s ease-in forwards; }
+@keyframes punch { 0% { transform: scale(0); } 60% { transform: scale(1.25); } 100% { transform: scale(1); } }
+@keyframes press { 40% { transform: translateY(2px) scale(.995); } }
+@keyframes ticket-in { from { transform: translateX(34px) rotate(.8deg); opacity: 0; } }
+@keyframes ticket-out { to { transform: translateX(-46px) rotate(-.8deg); opacity: 0; } }
+@media (max-width: 700px) {
+  .ticket { --stub: 96px; }
+  .t-when { font-size: 32px; }
+  .t-when.small-text { font-size: 19px; }
+  .plan { overflow-x: auto; padding-bottom: 6px; }
+  .plan-in { min-width: 760px; }
+  .t-title { font-size: 20px; }
+  .ticket-body { padding: 14px 14px 12px 16px; }
+}
+
+/* ---- Procesos */
+.plan { margin-top: 6px; }
+.plan svg { display: block; width: 100%; height: auto; overflow: visible; }
+.line { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); margin-top: 2px; }
+.station { text-align: center; padding: 0 4px; min-width: 0; }
+.station-n { font: 700 46px/1 var(--cond); font-variant-numeric: tabular-nums; }
+.station-l { font: 600 15px var(--display); }
+.station-c { color: var(--muted); font-size: 13px; min-height: 20px; }
+.station.empty-stop .station-n { color: var(--muted); opacity: .55; }
+.filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 22px 0 6px; }
+@media (max-width: 700px) { .filters { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; } .filters button { flex: none; } }
+.filters button[aria-pressed="true"] { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+.grid-head, .proc { display: grid; grid-template-columns: minmax(180px, 1.5fr) 150px 112px minmax(130px, 1fr) minmax(190px, 1.4fr) 112px;
+  gap: 4px 16px; align-items: center; padding-left: 12px; }
+.grid-head { padding: 8px 0 8px 12px; border-bottom: 2px solid var(--ink); font: 600 14px var(--display); color: var(--muted); }
+.proc { padding-top: 11px; padding-bottom: 11px; border-bottom: 1px solid var(--line-soft); }
+.proc.mine { background: linear-gradient(90deg, var(--gold-soft), transparent 28%); box-shadow: inset 4px 0 0 var(--gold); }
+.clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.proc-name { display: grid; gap: 1px; min-width: 0; }
+.proc-name .small { overflow-wrap: anywhere; }
+.steps { display: flex; gap: 5px; align-items: center; }
+.step { width: 14px; height: 14px; border-radius: 50%; border: 3px solid var(--track-soft); background: var(--surface); }
+.step.done { background: var(--track); border-color: var(--track); }
+.step.here { background: var(--surface); border-color: var(--track); box-shadow: 0 0 0 3px var(--track-soft); }
+.step-label { font-size: 13px; color: var(--muted); }
+.since { display: flex; align-items: center; gap: 8px; }
+.since.stale { color: var(--bad); font-weight: 600; }
+.ring { width: 22px; height: 22px; flex: none; }
+.ring circle { fill: none; stroke-width: 3.2; }
+.ring .rt { stroke: var(--line); }
+.ring .rv { stroke: var(--track); stroke-linecap: round; transition: stroke-dashoffset .9s var(--ease); }
+.ring.warm .rv { stroke: var(--gold); }
+.ring.hot .rv { stroke: var(--bad); }
+@media (max-width: 980px) {
+  .grid-head { display: none; }
+  .proc { grid-template-columns: minmax(0, 1fr) auto; }
+  .proc > :nth-child(n+3) { grid-column: 1 / -1; }
+}
+/* the live map of cars */
+.car rect { fill: var(--track-soft); stroke: var(--track); stroke-width: 1.5; }
+.car text { font: 700 14px var(--cond); fill: var(--track-ink); letter-spacing: .04em; pointer-events: none; }
+.car.mine rect { fill: var(--gold); stroke: var(--gold); }
+.car.mine text { fill: var(--gold-ink); }
+.car.check rect { fill: var(--surface); stroke: var(--gold); stroke-width: 2; stroke-dasharray: 4 3; }
+.car.check text { fill: var(--ink); }
+.car.ghost rect { fill: var(--surface); stroke: var(--muted); stroke-dasharray: 3 3; }
+.car.ghost text { fill: var(--muted); }
+.car .late-dot { fill: var(--bad); stroke: var(--surface); stroke-width: 2; }
+.car { cursor: pointer; outline: none; }
+.car:focus-visible rect, .car:hover rect { stroke-width: 3; }
+.map-label { font: 600 12px var(--cond); fill: var(--muted); letter-spacing: .04em; }
+.map-track { stroke: var(--track); stroke-width: 4; stroke-linecap: butt; }
+.map-river { fill: url(#river-g); }
+.rg-a { stop-color: var(--track); stop-opacity: .38; }
+.rg-b { stop-color: var(--ok); stop-opacity: .5; }
+.map-flow { stroke: var(--paper); stroke-opacity: .7; stroke-width: 2; stroke-linecap: round; stroke-dasharray: 1 15; animation: flow 2.6s linear infinite; }
+@keyframes flow { to { stroke-dashoffset: -32; } }
+body.away .map-flow { animation: none; }
+.car .wheel { fill: var(--ink); opacity: .55; }
+.map-stop { fill: var(--surface); stroke: var(--track); stroke-width: 4.5; }
+.map-stop.off { stroke: var(--track-soft); }
+.map-num { font: 700 12px var(--cond); fill: var(--track-ink); text-anchor: middle; }
+.map-siding { stroke: var(--muted); stroke-width: 2.5; stroke-dasharray: 5 4; fill: none; }
+.map-legend { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px 18px; align-items: center; }
+.sw { display: inline-block; width: 22px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; border: 1.5px solid var(--track); background: var(--track-soft); }
+.sw.mine { background: var(--gold); border-color: var(--gold); }
+.sw.check { background: var(--surface); border: 2px dashed var(--gold); }
+.sw.ghost { background: var(--surface); border: 1.5px dashed var(--muted); }
+.map-rail { stroke: var(--track); stroke-opacity: .45; stroke-width: 2; stroke-linecap: round; }
+.map-yard { stroke: var(--track); stroke-opacity: .45; stroke-width: 2; }
+.car.fresh rect { animation: carpulse 1.4s var(--ease) 3; }
+@keyframes carpulse { 50% { stroke-width: 5; filter: brightness(1.25); } }
+
+/* ---- Cola, listas */
+.queue-row { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line-soft); align-items: baseline; }
+.score { font: 700 22px var(--cond); font-variant-numeric: tabular-nums; color: var(--muted); }
+
+/* ---- Detalle */
+.detail { display: none; position: fixed; top: 0; right: 0; bottom: 0; width: min(580px, 100vw); overflow: auto; outline: none;
+  background: var(--surface); border-left: 1px solid var(--line); padding: 20px; z-index: 3; box-shadow: -18px 0 40px -24px var(--shade);
+  view-transition-name: drawer; }
+.detail.open { display: block; }
+@supports not (view-transition-name: none) { .detail.open { animation: drawer .28s var(--ease); } }
+@keyframes drawer { from { transform: translateX(28px); opacity: 0; } }
+.detail h2 { font-size: 22px; }
+.detail h3 { margin: 22px 0 8px; padding-bottom: 6px; border-bottom: 1px solid var(--line); font-size: 16px; }
+.detail ul { margin: 0; padding-left: 20px; }
+.detail li { margin: 3px 0; }
+img.shot { max-width: 100%; border: 1px solid var(--line); border-radius: 4px; }
+input[type="text"], textarea, select { font: inherit; color: inherit; background: var(--paper); border: 1px solid var(--line);
+  border-radius: 6px; padding: 7px 9px; width: 100%; max-width: 560px; }
+select { width: auto; }
+table { border-collapse: collapse; }
+td { padding: 2px 14px 2px 0; }
+
+/* ---- Aprender */
+.learn { max-width: 760px; }
+.question { font: 600 22px/1.35 var(--display); }
+.card-q { perspective: 900px; background: var(--raise); border: 1px solid var(--line); border-radius: 16px; padding: 22px 24px;
+  box-shadow: 0 18px 34px -24px var(--shade), inset 4px 0 0 var(--track); }
+.card-q .question { font-size: 26px; margin: 6px 0 14px; }
+.card-q textarea { max-width: none; }
+#answer { border-left: 4px solid var(--track); background: var(--track-soft); color: var(--ink); font-size: 14px; }
+button[data-grade] { min-width: 44px; font-weight: 700; font-family: var(--cond); font-size: 18px; border-width: 2px; border-color: var(--g); background: color-mix(in srgb, var(--g) 14%, var(--raise)); }
+button[data-grade="0"] { --g: var(--muted); } button[data-grade="1"] { --g: color-mix(in srgb, var(--track) 22%, var(--muted)); }
+button[data-grade="2"] { --g: color-mix(in srgb, var(--track) 44%, var(--muted)); } button[data-grade="3"] { --g: color-mix(in srgb, var(--track) 66%, var(--muted)); }
+button[data-grade="4"] { --g: color-mix(in srgb, var(--track) 86%, var(--muted)); } button[data-grade="5"] { --g: var(--track); }
+#answer { transform-origin: 50% 0; animation: unfold .45s var(--ease) 1; }
+@keyframes unfold { from { transform: rotateX(-75deg); opacity: 0; } }
+
+.fatal { padding: 24px 0; color: var(--bad); font-weight: 600; }
+.toast { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); max-width: 90vw; padding: 9px 16px;
+  border-radius: 6px; background: var(--ink); color: var(--surface); opacity: 0; pointer-events: none; transform: translate(-50%, 14px);
+  transition: opacity .2s, transform .28s var(--ease); z-index: 4; }
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast.bad { background: var(--bad); color: var(--on-bad); }
+
+/* ---- The command palette */
+.kbd-btn { display: inline-flex; gap: 8px; align-items: center; padding: 3px 10px; font-size: 13px; color: var(--muted); }
+.kbd-btn kbd { font: 600 11px var(--cond); letter-spacing: .06em; padding: 1px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--paper); color: var(--muted); }
+.pal-back { position: fixed; inset: 0; z-index: 6; display: grid; justify-items: center; align-content: start; padding: 13vh 14px 0;
+  background: color-mix(in srgb, var(--gap) 62%, transparent); animation: pal-fade .16s ease-out; }
+.pal { width: min(640px, 100%); background: var(--raise); color: var(--ink); border: 1px solid var(--line); border-radius: 16px; overflow: hidden;
+  box-shadow: 0 30px 70px -20px var(--shade); animation: pal-in .2s var(--ease); }
+.pal input { display: block; width: 100%; max-width: none; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: none; padding: 17px 20px; font-size: 18px; }
+.pal input:focus-visible { outline: none; box-shadow: inset 0 -3px 0 var(--track); }
+.pal-list { list-style: none; margin: 0; padding: 6px; max-height: 50vh; overflow: auto; }
+.pal-item { display: grid; grid-template-columns: 112px minmax(0, 1fr) auto; gap: 12px; align-items: baseline; padding: 9px 12px; border-radius: 9px; cursor: pointer; }
+.pal-item.on { background: var(--track-soft); box-shadow: inset 3px 0 0 var(--track); }
+.pal-kind { font: 600 12px var(--cond); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.pal-text { font-weight: 600; overflow-wrap: anywhere; }
+.pal-extra { font-size: 12px; color: var(--muted); }
+.pal-empty { padding: 16px 12px; color: var(--muted); }
+.pal-foot { padding: 8px 16px; font-size: 12px; color: var(--muted); border-top: 1px solid var(--line); background: var(--surface); }
+@keyframes pal-fade { from { opacity: 0; } }
+@keyframes pal-in { from { transform: translateY(-10px) scale(.98); opacity: 0; } }
+@media (max-width: 700px) { .kbd-btn kbd, #open-keys { display: none; } .pal-item { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
+
+/* ---- Moving between things. The board stays put; a section slides the way you went (Hoy to Procesos is forward);
+   the drawer grows out of the row you opened and leaves back into it; lists glide to their new order. The
+   browser does the heavy lifting (view transitions) and the page works exactly the same without them. */
+::view-transition { pointer-events: none; }
+::view-transition-group(root) { animation: none; }
+::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+main { view-transition-name: page; }
+::view-transition-group(page) { animation-duration: 0s; }
+::view-transition-old(page), ::view-transition-new(page) { animation: none; mix-blend-mode: normal; }
+[data-vt="sun"]::view-transition-new(page) { animation: sun-in .74s var(--ease-expo) both; }
+[data-vt="sun"]::view-transition-old(page) { animation: sun-old .74s var(--ease-expo) both; }
+/* Moving along the line: the page slides toward the stop you chose and turns a little as it leaves, the way the
+   panel did in the story. Two or three stops away is a longer ride. */
+[data-vt="fwd"] { --vt-dir: 1; }
+[data-vt="back"] { --vt-dir: -1; }
+[data-vt="fwd"]::view-transition-old(page), [data-vt="back"]::view-transition-old(page) { animation: travel-out var(--vt-time, .62s) var(--ease-expo) both; }
+[data-vt="fwd"]::view-transition-new(page), [data-vt="back"]::view-transition-new(page) { animation: travel-in var(--vt-time, .62s) var(--ease-expo) both; }
+@keyframes travel-out { to { opacity: 0; transform: perspective(1500px) translateX(calc(var(--vt-dir, 1) * -9%)) rotateY(calc(var(--vt-dir, 1) * 10deg)) scale(.95); } }
+@keyframes travel-in { from { opacity: 0; transform: perspective(1500px) translateX(calc(var(--vt-dir, 1) * 9%)) rotateY(calc(var(--vt-dir, 1) * -10deg)) scale(.95); } }
+.platform .rider { position: absolute; top: 0; bottom: 0; left: 0; width: 56px; border-radius: 3px; background: var(--chalk); opacity: 0; pointer-events: none; }
+@keyframes sun-in { from { clip-path: circle(0 at var(--vt-x, 50%) var(--vt-y, 0)); } to { clip-path: circle(var(--vt-r, 160vmax) at var(--vt-x, 50%) var(--vt-y, 0)); } }
+@keyframes sun-old { to { transform: scale(.985); opacity: .45; } }
+::view-transition-old(drawer):only-child { animation: drawer-out .22s ease-in both; }
+::view-transition-new(drawer):only-child { animation: drawer-in .36s var(--ease) both; }
+::view-transition-group(drawer) { animation-duration: .3s; animation-timing-function: var(--ease); }
+[data-vt="next"]::view-transition-old(drawer) { animation: vt-out .14s ease-in both; }
+[data-vt="next"]::view-transition-new(drawer) { animation: vt-in .3s var(--ease) both; }
+[data-vt="prev"]::view-transition-old(drawer) { animation: vt-out-r .14s ease-in both; }
+[data-vt="prev"]::view-transition-new(drawer) { animation: vt-in-r .3s var(--ease) both; }
+::view-transition-group(job) { animation-duration: .42s; animation-timing-function: var(--ease); z-index: 1; }
+::view-transition-old(job), ::view-transition-new(job) { height: 100%; width: 100%; object-fit: none; object-position: left center; }
+@keyframes vt-out { to { opacity: 0; transform: translateX(-26px); } }
+@keyframes vt-in { from { opacity: 0; transform: translateX(26px); } }
+@keyframes vt-out-r { to { opacity: 0; transform: translateX(26px); } }
+@keyframes vt-in-r { from { opacity: 0; transform: translateX(-26px); } }
+@keyframes drawer-out { to { opacity: 0; transform: translateX(44px); } }
+@keyframes drawer-in { from { opacity: 0; transform: translateX(44px); } }
+@keyframes pop { 40% { transform: scale(1.28); } }
+/* where you are: the row the keyboard is on, the thing you were sent to, and what a car and its row share */
+li[data-card], li[data-task], section, .ticket-wrap { scroll-margin: 96px 0 28px; }
+li.cur { background: color-mix(in srgb, var(--track) 12%, transparent); box-shadow: inset 4px 0 0 var(--track); }
+.locate { animation: locate 1.6s var(--ease) 1; border-radius: 10px; }
+@keyframes locate { 0%, 40% { outline: 3px solid var(--track); outline-offset: 6px; } 100% { outline: 3px solid transparent; outline-offset: 14px; } }
+.proc.hl { background: color-mix(in srgb, var(--track) 11%, transparent); }
+.car.hl rect { stroke-width: 3.5; filter: brightness(1.18); }
+.b-group[role="button"] { cursor: pointer; border-radius: 8px; padding: 4px 6px 6px; margin: -4px -6px -6px; transition: background-color .15s; }
+.b-group[role="button"]:hover { background: rgba(255, 255, 255, .06); }
+.b-group[role="button"]:focus-visible { outline: 2px solid var(--chalk); outline-offset: 2px; }
+.seq { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.seq button { padding: 2px 9px; }
+.timeline { list-style: none; margin: 0; padding: 2px 0 2px 18px; border-left: 2px solid var(--track-soft); }
+.timeline li { position: relative; display: grid; gap: 1px; padding: 6px 0 8px; margin: 0; }
+.timeline li::before { content: ""; position: absolute; left: -25px; top: 11px; width: 10px; height: 10px; border-radius: 50%; background: var(--surface); border: 3px solid var(--track); }
+.timeline li:first-child::before { background: var(--ink); border-color: var(--ink); }
+.bars { display: grid; gap: 2px; }
+.bar-row { display: grid; grid-template-columns: minmax(110px, 1.3fr) 2fr 38px; gap: 12px; align-items: center; padding: 3px 0; }
+.bar-t { display: block; height: 9px; border-radius: 5px; background: var(--line-soft); overflow: hidden; }
+.bar-t i { display: block; height: 100%; width: calc(var(--w, 0) * 100%); border-radius: 5px; background: var(--track); transform-origin: 0 50%; animation: grow .7s var(--ease) both; }
+.bar-v { font: 700 16px var(--cond); text-align: right; }
+@keyframes grow { from { transform: scaleX(0); } }
+.keys { position: fixed; left: 16px; bottom: 16px; z-index: 5; width: min(360px, calc(100vw - 32px)); padding: 14px 16px; border-radius: 12px;
+  background: var(--raise); border: 1px solid var(--line); box-shadow: 0 22px 50px -18px var(--shade); animation: pal-in .2s var(--ease); }
+.keys h3 { font-size: 15px; margin-bottom: 8px; }
+.keys dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 14px; }
+.keys dt kbd { font: 600 12px var(--cond); padding: 1px 7px; border: 1px solid var(--line); border-radius: 4px; background: var(--paper); }
+.keys dd { margin: 0; color: var(--muted); }
+
+/* ---- One app, one way of moving: the same gestures as the story that introduces it. A section opens as a
+   sun; its title rises out of its baseline; what it lists comes in one after another; the funnel draws itself and
+   counts; an approval fills, then confirms in green. All of it plays only when you change section, never on
+   the silent refresh, and none of it when the system asks for less motion. */
+@property --n { syntax: "<integer>"; inherits: true; initial-value: 0; }
+#app.entering h2 { animation: title-rise .8s var(--ease-expo) .06s both; }
+#app.entering :is(.ticket-wrap, .lead, li.item, li.proc, li.queue-row, .mail, .station, .block > h3, .card-q, .ticket-clear) {
+  animation: row-in .55s var(--ease) calc(var(--i, 0) * 30ms + .16s) both; }
+@keyframes title-rise { from { transform: translateY(100%); clip-path: inset(0 0 100% 0); } to { transform: translateY(0); clip-path: inset(0 0 0 0); } }
+@keyframes row-in { from { opacity: 0; transform: translateY(12px); } }
+#app.entering .station-n { position: relative; color: transparent; }
+#app.entering .station-n::after { content: counter(n); counter-reset: n var(--n); position: absolute; inset: 0; color: var(--ink);
+  animation: count-up 1.05s var(--ease-expo) .3s both; }
+#app.entering .station.empty-stop .station-n::after { color: var(--muted); }
+@keyframes count-up { from { --n: 0; } }
+button.sending, button.sent { position: relative; overflow: hidden; }
+button.sending:disabled, button.sent:disabled { opacity: 1; }
+button.sending::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--gold); transform-origin: 0 50%;
+  animation: send-bar 1.1s var(--ease) infinite; }
+@keyframes send-bar { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+button.sent { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); }
+button.sent::before { content: "\2713  "; }
+
+/* ---- The story's ideas, as views you use: what jobbot did in the last day (Hoy), the path from a posting to a send,
+   the threshold and trust (Cola), and where one application stands among the five layers (the drawer). The same
+   words as the story, the same colours as everywhere: gold is your turn, blue is the way, green is confirmed. */
+.night-plot { position: relative; margin-top: 12px; }
+.night-svg { display: block; width: 100%; height: auto; overflow: visible; }
+.n-hatch { stroke: var(--line); stroke-width: 2; }
+.n-busy { fill: url(#night-hatch); }
+.n-base { stroke: var(--line); stroke-width: 2; }
+.n-bar { fill: var(--track); }
+.n-now { stroke: var(--ink); stroke-width: 2; }
+.n-dot { cursor: pointer; }
+.n-dot circle { fill: var(--surface); stroke: var(--track); stroke-width: 3.5; transform-box: fill-box; transform-origin: center; }
+.n-dot.ask circle { fill: var(--gold); stroke: var(--gold); }
+.n-dot.sent circle { fill: var(--ok); stroke: var(--ok); }
+.n-dot:hover circle { stroke: var(--ink); }
+.n-axis { position: relative; height: 20px; margin-top: 6px; }
+.n-axis span { position: absolute; top: 0; transform: translateX(-50%); font: 600 12px var(--cond); letter-spacing: .04em; color: var(--muted); white-space: nowrap; }
+.n-axis span.now { color: var(--ink); font-weight: 700; }
+.n-axis span.edge-r { transform: translateX(-100%); }
+.n-sub { font: 500 14px var(--display); color: var(--muted); }
+.n-list .n-li { display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; gap: 10px; align-items: baseline; padding: 7px 0; border-bottom: 1px solid var(--line-soft); }
+.sw.bar { background: var(--track); border-color: var(--track); width: 14px; }
+.sw.dot, .sw.dot-ask, .sw.dot-sent { width: 12px; border-radius: 50%; border: 3px solid var(--track); background: var(--surface); }
+.sw.dot-ask { background: var(--gold); border-color: var(--gold); }
+.sw.dot-sent { background: var(--ok); border-color: var(--ok); }
+.sw.hatch { border: 1.5px solid var(--line); background: repeating-linear-gradient(135deg, var(--line) 0 2px, transparent 2px 6px); }
+
+.route-river { fill: url(#route-g); }
+.cola-pair { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 0 44px; align-items: start; }
+@media (max-width: 900px) { .cola-pair { grid-template-columns: minmax(0, 1fr); } }
+.thr-plot { position: relative; margin-top: 8px; padding: 24px 0 24px; }
+.thr-svg { display: block; width: 100%; height: 112px; overflow: visible; }
+.h-bar { fill: var(--line); }
+.h-bar.in { fill: var(--track); }
+.h-thr { stroke: var(--ink); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.h-if { stroke: var(--ink); stroke-width: 2; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; }
+.thr-axis span { position: absolute; bottom: 0; transform: translateX(-50%); font: 600 12px var(--cond); letter-spacing: .04em; color: var(--muted); white-space: nowrap; }
+.thr-axis span.tag { color: var(--ink); font-weight: 700; }
+.thr-note { position: absolute; top: 2px; font: 700 15px var(--cond); letter-spacing: .02em; white-space: nowrap; pointer-events: none; }
+.thr-note.in { color: var(--track-ink); }
+.thr-note.out { color: var(--muted); transform: translateX(-100%); }
+.thr-try { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-top: 6px; }
+.thr-try input[type="range"] { flex: 1 1 200px; max-width: 360px; accent-color: var(--track); }
+.thr-try output { font: 700 20px var(--cond); min-width: 2ch; }
+.t-boxes { list-style: none; display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0 4px; padding: 0; }
+.t-box { width: 44px; height: 44px; border-radius: 8px; border: 2px dashed var(--line); display: grid; place-items: center; font: 700 22px var(--cond); color: var(--muted); }
+.t-box::before { content: attr(data-n); }
+.t-box.done { border: 2px solid var(--ok); background: var(--ok-soft); color: var(--ok); }
+.t-box.done::before { content: "\2713"; }
+.cap { margin-top: 20px; }
+.cap-label { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; margin-bottom: 6px; }
+.cap-bar { height: 10px; border-radius: 5px; background: var(--line-soft); overflow: hidden; }
+.cap-bar i { display: block; height: 100%; width: calc(var(--w, 0) * 100%); border-radius: 5px; background: var(--track); transform-origin: 0 50%; }
+.mini { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 2px; }
+.step.here.you { border-color: var(--gold); box-shadow: 0 0 0 3px var(--gold-soft); }
+
+.journey { list-style: none; margin: 6px 0 0; padding: 0; }
+.journey li { position: relative; display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 0 12px; padding: 0 0 16px; margin: 0; }
+.journey li::before { content: ""; position: absolute; left: 12px; top: 26px; bottom: 0; width: 2px; background: var(--track-soft); }
+.journey li:last-child { padding-bottom: 4px; }
+.journey li:last-child::before { content: none; }
+.journey li.j-done::before { background: var(--track); }
+.j-mark { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font: 700 15px/1 var(--cond);
+  border: 3px solid var(--track-soft); background: var(--surface); color: var(--muted); box-sizing: border-box; }
+.j-done .j-mark { background: var(--track); border-color: var(--track); color: var(--paper); }
+.j-done .j-mark::before { content: "\2713"; }
+.j-robot .j-mark { border-color: var(--track); color: var(--track-ink); }
+.j-robot .j-mark::before { content: "\2026"; }
+.j-you .j-mark { background: var(--gold); border-color: var(--gold); color: var(--gold-ink); }
+.j-you .j-mark::before { content: "!"; }
+.j-name { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font: 600 16px var(--display); min-height: 26px; }
+.j-todo .j-name { color: var(--muted); font-weight: 500; }
+.j-body { display: grid; gap: 4px; min-width: 0; }
+.j-after { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line-soft); display: grid; gap: 6px; }
+.journey.enter li { animation: row-in .5s var(--ease) calc(var(--i, 0) * 70ms + .15s) both; }
+
+@keyframes bar-up { from { transform: scaleY(0); } }
+@keyframes dot-in { from { opacity: 0; transform: scale(.2); } }
+@keyframes box-in { from { opacity: 0; transform: scale(.5); } }
+#app.entering .n-bar { transform-box: fill-box; transform-origin: 50% 100%; animation: bar-up .6s var(--ease) calc(var(--bi, 0) * 14ms + .22s) both; }
+#app.entering .h-bar { transform-box: fill-box; transform-origin: 50% 100%; animation: bar-up .6s var(--ease) calc(var(--bi, 0) * 7ms + .25s) both; }
+#app.entering .n-dot circle { animation: dot-in .45s var(--ease) calc(var(--bi, 0) * 14ms + .5s) both; }
+#app.entering .t-box.done { animation: box-in .5s var(--ease) calc(var(--bi, 0) * 110ms + .45s) both; }
+#app.entering .cap-bar i { animation: grow .8s var(--ease-expo) .6s both; }
+
+/* Movement is for what changed. Whoever asks for less gets none, and a hidden tab pays nothing. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+body.away .platform { animation: none; }
+</style>
+</head>
+<body>
+<section class="board" aria-label="Tablero de salidas">
+  <div class="board-in">
+    <div class="b-counters" id="b-counters" role="group" aria-label="Cuántas cosas esperan"></div>
+    <div class="b-info" id="b-info"></div>
+    <div class="b-clock" id="b-clock" aria-hidden="true"></div>
+  </div>
+  <div class="b-line" id="b-line" aria-hidden="true"></div>
+  <p class="sr" id="b-line-sr" role="status"></p>
+</section>
+<div class="platform" id="platform" data-mood="calm" aria-hidden="true"></div>
+<header class="top">
+  <div class="top-in">
+    <div class="brand">jobbot</div>
+    <nav class="tabs" role="tablist" aria-label="Secciones">
+      <button role="tab" id="tab-hoy" data-tab="hoy" aria-selected="true" aria-controls="app" tabindex="0">Hoy</button>
+      <button role="tab" id="tab-procesos" data-tab="procesos" aria-selected="false" aria-controls="app" tabindex="-1">Procesos</button>
+      <button role="tab" id="tab-cola" data-tab="cola" aria-selected="false" aria-controls="app" tabindex="-1">Cola</button>
+      <button role="tab" id="tab-learn" data-tab="learn" aria-selected="false" aria-controls="app" tabindex="-1">Aprender</button>
+    </nav>
+    <div id="controls"></div>
+  </div>
+</header>
+<main id="app" role="tabpanel" aria-labelledby="tab-hoy"><p class="muted">Cargando…</p></main>
+<aside id="detail" class="detail" tabindex="-1" aria-label="Detalle de la postulación"></aside>
+<div id="toast" class="toast" role="status"></div>
+<script nonce="__NONCE__">
+"use strict";
+(() => {
+  // The token arrives in the address, is read once and is taken out of the address bar.
+  const params = new URLSearchParams(location.search);
+  const token = params.get("t") || "";
+  // Shown inside another page (the demo on a site), the panel leaves the browser history alone.
+  const embedded = window.top !== window || params.has("embed");
+  history.replaceState(null, "", location.pathname + location.hash);
+
+  const STATE_LABELS = {
+    scored: "Puntuada", prepared: "Preparada", needs_gonza: "Necesita a Gonza", submitted: "Enviada",
+    replied: "Respondió", technical_test: "Prueba técnica", interview: "Entrevista", offer: "Oferta",
+    accepted: "Aceptada", rejected: "Rechazada", withdrawn: "Retirada", ghosted: "Sin respuesta",
+  };
+  const MARK_LABELS = {
+    replied: "Respondió", technical_test: "Prueba técnica", interview: "Entrevista", offer: "Oferta",
+    accepted: "Aceptada", rejected: "Rechazada", withdrawn: "Retirada", ghosted: "Sin respuesta",
+  };
+  const ACTION_LABELS = { approve: "Aprobar", resolve: "Devolver a la cola", confirm: "Ya la envié" };
+  const ACTION_HINTS = {
+    approve: "Revisé la captura y está bien: la próxima corrida la envía.",
+    resolve: "Arreglé lo que la detuvo; que vuelva a la cola.",
+    confirm: "La envié yo o sí llegó; márcala como enviada.",
+  };
+  const KIND_LABELS = {
+    ack: "Acuse", rejection: "Rechazo", recruiter: "Reclutador", interview_invite: "Invitación a entrevista",
+    technical_test: "Prueba técnica", action_required: "Requiere acción", other: "Otro",
+  };
+  // The five stations every application goes through, left to right.
+  const STATIONS = [
+    { state: "submitted", label: "Enviada" },
+    { state: "replied", label: "Respondió" },
+    { state: "technical_test", label: "Prueba técnica" },
+    { state: "interview", label: "Entrevista" },
+    { state: "offer", label: "Oferta" },
+  ];
+  const LIVE = ["submitted", "replied", "technical_test", "interview", "offer", "ghosted"];
+  const CLOSED = ["accepted", "rejected", "withdrawn"];
+  // The kinds of "needs Gonza", in the order they are shown.
+  const REASON_GROUPS = [
+    { kind: "approve", title: "Por aprobar" },
+    { kind: "handoff", title: "Formularios para enviar tú" },
+    { kind: "missing_answers", title: "Faltan respuestas" },
+    { kind: "blocked", title: "Una página me frenó" },
+    { kind: "error", title: "La página falló" },
+    { kind: "manual_apply", title: "Postular a mano desde el aviso" },
+    { kind: "other", title: "Otras" },
+  ];
+  const STALE_DAYS = 10;
+  const OPEN_BELOW = 7;
+  const REDRAW_MS = 10 * 60 * 1000;
+
+  const state = {
+    snap: null, last: "", tab: "hoy", filter: "all", openKey: null, detail: null, shotUrl: null, shotKey: null, note: "",
+    folds: {}, fresh: new Set(), skipped: new Set(), ticketId: null, hadTicket: false, punched: 0,
+    rings: new Set(), carPos: new Map(), after: [], whatIf: null, journeyIn: false,
+    scroll: {}, cursor: null, returnTo: null, drawerPushed: false, ignorePop: 0, vtBusy: false,
+    drill: { card: null, shown: false, answer: "", text: "", topic: "", empty: false },
+  };
+
+  // Where Gonza was, kept for the visit (not for ever): the section, the filter and the folds he opened.
+  const TABS = ["hoy", "procesos", "cola", "learn"];
+  const FILTERS = ["all", "mine", "wait", "stale"];
+  const keep = {
+    get(name) { try { return JSON.parse(sessionStorage.getItem("panel." + name) || "null"); } catch (e) { return null; } },
+    set(name, value) { try { sessionStorage.setItem("panel." + name, JSON.stringify(value)); } catch (e) { /* no storage */ } },
+  };
+  const persist = () => keep.set("view", { tab: state.tab, filter: state.filter, folds: state.folds });
+  const startRoute = routeOfHash();
+  const saved = embedded ? null : keep.get("view");
+  if (saved && FILTERS.includes(saved.filter)) state.filter = saved.filter;
+  if (saved && saved.folds && typeof saved.folds === "object") state.folds = saved.folds;
+  if (startRoute) state.tab = startRoute.tab;
+  else if (saved && TABS.includes(saved.tab)) state.tab = saved.tab;
+
+  // Builds an element. Every child that is not a node becomes a text node, so data can never be
+  // read as markup.
+  function h(tag, attrs, ...kids) {
+    const el = document.createElement(tag);
+    for (const [name, value] of Object.entries(attrs || {})) {
+      if (value === false || value == null) continue;
+      if (name === "class") el.className = value;
+      else if (name.startsWith("on")) el.addEventListener(name.slice(2), value);
+      else el.setAttribute(name, value === true ? "" : String(value));
+    }
+    for (const kid of kids.flat(Infinity)) {
+      if (kid === false || kid == null) continue;
+      el.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
+    }
+    return el;
+  }
+
+  // Replaces the children of a box with the parts that exist. `replaceChildren` would print a
+  // missing part (a `null` from a condition) as the text "null".
+  function fill(box, ...parts) {
+    box.replaceChildren(...parts.filter((part) => part != null && part !== false));
+  }
+
+  // A button for something that cannot be undone. The first click only arms it and says so; a
+  // second, deliberate click within a few seconds does the thing. Two clicks in the same instant
+  // (a double click by habit) count as one, so that cannot confirm by accident.
+  const ARM_MIN_MS = 350;
+  const ARM_MAX_MS = 5000;
+  function twoStep(label, run) {
+    let armedAt = 0;
+    let timer = 0;
+    return (e) => {
+      const button = e.currentTarget;
+      if (armedAt === 0) {
+        armedAt = Date.now();
+        button.textContent = "¿Seguro? Pulsa otra vez";
+        timer = setTimeout(() => { armedAt = 0; button.textContent = label; }, ARM_MAX_MS);
+        return;
+      }
+      if (Date.now() - armedAt < ARM_MIN_MS) return;
+      clearTimeout(timer);
+      armedAt = 0;
+      button.textContent = label;
+      run(button);
+    };
+  }
+
+  // A link only when the address is http or https.
+  function link(url, text) {
+    if (!/^https?:\/\//i.test(url || "")) return h("span", { class: "muted" }, text || url || "");
+    return h("a", { href: url, target: "_blank", rel: "noopener noreferrer" }, text || url);
+  }
+
+  const pct = (x) => (x == null ? "n/a" : Math.round(x * 100) + "%");
+  const usd = (x) => "US$" + Number(x).toFixed(2);
+  function when(iso) {
+    try {
+      return new Date(iso).toLocaleString("es-CL", { timeZone: "America/Santiago", dateStyle: "short", timeStyle: "short" });
+    } catch (e) {
+      return iso;
+    }
+  }
+  function plural(n, one, many) { return n + " " + (n === 1 ? one : many); }
+
+  // "hace 3 h", "hace 2 días": how long ago, in words.
+  function ago(iso, nowMs) {
+    const minutes = Math.floor((nowMs - Date.parse(iso)) / 60000);
+    if (!(minutes >= 0)) return "ahora";
+    if (minutes < 60) return "hace " + Math.max(minutes, 1) + " min";
+    const hours = Math.floor(minutes / 60);
+    if (hours < 48) return "hace " + hours + " h";
+    return "hace " + Math.floor(hours / 24) + " días";
+  }
+  const daysSince = (iso, nowMs) => Math.max(0, Math.floor((nowMs - Date.parse(iso)) / 86400000));
+
+  // The time left to a task, or how late it is, with a tone for the page to colour.
+  function countdown(task, nowMs) {
+    if (!task.due_at) return null;
+    const ms = Date.parse(task.due_at) - nowMs;
+    if (task.overdue || ms < 0) {
+      const hours = Math.floor(-ms / 3600000);
+      return { text: "Venció " + (hours < 48 ? "hace " + Math.max(hours, 1) + " h" : "hace " + Math.floor(hours / 24) + " días"), tone: "late" };
+    }
+    const hours = Math.floor(ms / 3600000);
+    if (hours < 1) return { text: "Vence en menos de 1 h", tone: "soon" };
+    if (hours < 48) return { text: "Vence en " + hours + " h", tone: "soon" };
+    return { text: "Quedan " + Math.floor(hours / 24) + " días", tone: "" };
+  }
+
+  const toastBox = document.getElementById("toast");
+  let toastTimer = 0;
+  function toast(message, ok) {
+    toastBox.textContent = message;
+    toastBox.className = "toast show " + (ok ? "ok" : "bad");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toastBox.className = "toast"; }, 6000);
+  }
+
+  // The static demo (docs/demo, made-up data) sets `window.__DEMO__`; the real panel never has it.
+  const demo = window.__DEMO__ || null;
+  async function api(path, body) {
+    if (demo) return demo.api(path, body);
+    const init = { headers: { "X-Panel-Token": token } };
+    if (body !== undefined) {
+      init.method = "POST";
+      init.headers["Content-Type"] = "application/json";
+      init.body = JSON.stringify(body);
+    }
+    let res;
+    try {
+      res = await fetch(path, init);
+    } catch (e) {
+      return { ok: false, status: 0, data: { message: "No se pudo hablar con el panel: ¿se cerró jobbot panel?" } };
+    }
+    let data = null;
+    try { data = await res.json(); } catch (e) { /* not JSON */ }
+    return { ok: res.ok, status: res.status, data };
+  }
+
+  const said = (r, fallback) => (r.data && r.data.message) || fallback;
+
+  function fatal(message) {
+    document.getElementById("app").replaceChildren(h("p", { class: "fatal" }, message));
+    document.getElementById("controls").replaceChildren();
+    document.getElementById("detail").className = "detail";
+  }
+
+  async function refresh(force) {
+    const r = await api("/api/snapshot");
+    if (r.status === 401 || r.status === 403) {
+      fatal("El panel no reconoce este enlace: la clave cambia cada vez que se inicia jobbot panel. Ábrelo de nuevo con el enlace que imprime.");
+      return false;
+    }
+    if (!r.ok) { toast(said(r, "No se pudo leer el panel."), false); return false; }
+    const key = JSON.stringify(Object.assign({}, r.data, { generated_at: "" }));
+    // Nothing changed, but the clock did: the countdowns, "hace 3 h" and the days without news are
+    // worked out from the snapshot's own time, so an old picture is drawn again after a while.
+    const aged = state.snap != null && Date.parse(r.data.generated_at) - Date.parse(state.snap.generated_at) >= REDRAW_MS;
+    if (!force && key === state.last && !aged) return true;
+    // Never redraw under a half-typed answer; the next poll tries again.
+    if (!force && typing()) return true;
+    state.last = key;
+    const news = state.snap ? diffSnapshots(state.snap, r.data) : sinceLastVisit(r.data);
+    state.snap = r.data;
+    state.fresh = news.fresh;
+    render();
+    if (news.lines.length) announce(news.lines);
+    if (news.big) ceremony();
+    // The marks of what is new last a moment; a redraw after that does not point at them again.
+    setTimeout(() => { state.fresh = new Set(); }, 4000);
+    return true;
+  }
+
+  function typing() {
+    const a = document.activeElement;
+    return a != null && document.getElementById("app").contains(a) && /^(TEXTAREA|INPUT|SELECT)$/.test(a.tagName);
+  }
+
+  // An action: the button is off while the request runs, then everything is read again.
+  const SEQUENCE = { "/api/approve": "Aprobada", "/api/confirm": "Anotada" };
+  async function act(path, body, button, onOk) {
+    const staged = !!(button && SEQUENCE[path]) && !still();
+    if (button) button.disabled = true;
+    if (staged) button.classList.add("sending");
+    const r = await api(path, body);
+    toast(said(r, r.ok ? "Hecho." : "No se pudo."), r.ok);
+    if (r.ok && onOk) onOk();
+    if (staged) {
+      button.classList.remove("sending");
+      if (r.ok) {
+        button.classList.add("sent");
+        button.textContent = SEQUENCE[path];
+        await new Promise((resolve) => setTimeout(resolve, 600));
+      }
+    }
+    await refresh(true);
+    if (state.openKey) await openJob(state.openKey);
+    return r;
+  }
+
+  // ---- What the page knows about the processes, built from one snapshot
+
+  const norm = (text) => String(text || "").toLowerCase();
+  function escapeRegExp(text) { return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+
+  // The application a task belongs to: by its key when it has one, else by a company name that the
+  // task text says out loud (whole word, at least three letters). A task that names several
+  // companies belongs to none of them, so a to-do about a batch is never pinned on one process.
+  function ownerOf(task, cards) {
+    // A task with a key belongs to that application or to none: never to another one that happens
+    // to share a company name.
+    if (task.job_key) return cards.find((c) => c.key === task.job_key) || null;
+    const text = norm(task.text);
+    const named = cards.filter((c) => {
+      const name = norm(c.company).trim();
+      return name.length >= 3 && new RegExp("(^|[^\\p{L}\\p{N}])" + escapeRegExp(name) + "($|[^\\p{L}\\p{N}])", "u").test(text);
+    });
+    // Exactly one application named, or the text is about something else (a batch, two companies,
+    // a company with two open applications) and no process is pinned.
+    return named.length === 1 ? named[0] : null;
+  }
+
+  function model(s) {
+    const nowMs = Date.parse(s.generated_at);
+    const live = [];
+    for (const col of s.board) if (LIVE.includes(col.state)) live.push(...col.cards);
+    const tasks = s.today.tasks.map((task) => ({ task, owner: ownerOf(task, live) }));
+    const nextByKey = new Map();
+    for (const item of tasks) {
+      if (item.owner && !nextByKey.has(item.owner.key)) nextByKey.set(item.owner.key, item.task);
+    }
+    const procs = live.map((card) => {
+      const task = nextByKey.get(card.key) || null;
+      let turn = "wait";
+      if (task) turn = "mine";
+      else if (card.state === "offer") turn = "mine";
+      else if (card.state === "ghosted") turn = "check";
+      else if (card.state !== "submitted") turn = "check";
+      const days = daysSince(card.updated_at, nowMs);
+      return { card, task, turn, days, stale: card.state === "submitted" && days >= STALE_DAYS };
+    });
+    // Whose turn first; inside a group the nearest deadline (none last), then the longest wait. Every
+    // key is a plain number, so the order is the same whichever pair the sort compares.
+    const rank = { mine: 0, check: 1, wait: 2 };
+    const due = (p) => (p.task && p.task.due_at ? Date.parse(p.task.due_at) : Number.MAX_SAFE_INTEGER);
+    procs.sort((a, b) => rank[a.turn] - rank[b.turn] || Math.sign(due(a) - due(b)) || b.days - a.days);
+    return { nowMs, tasks, procs };
+  }
+
+  // ---- The board: split-flap counters, the line of announcements, the clock and the platform edge
+
+  // A flap shows one letter at a time, and the drum turns forward only, so a change from 3 to 7
+  // runs through 4, 5 and 6 like the real boards do.
+  const DRUM = " 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ:.-/+";
+  const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const still = () => motion.matches || document.hidden;
+  const flapText = (text) => String(text == null ? "" : text).normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/[^0-9A-Z:.\-/+ ]/g, " ");
+
+  function paintCell(el, ch) {
+    for (const part of el.children) part.setAttribute("data-c", ch);
+    el._c = ch;
+  }
+
+  function flapCell(extra) {
+    const el = h("span", { class: "fl" + (extra ? " " + extra : "") }, h("i", { class: "t" }), h("i", { class: "b" }), h("i", { class: "ft" }), h("i", { class: "fb" }));
+    paintCell(el, " ");
+    return el;
+  }
+
+  // One turn of the flap: the top half falls over the new letter, then the bottom half lands.
+  function flipOnce(el, from, to, ms) {
+    const [top, bottom, ft, fb] = el.children;
+    top.setAttribute("data-c", to);
+    bottom.setAttribute("data-c", from);
+    ft.setAttribute("data-c", from);
+    fb.setAttribute("data-c", to);
+    el.classList.add("go");
+    const down = ft.animate([{ transform: "rotateX(0deg)", filter: "brightness(1)" }, { transform: "rotateX(-90deg)", filter: "brightness(.45)" }],
+      { duration: ms, easing: "ease-in", fill: "forwards" });
+    return down.finished.then(() => {
+      const up = fb.animate([{ transform: "rotateX(90deg)", filter: "brightness(.45)" }, { transform: "rotateX(0deg)", filter: "brightness(1)" }],
+        { duration: ms, easing: "ease-out", fill: "forwards" });
+      return up.finished.then(() => {
+        paintCell(el, to);
+        el.classList.remove("go");
+        down.cancel();
+        up.cancel();
+      });
+    });
+  }
+
+  // Sends a flap to a letter. Changes queue up on the flap, so a second one waits for the first.
+  function flipTo(el, to, delay) {
+    el._q = (el._q || Promise.resolve()).then(async () => {
+      if (delay) await new Promise((r) => setTimeout(r, delay));
+      if (el._c === to) return;
+      if (still()) { paintCell(el, to); return; }
+      const size = DRUM.length;
+      const dest = DRUM.indexOf(to);
+      let at = DRUM.indexOf(el._c);
+      const steps = (dest - at + size) % size;
+      if (steps > 5) { at = (dest - 5 + size) % size; paintCell(el, DRUM[at]); }
+      const ms = steps > 3 ? 36 : 62;
+      while (at !== dest) {
+        const next = (at + 1) % size;
+        await flipOnce(el, DRUM[at], DRUM[next], ms);
+        at = next;
+      }
+    }).catch(() => paintCell(el, to));
+  }
+
+  function flapRow(size, cells) {
+    const row = h("span", { class: "flaps " + size }, cells);
+    row._cells = cells.filter((c) => !c.classList.contains("colon"));
+    return row;
+  }
+  const flapCells = (n) => Array.from({ length: n }, () => flapCell());
+
+  // Writes a text on a row, the letters turning one after another.
+  function flapSet(row, text, stagger) {
+    const chars = flapText(text).padEnd(row._cells.length, " ").slice(0, row._cells.length);
+    row._cells.forEach((cell, i) => flipTo(cell, chars[i], i * (stagger == null ? 38 : stagger)));
+  }
+
+  const board = { counters: {}, line: null, clock: null, clockText: "", lines: [], at: 0, pending: [], holdUntil: 0, timer: 0 };
+
+  const BOARD_GO = {
+    turn: "Ir a lo siguiente que te toca", approve: "Ir a lo que espera tu aprobación",
+    wait: "Ver los procesos que esperan a la empresa", stale: "Ver los procesos sin noticias",
+  };
+
+  function buildBoard() {
+    const groups = [["turn", "Tu turno"], ["approve", "Por aprobar"], ["wait", "En espera"], ["stale", "Sin noticias"]];
+    document.getElementById("b-counters").replaceChildren(...groups.map(([id, label]) => {
+      const row = flapRow("big", flapCells(2));
+      board.counters[id] = row;
+      return h("div", { class: "b-group", "data-b": id, role: "button", tabindex: "0", title: BOARD_GO[id],
+        onclick: (e) => jump(id, centerOf(e.currentTarget)),
+        onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); jump(id); } } },
+        h("span", { class: "plate" }, label), row, h("span", { class: "sr", "data-sr": id }, "0"));
+    }));
+    const colon = flapCell("colon");
+    paintCell(colon, ":");
+    board.clock = flapRow("mid", [flapCell(), flapCell(), colon, flapCell(), flapCell()]);
+    document.getElementById("b-clock").replaceChildren(buildDial(), h("div", { class: "b-time" }, h("span", { class: "plate" }, "Hora en Santiago"), board.clock));
+    board.line = flapRow("small", flapCells(34));
+    document.getElementById("b-line").replaceChildren(board.line);
+    tickClock();
+    setInterval(tickClock, 1000);
+    board.timer = setInterval(rotateLine, 7000);
+  }
+
+  // The 24-hour dial of the story, small: midnight at the top, the bot's window (18:00 to 09:00) over the top with
+  // the part that has gone by lit, the hours Gonza is busy hatched underneath, and a hand for now.
+  const dial = { hand: null, lit: null, hours: null };
+  const DIAL_C = 50;
+  const DIAL_R = 36;
+  const dialPoint = (r, deg) => { const a = (deg * Math.PI) / 180; return [DIAL_C + r * Math.sin(a), DIAL_C - r * Math.cos(a)]; };
+  const dialArc = (r, d0, d1) => {
+    const [x0, y0] = dialPoint(r, d0);
+    const [x1, y1] = dialPoint(r, d1);
+    return "M" + x0.toFixed(2) + " " + y0.toFixed(2) + " A" + r + " " + r + " 0 " + (d1 - d0 > 180 ? 1 : 0) + " 1 " + x1.toFixed(2) + " " + y1.toFixed(2);
+  };
+  function buildDial() {
+    const ticks = [];
+    for (let hr = 0; hr < 24; hr++) {
+      const [x0, y0] = dialPoint(DIAL_R + 4, hr * 15);
+      const [x1, y1] = dialPoint(DIAL_R + (hr % 6 === 0 ? 11 : hr % 3 === 0 ? 8 : 6), hr * 15);
+      ticks.push(sv("line", { class: "dl-tick", x1: x0.toFixed(2), y1: y0.toFixed(2), x2: x1.toFixed(2), y2: y1.toFixed(2) }));
+    }
+    dial.lit = sv("path", { class: "dl-lit", d: "" });
+    dial.hand = sv("g", { class: "dl-hand" },
+      sv("line", { x1: DIAL_C, y1: DIAL_C + 5, x2: DIAL_C, y2: DIAL_C - DIAL_R + 3 }),
+      sv("circle", { class: "dl-tip", cx: DIAL_C, cy: DIAL_C - DIAL_R + 3, r: 3 }));
+    return sv("svg", { class: "b-dial", viewBox: "-6 -6 112 112", "aria-hidden": "true" },
+      sv("circle", { class: "dl-face", cx: DIAL_C, cy: DIAL_C, r: DIAL_R + 2 }),
+      sv("path", { class: "dl-busy", d: dialArc(DIAL_R - 6, 135, 270) }),
+      sv("path", { class: "dl-rail", d: dialArc(DIAL_R, 270, 495) }),
+      dial.lit, ticks, dial.hand,
+      sv("circle", { class: "dl-hub", cx: DIAL_C, cy: DIAL_C, r: 2.6 }));
+  }
+  function setDial(hours) {
+    const deg = (hours % 24) * 15;
+    const inWindow = hours >= 18 || hours < 9;
+    const end = hours >= 18 ? deg : deg + 360;
+    dial.lit.setAttribute("d", inWindow && end - 270 > 0.5 ? dialArc(DIAL_R, 270, end) : "");
+    dial.hand.setAttribute("transform", "rotate(" + deg.toFixed(2) + " " + DIAL_C + " " + DIAL_C + ")");
+  }
+  // On the first draw the night goes by: the hand runs from 18:00 to the hour it is.
+  function moveDial(hours) {
+    if (!dial.hand) return;
+    const first = dial.hours == null;
+    dial.hours = hours;
+    if (!first || still()) { setDial(hours); return; }
+    const to = hours >= 18 ? hours : hours + 24;
+    const t0 = performance.now() + 250;
+    const step = (now) => {
+      const k = Math.min(1, Math.max(0, (now - t0) / 1500));
+      setDial(18 + (to - 18) * (k >= 1 ? 1 : 1 - Math.pow(2, -10 * k)));
+      if (k < 1) requestAnimationFrame(step);
+    };
+    setDial(18);
+    requestAnimationFrame(step);
+  }
+
+  function tickClock() {
+    let text;
+    try {
+      text = new Date().toLocaleTimeString("es-CL", { timeZone: "America/Santiago", hour: "2-digit", minute: "2-digit", hour12: false });
+    } catch (e) {
+      text = "--:--";
+    }
+    if (text === board.clockText) return;
+    board.clockText = text;
+    flapSet(board.clock, text.replace(/\D/g, "").replace(/^(\d{2})(\d{2})$/, "$1$2"), 0);
+    const hm = /^(\d{2}):(\d{2})$/.exec(text);
+    if (hm) moveDial(Number(hm[1]) + Number(hm[2]) / 60);
+  }
+
+  function countOnBoard(id, n) {
+    const row = board.counters[id];
+    const text = n > 99 ? "99" : String(n).padStart(2, " ");
+    flapSet(row, text, 70);
+    row.classList.toggle("zero", n === 0);
+    const sr = document.querySelector('[data-sr="' + id + '"]');
+    if (sr) sr.textContent = String(n);
+  }
+
+  // The messages the board rotates through, in the order of what matters.
+  function boardLines(m) {
+    const s = state.snap;
+    const c = s.controls;
+    const out = [];
+    if (c.stopped) out.push("STOP ACTIVO  SIN ENVIOS");
+    else if (c.window_open === true) out.push("VENTANA DE ENVIO ABIERTA");
+    else if (c.window_open === false) {
+      const hour = String(c.next_window || "").split(" ")[1];
+      out.push("VENTANA DE ENVIO ABRE " + (hour || ""));
+    }
+    const dated = m.tasks.filter((t) => t.task.due_at);
+    if (dated.length) {
+      const left = countdown(dated[0].task, m.nowMs);
+      out.push((dated[0].owner ? dated[0].owner.company : "TAREA") + "  " + left.text);
+    }
+    const offer = m.procs.find((p) => p.card.state === "offer");
+    if (offer) out.push("OFERTA DE " + offer.card.company + " ESPERA");
+    const interview = m.procs.find((p) => p.card.state === "interview");
+    if (interview) out.push("ENTREVISTA CON " + interview.card.company);
+    if (out.length === 0) out.push("TODO AL DIA");
+    return out.map((text) => flapText(text).slice(0, 34).trimEnd());
+  }
+
+  // An announcement jumps the queue and stays for a while; then the rotation goes on.
+  function announce(lines) {
+    board.pending.push(...lines.slice(0, 4).map((text) => flapText(text).slice(0, 34).trimEnd()));
+    board.holdUntil = 0;
+    rotateLine();
+  }
+
+  function rotateLine() {
+    if (!board.line || (document.hidden && board.at > 0)) return;
+    if (Date.now() < board.holdUntil) return;
+    let text;
+    if (board.pending.length) {
+      text = board.pending.shift();
+      board.holdUntil = Date.now() + 6500;
+    } else {
+      if (board.lines.length === 0) return;
+      board.at = (board.at + 1) % board.lines.length;
+      text = board.lines[board.at];
+    }
+    flapSet(board.line, text, 14);
+    document.getElementById("b-line-sr").textContent = text;
+  }
+
+  // The colour of the platform edge: the state of the day, readable from across the room.
+  const MOOD_COLOURS = { calm: "var(--track)", turn: "var(--gold)", urgent: "var(--urgent)", stop: "var(--gold)" };
+  function moodOf(m) {
+    const s = state.snap;
+    if (s.controls.stopped) return "stop";
+    const urgent = m.tasks.some((t) => t.task.overdue || (t.task.due_at && Date.parse(t.task.due_at) - m.nowMs < 24 * 3600000));
+    if (urgent) return "urgent";
+    return turnCount(m) > 0 ? "turn" : "calm";
+  }
+
+  // The tab says how many things wait for Gonza, in its title and in its little icon. The title
+  // never says what this is: the browser may be shared.
+  const icon = { link: null, url: null, key: "" };
+  function setTabIcon(count, mood) {
+    const key = count + "|" + mood;
+    if (key === icon.key) return;
+    icon.key = key;
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = 64;
+      canvas.height = 64;
+      const g = canvas.getContext("2d");
+      g.fillStyle = "#101a2d";
+      g.beginPath();
+      g.roundRect(2, 2, 60, 60, 12);
+      g.fill();
+      g.fillStyle = "#edf2f9";
+      g.font = "700 40px 'Bahnschrift Condensed', 'Arial Narrow', sans-serif";
+      g.textAlign = "center";
+      g.textBaseline = "middle";
+      g.fillText(count > 99 ? "99" : String(count), 32, 29);
+      g.fillStyle = { calm: "#61afee", turn: "#fbc024", urgent: "#fa6863", stop: "#fbc024" }[mood];
+      g.fillRect(8, 49, 48, 7);
+      g.fillStyle = "#01030c";
+      g.fillRect(2, 28, 60, 2);
+      canvas.toBlob((blob) => {
+        if (!blob) return;
+        if (!icon.link) {
+          icon.link = document.createElement("link");
+          icon.link.rel = "icon";
+          document.head.append(icon.link);
+        }
+        const old = icon.url;
+        icon.url = URL.createObjectURL(blob);
+        icon.link.href = icon.url;
+        if (old) URL.revokeObjectURL(old);
+      });
+    } catch (e) { /* the icon is a courtesy */ }
+  }
+
+  function updateBoard(m) {
+    const s = state.snap;
+    const turn = turnCount(m);
+    countOnBoard("turn", turn);
+    countOnBoard("approve", s.awaiting_approval.total);
+    countOnBoard("wait", m.procs.filter((p) => p.turn === "wait").length);
+    countOnBoard("stale", m.procs.filter((p) => p.stale).length);
+    const first = board.lines.length === 0;
+    board.lines = boardLines(m);
+    if (first) { board.at = -1; board.holdUntil = 0; rotateLine(); }
+    const mood = moodOf(m);
+    const platform = document.getElementById("platform");
+    if (platform.dataset.mood !== mood) platform.dataset.mood = mood;
+    document.documentElement.style.setProperty("--mood", MOOD_COLOURS[mood]);
+    document.title = (turn > 0 ? "(" + turn + ") " : "") + "Panel";
+    setTabIcon(turn, mood);
+  }
+
+  // A one-off gold sweep along the platform when something big happens (an interview, an offer).
+  function ceremony() {
+    const platform = document.getElementById("platform");
+    platform.classList.remove("ceremony");
+    void platform.offsetWidth;
+    platform.classList.add("ceremony");
+  }
+
+  // What changed since the last picture, so the page can say so instead of redrawing in silence.
+  const mailId = (mail) => mail.received_at + "|" + mail.subject;
+  function diffSnapshots(prev, next) {
+    const out = { fresh: new Set(), lines: [], big: false };
+    if (!prev) return out;
+    const seenMail = new Set(prev.today.emails.map(mailId));
+    const seenTask = new Set(prev.today.tasks.map((t) => t.id));
+    const was = new Map();
+    for (const col of prev.board) for (const c of col.cards) was.set(c.key, c.state);
+    for (const mail of next.today.emails) {
+      if (seenMail.has(mailId(mail))) continue;
+      out.fresh.add("mail:" + mailId(mail));
+      out.lines.push((mail.company || "CORREO NUEVO") + "  " + (KIND_LABELS[mail.kind] || mail.kind));
+    }
+    for (const t of next.today.tasks) {
+      if (seenTask.has(t.id)) continue;
+      out.fresh.add("task:" + t.id);
+      out.lines.push("TAREA NUEVA");
+    }
+    for (const col of next.board) {
+      for (const c of col.cards) {
+        const before = was.get(c.key);
+        if (!before || before === c.state) continue;
+        out.fresh.add("card:" + c.key);
+        out.lines.push(c.company + "  " + (STATE_LABELS[c.state] || c.state));
+        if (c.state === "interview" || c.state === "offer") out.big = true;
+      }
+    }
+    return out;
+  }
+
+  // On the first picture of a visit: what happened since the last time the page was open.
+  function sinceLastVisit(snap) {
+    let last = 0;
+    try { last = Date.parse(localStorage.getItem("panel.lastVisit") || ""); } catch (e) { /* no storage */ }
+    const out = { fresh: new Set(), lines: [], big: false };
+    if (!(last > 0)) return out;
+    for (const mail of snap.today.emails) if (Date.parse(mail.received_at) > last) out.fresh.add("mail:" + mailId(mail));
+    for (const col of snap.board) {
+      if (!LIVE.includes(col.state) && !CLOSED.includes(col.state)) continue;
+      for (const c of col.cards) if (Date.parse(c.updated_at) > last) out.fresh.add("card:" + c.key);
+    }
+    if (out.fresh.size) out.lines.push("DESDE TU ULTIMA VISITA " + out.fresh.size + (out.fresh.size === 1 ? " NOVEDAD" : " NOVEDADES"));
+    return out;
+  }
+  function rememberVisit() {
+    try { localStorage.setItem("panel.lastVisit", new Date().toISOString()); } catch (e) { /* no storage */ }
+  }
+  document.addEventListener("visibilitychange", () => {
+    document.body.classList.toggle("away", document.hidden);
+    if (document.hidden) rememberVisit();
+  });
+  window.addEventListener("pagehide", rememberVisit);
+
+  // ---- The ticket: the one thing to do now
+
+  // Everything that waits for Gonza, in the order that matters: what is late or due within two days,
+  // an offer to answer, the applications that need his stamp, what stopped the robot, the other
+  // tasks, and last the follow-ups nobody has put a task on. The page shows the first one only.
+  const SOON_HOURS = 48;
+
+  function taskStub(task, nowMs) {
+    if (!task.due_at) return { big: "SIN FECHA", small: true, sub: "cuando puedas" };
+    const left = countdown(task, nowMs);
+    const ms = Date.parse(task.due_at) - nowMs;
+    if (task.overdue || ms < 0) return { big: "VENCIDA", small: true, sub: left.text };
+    const hours = Math.floor(ms / 3600000);
+    if (hours < 1) return { big: "<1 H", sub: left.text };
+    if (hours < SOON_HOURS) return { big: hours + " H", sub: left.text };
+    return { big: Math.floor(hours / 24) + " D", sub: left.text };
+  }
+
+  // The number on the board, in the tab and in the title: the tasks, the approvals and the stuck forms
+  // the server counts, plus the offers and follow-ups that have no task and are only in the ticket queue.
+  function turnCount(m) {
+    const s = state.snap;
+    const extra = candidates(m).filter((c) => c.extra).length;
+    return s.today.tasks_total + s.awaiting_approval.total + s.needs_gonza.total + extra;
+  }
+
+  function candidates(m) {
+    const s = state.snap;
+    const byDue = (a, b) => Date.parse(a.task.due_at) - Date.parse(b.task.due_at);
+    const dated = m.tasks.filter((t) => t.task.due_at).sort(byDue);
+    const soon = (t) => t.task.overdue || Date.parse(t.task.due_at) - m.nowMs < SOON_HOURS * 3600000;
+    const out = [];
+    const ofTask = (item) => {
+      const { task, owner } = item;
+      const late = task.overdue || (task.due_at && Date.parse(task.due_at) < m.nowMs);
+      return Object.assign({ id: "task:" + task.id, tone: late ? "late" : "turn", kind: "Tarea", title: task.text, task,
+        why: owner ? owner.company + ": " + (STATE_LABELS[owner.state] || owner.state) : null,
+        open: owner ? owner.key : null, link: task.link }, taskStub(task, m.nowMs));
+    };
+    const ofCard = (c, kind, tone, big, sub, why, small) => ({
+      id: "card:" + c.key, tone, kind, big, sub, small, title: c.company + " — " + c.title, key: c.key,
+      why: why || c.reason_short || null, actions: c.actions, link: c.url,
+    });
+    dated.filter(soon).forEach((t) => out.push(ofTask(t)));
+    for (const p of m.procs) {
+      if (p.card.state === "offer" && !p.task) out.push(Object.assign(ofCard(p.card, "Oferta", "turn", "OFERTA", "decide", "Una oferta espera tu respuesta.", true), { extra: true }));
+    }
+    for (const c of s.awaiting_approval.cards) {
+      out.push(ofCard(c, "Por aprobar", "approve", String(c.score), "puntaje", c.reason_short || "Revisa la captura: si está bien, la próxima corrida la envía."));
+    }
+    for (const g of REASON_GROUPS) {
+      if (g.kind === "approve") continue;
+      for (const c of s.needs_gonza.cards.filter((x) => (x.reason_kind || "other") === g.kind)) {
+        out.push(ofCard(c, g.title, "turn", String(c.score), "puntaje", c.reason_short));
+      }
+    }
+    dated.filter((t) => !soon(t)).forEach((t) => out.push(ofTask(t)));
+    m.tasks.filter((t) => !t.task.due_at).forEach((t) => out.push(ofTask(t)));
+    for (const p of m.procs) {
+      if (p.task || p.card.state === "offer") continue;
+      if (p.turn === "check" || p.stale) {
+        out.push(Object.assign(ofCard(p.card, "Seguimiento", "turn", p.days + " D", "sin noticias",
+          p.card.state === "ghosted" ? "Sin noticias: decide si insistes." : p.stale ? "Sin noticias hace " + p.days + " días: decide si insistes." : "Sin tarea: agrega el siguiente paso."), { extra: true }));
+      }
+    }
+    return out;
+  }
+
+  // The punch: the ticket is pressed and a hole opens in the stub, then the work is done.
+  function punchThen(button, run) {
+    state.punched += 1;
+    const ticket = button.closest(".ticket");
+    if (!ticket || still()) { run(button); return; }
+    ticket.classList.add("punched");
+    setTimeout(() => run(button), 300);
+  }
+
+  function ticketButtons(c) {
+    const acts = [];
+    if (c.task) {
+      acts.push(h("button", { class: "primary", "data-ticket-act": "done", title: "Ya lo hice: sale de la lista",
+        onclick: twoStep("Hecha", (button) => punchThen(button, () => act("/api/task/done", { id: c.task.id }, button))) }, "Hecha"));
+    }
+    for (const action of c.actions || []) {
+      const run = (button) => punchThen(button, () => act("/api/" + action, { key: c.key }, button));
+      acts.push(h("button", { class: action === "approve" ? "primary" : "", "data-ticket-act": action, title: ACTION_HINTS[action],
+        onclick: PERMANENT_ACTIONS.includes(action) ? twoStep(ACTION_LABELS[action], run) : (e) => run(e.currentTarget) }, ACTION_LABELS[action]));
+    }
+    const key = c.key || c.open;
+    if (key) acts.push(h("button", { "data-ticket-open": key, onclick: () => openJob(key) }, "Abrir"));
+    if (c.link && /^https?:\/\//i.test(c.link)) acts.push(h("a", { class: "t-link", href: c.link, target: "_blank", rel: "noopener noreferrer" }, c.task ? "Abrir enlace" : "Ver el aviso"));
+    return acts;
+  }
+
+  function ticketView(c, more, enter) {
+    const after = [];
+    after.push(more > 0 ? "Después de esta: " + plural(more, "pendiente", "pendientes") + "." : "Es la última.");
+    if (state.punched > 0) after.push("Despachadas en esta visita: " + state.punched + ".");
+    return h("div", { class: "ticket-wrap" + (enter ? " in" : "") },
+      h("article", { class: "ticket", "data-tone": c.tone, "data-ticket": c.id, "aria-label": "Lo siguiente que te toca" },
+        h("div", { class: "ticket-stub" },
+          h("span", { class: "t-kind" }, c.kind),
+          h("span", { class: "t-when" + (c.small ? " small-text" : "") }, c.big),
+          h("span", { class: "t-sub" }, c.sub)),
+        h("div", { class: "ticket-body" },
+          h("div", { class: "t-title" }, c.title),
+          c.why ? h("p", { class: "t-why" }, c.why) : null,
+          h("div", { class: "row t-acts" },
+            ticketButtons(c),
+            more > 0 ? h("button", { class: "ghost", "data-ticket-skip": c.id, title: "Pasa a la siguiente sin cerrar esta",
+              onclick: () => { state.skipped.add(c.id); render(); } }, "Después") : null),
+          h("div", { class: "t-after" }, after.join(" "))),
+        h("span", { class: "punch" })));
+  }
+
+  // With a mouse, the ticket leans a few degrees toward the pointer and catches a little light.
+  const fineMouse = window.matchMedia("(hover: hover) and (pointer: fine)");
+  function tiltOnPointer(wrap) {
+    if (!fineMouse.matches) return;
+    wrap.addEventListener("pointermove", (e) => {
+      if (still()) return;
+      const box = wrap.getBoundingClientRect();
+      const x = (e.clientX - box.left) / box.width;
+      const y = (e.clientY - box.top) / box.height;
+      wrap.style.setProperty("--ry", ((x - 0.5) * 5).toFixed(2) + "deg");
+      wrap.style.setProperty("--rx", ((0.5 - y) * 4).toFixed(2) + "deg");
+      wrap.style.setProperty("--gx", (x * 100).toFixed(0) + "%");
+      wrap.style.setProperty("--gy", (y * 100).toFixed(0) + "%");
+      wrap.style.setProperty("--glare", "1");
+    });
+    wrap.addEventListener("pointerleave", () => {
+      for (const name of ["--rx", "--ry", "--glare"]) wrap.style.removeProperty(name);
+    });
+  }
+
+  // The slot at the top of Hoy: the first ticket, or the empty platform.
+  function ticketSlot(m) {
+    const all = candidates(m);
+    let list = all.filter((c) => !state.skipped.has(c.id));
+    if (list.length === 0 && all.length > 0) { state.skipped.clear(); list = all; }
+    const first = list[0];
+    const slot = h("section", { class: "ticket-slot", id: "ticket", "aria-label": "Lo siguiente" });
+    if (!first) {
+      const cleared = state.hadTicket && state.punched > 0;
+      state.hadTicket = false;
+      state.ticketId = null;
+      if (cleared) ceremony();
+      fill(slot, h("div", { class: "ticket-clear" },
+        h("span", { class: "clear-mark" }),
+        h("div", {}, h("p", { class: "clear-title" }, "Andén despejado"),
+          h("p", { class: "muted" }, state.punched > 0 ? "Despachaste " + plural(state.punched, "pendiente", "pendientes") + " en esta visita. Nada más espera tu turno." : "Nada espera tu turno ahora."))));
+      return slot;
+    }
+    const enter = state.ticketId !== first.id;
+    state.ticketId = first.id;
+    state.hadTicket = true;
+    const view = ticketView(first, list.length - 1, enter);
+    tiltOnPointer(view);
+    fill(slot, view);
+    return slot;
+  }
+
+  // ---- Maps: SVG drawn node by node, like everything else on the page
+
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  function sv(tag, attrs, ...kids) {
+    const el = document.createElementNS(SVG_NS, tag);
+    for (const [name, value] of Object.entries(attrs || {})) {
+      if (value === false || value == null) continue;
+      el.setAttribute(name, String(value));
+    }
+    for (const kid of kids.flat(Infinity)) {
+      if (kid === false || kid == null) continue;
+      el.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
+    }
+    return el;
+  }
+
+  // The follow-up ring: it fills as the days without news go by, and closes at the day the page
+  // suggests a nudge. It fills in the first time it is drawn and is simply there after that.
+  const RING_R = 9;
+  const RING_C = 2 * Math.PI * RING_R;
+  function ring(p) {
+    const frac = Math.min(p.days / STALE_DAYS, 1);
+    const tone = frac >= 1 ? " hot" : frac >= 0.7 ? " warm" : "";
+    const value = sv("circle", { class: "rv", cx: 12, cy: 12, r: RING_R, "stroke-dasharray": RING_C.toFixed(2),
+      "stroke-dashoffset": (RING_C * (1 - frac)).toFixed(2), transform: "rotate(-90 12 12)" });
+    if (!state.rings.has(p.card.key)) {
+      state.rings.add(p.card.key);
+      state.after.push(() => {
+        if (still() || frac === 0) return;
+        value.animate([{ strokeDashoffset: RING_C }, { strokeDashoffset: RING_C * (1 - frac) }], { duration: 900, easing: "cubic-bezier(.23,1,.32,1)" });
+      });
+    }
+    const label = "Día " + Math.min(p.days, STALE_DAYS) + " de " + STALE_DAYS + " sin noticias";
+    return sv("svg", { class: "ring" + tone, viewBox: "0 0 24 24", role: "img", "aria-label": label },
+      sv("title", {}, label), sv("circle", { class: "rt", cx: 12, cy: 12, r: RING_R }), value);
+  }
+
+  // The line map: the funnel as a river that narrows, the track below it with its five stops, a
+  // car for every live application standing at its stop, and a siding for the ones that went quiet.
+  const CAR_W = 42;
+  const CAR_H = 24;
+  const CAR_GAP = 6;
+  const CAR_COLS = 4;
+  const initials = (name) => String(name || "?").replace(/[^\p{L}\p{N}]/gu, "").slice(0, 3).toUpperCase();
+
+  // The river of five stops that narrows with what reaches each one: the outline of the shape, 1000 wide, the
+  // stops 200 apart from x = 100, centred on the line at height `track`. Procesos and the path of Cola share it.
+  const stopX = (i) => 100 + 200 * i;
+  function riverShape(counts, track, max) {
+    const top = Math.max(1, max || 0, ...counts);
+    const thick = (n) => (n === 0 ? 3 : 10 + 38 * Math.sqrt(n / top));
+    const up = counts.map((n, i) => [stopX(i), track - thick(n) / 2]);
+    const down = counts.map((n, i) => [stopX(i), track + thick(n) / 2]);
+    const curve = (a, b) => "C " + (a[0] + 100) + " " + a[1] + " " + (b[0] - 100) + " " + b[1] + " " + b[0] + " " + b[1];
+    let d = "M 0 " + up[0][1] + " L " + up[0][0] + " " + up[0][1];
+    for (let i = 1; i < counts.length; i++) d += " " + curve(up[i - 1], up[i]);
+    const last = counts.length - 1;
+    d += " L 1000 " + up[last][1] + " L 1000 " + down[last][1] + " L " + down[last][0] + " " + down[last][1];
+    for (let i = last; i > 0; i--) d += " " + curve(down[i], down[i - 1]);
+    return d + " L 0 " + down[0][1] + " Z";
+  }
+
+  function planMap(m, f) {
+    const X = stopX;
+    const TRACK = 54;
+    const ROW = CAR_H + 16;
+    const counts = [f.sent, f.answered, f.tests, f.interviews, f.offers];
+    const d = riverShape(counts, TRACK);
+
+    const stops = STATIONS.map(() => []);
+    const quiet = [];
+    for (const p of m.procs) {
+      const at = STATIONS.findIndex((st) => st.state === p.card.state);
+      if (at >= 0) stops[at].push(p); else quiet.push(p);
+    }
+    const rows = Math.max(0, ...stops.map((list) => Math.ceil(list.length / CAR_COLS)));
+    const carsTop = TRACK + 44;
+    const yardY = carsTop + rows * ROW + (rows ? 6 : 0);
+    const height = quiet.length ? yardY + CAR_H + 16 : carsTop + Math.max(rows, 0) * ROW;
+
+    const cars = [];
+    const rails = [];
+    const car = (p, x, y) => {
+      const fresh = state.fresh.has("card:" + p.card.key);
+      const station = (STATE_LABELS[p.card.state] || p.card.state);
+      const late = p.task && (p.task.overdue || (p.task.due_at && Date.parse(p.task.due_at) < m.nowMs));
+      const label = p.card.company + " — " + p.card.title + ": " + station;
+      const g = sv("g", { class: "car " + (p.card.state === "ghosted" ? "ghost" : p.turn) + (fresh ? " fresh" : ""), "data-car": p.card.key, tabindex: 0,
+        role: "button", "aria-label": label, transform: "translate(" + x + " " + y + ")" },
+        sv("title", {}, label),
+        sv("rect", { width: CAR_W, height: CAR_H, rx: 5 }),
+        sv("circle", { class: "wheel", cx: 11, cy: CAR_H + 1.5, r: 3 }),
+        sv("circle", { class: "wheel", cx: CAR_W - 11, cy: CAR_H + 1.5, r: 3 }),
+        sv("text", { x: CAR_W / 2, y: 16.5, "text-anchor": "middle" }, initials(p.card.company)),
+        late ? sv("circle", { class: "late-dot", cx: CAR_W - 3, cy: 3, r: 4.5 }) : null);
+      g.addEventListener("click", () => openJob(p.card.key));
+      g.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openJob(p.card.key); } });
+      // A car that moved glides from where it stood; one that is new fades in.
+      const key = p.card.key;
+      const before = state.carPos.get(key);
+      if (state.carPos.size > 0 && !still()) {
+        state.after.push(() => {
+          if (before && (before.x !== x || before.y !== y)) {
+            g.animate([{ transform: "translate(" + before.x + "px, " + before.y + "px)" }, { transform: "translate(" + x + "px, " + y + "px)" }],
+              { duration: 750, easing: "cubic-bezier(.23,1,.32,1)" });
+          } else if (!before) {
+            g.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 500 });
+          }
+        });
+      }
+      state.carPos.set(key, { x, y });
+      cars.push(g);
+    };
+    stops.forEach((list, i) => {
+      if (list.length === 0) return;
+      const span = Math.min(list.length, CAR_COLS) * (CAR_W + CAR_GAP) - CAR_GAP;
+      const left = Math.round(X(i) - span / 2);
+      // the spur that leaves the main line, and a short rail under every row of cars
+      rails.push(sv("line", { class: "map-yard", x1: X(i), y1: TRACK + 10, x2: X(i), y2: carsTop - 6 }));
+      list.forEach((p, k) => {
+        const col = k % CAR_COLS;
+        const row = Math.floor(k / CAR_COLS);
+        car(p, left + col * (CAR_W + CAR_GAP), carsTop + row * ROW);
+      });
+      for (let r = 0; r < Math.ceil(list.length / CAR_COLS); r++) {
+        const inRow = Math.min(CAR_COLS, list.length - r * CAR_COLS);
+        const w = inRow * (CAR_W + CAR_GAP) - CAR_GAP;
+        rails.push(sv("line", { class: "map-rail", x1: left - 8, y1: carsTop + r * ROW + CAR_H + 5, x2: left + w + 8, y2: carsTop + r * ROW + CAR_H + 5 }));
+      }
+    });
+    quiet.slice(0, 20).forEach((p, k) => car(p, 150 + k * (CAR_W + CAR_GAP), yardY));
+
+    const live = new Set(m.procs.map((p) => p.card.key));
+    for (const key of Array.from(state.carPos.keys())) if (!live.has(key)) state.carPos.delete(key);
+
+    // Opening Procesos: the river and the track are drawn from left to right, the stops light one by one and
+    // the cars drive in from the left to where they stand.
+    const reveal = sv("rect", { x: 0, y: -10, width: 1000, height: height + 20 });
+    state.after.push(() => {
+      if (!state.entering || still()) return;
+      reveal.animate([{ width: "0px" }, { width: "1000px" }], { duration: 1100, delay: 150, easing: "cubic-bezier(.16,1,.3,1)", fill: "backwards" });
+      document.querySelectorAll("#app .map-stop").forEach((el, i) => {
+        el.animate([{ opacity: 0, transform: "scale(.4)" }, { opacity: 1, transform: "scale(1)" }], { duration: 420, delay: 300 + i * 130, easing: "cubic-bezier(.23,1,.32,1)", fill: "backwards" });
+      });
+      document.querySelectorAll("#app .car").forEach((g, i) => {
+        const at = /translate\(([-\d.]+)[ ,]+([-\d.]+)\)/.exec(g.getAttribute("transform") || "");
+        if (!at) return;
+        g.animate([{ transform: "translate(" + (Number(at[1]) - 110) + "px, " + at[2] + "px)", opacity: 0 }, { transform: "translate(" + at[1] + "px, " + at[2] + "px)", opacity: 1 }],
+          { duration: 760, delay: 420 + i * 55, easing: "cubic-bezier(.16,1,.3,1)", fill: "backwards" });
+      });
+    });
+
+    return sv("svg", { class: "map", viewBox: "0 0 1000 " + height, role: "group", "aria-label": "Mapa de las postulaciones abiertas, una por vagón" },
+      sv("defs", {}, sv("linearGradient", { id: "river-g", x1: 0, y1: 0, x2: 1, y2: 0 },
+        sv("stop", { class: "rg-a", offset: "0%" }), sv("stop", { class: "rg-a", offset: "78%" }), sv("stop", { class: "rg-b", offset: "100%" })),
+        sv("clipPath", { id: "river-clip" }, reveal)),
+      sv("g", { "clip-path": "url(#river-clip)" },
+        sv("path", { class: "map-river", d }),
+        sv("line", { class: "map-flow", x1: 0, y1: TRACK, x2: 1000, y2: TRACK }),
+        sv("line", { class: "map-track", x1: 0, y1: TRACK, x2: 1000, y2: TRACK })),
+      STATIONS.map((st, i) => sv("circle", { class: "map-stop" + (counts[i] === 0 ? " off" : ""), cx: X(i), cy: TRACK, r: 10 })),
+      rails,
+      cars,
+      quiet.length
+        ? [sv("text", { class: "map-label", x: 8, y: yardY + 16 }, "Sin respuesta"),
+           sv("line", { class: "map-siding", x1: 126, y1: yardY + CAR_H + 5, x2: 1000, y2: yardY + CAR_H + 5 })]
+        : null);
+  }
+
+  // ---- Header
+
+  function renderControls() {
+    const c = state.snap.controls;
+    const claude = state.snap.claude;
+    let window_ = "Ventana de ejecución: sin datos";
+    if (c.window_open === true) window_ = "Ventana de ejecución abierta";
+    if (c.window_open === false) {
+      // "2026-10-06 18:00" -> "18:00" when it is today (Santiago), "07/10 18:00" otherwise.
+      const [day, hour] = String(c.next_window || "").split(" ");
+      const today = new Date(state.snap.generated_at).toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
+      const opens = day === today && hour ? hour : day && hour ? day.slice(8, 10) + "/" + day.slice(5, 7) + " " + hour : c.next_window;
+      window_ = "Ventana cerrada" + (c.next_window ? ", abre " + opens : "");
+    }
+    const spend = "Claude, 24 h: " + usd(claude.spent_24h) + (claude.daily_budget != null ? " de " + usd(claude.daily_budget) : "");
+    document.getElementById("b-info").replaceChildren(
+      h("span", { class: "led " + (c.window_open === true ? "on" : "off") }, window_),
+      h("span", {}, spend));
+    document.getElementById("controls").replaceChildren(
+      h("span", { id: "run-state", class: "badge " + (c.stopped ? "bad" : "ok") }, c.stopped ? "STOP activo" : "En marcha"),
+      c.stopped
+        ? h("button", { id: "resume", onclick: (e) => act("/api/resume", {}, e.currentTarget) }, "Quitar STOP")
+        : h("button", { id: "stop", class: "danger", onclick: (e) => act("/api/stop", {}, e.currentTarget) }, "STOP"),
+      h("button", { id: "open-palette", class: "kbd-btn", title: "Buscar una postulación o saltar a una sección", onclick: openPalette }, "Buscar", h("kbd", {}, "Ctrl K")),
+      h("button", { id: "theme", class: "kbd-btn", title: "Tema: automático, claro u oscuro", "aria-label": "Cambiar el tema", onclick: cycleTheme }, "Tema", h("kbd", {}, "T")),
+      h("button", { id: "open-keys", class: "kbd-btn", title: "Atajos de teclado", "aria-label": "Atajos de teclado", onclick: toggleKeys }, h("kbd", {}, "?")),
+    );
+  }
+
+  function renderTabs(m) {
+    const s = state.snap;
+    const labels = {
+      hoy: ["Hoy", turnCount(m), true],
+      procesos: ["Procesos", m.procs.length, false],
+      cola: ["Cola", countOf(s, "scored") + countOf(s, "prepared"), false],
+      learn: ["Aprender", s.learn.due, false],
+    };
+    document.querySelectorAll("[data-tab]").forEach((b) => {
+      const [name, n, hot] = labels[b.dataset.tab];
+      b.setAttribute("aria-selected", String(b.dataset.tab === state.tab));
+      b.setAttribute("tabindex", b.dataset.tab === state.tab ? "0" : "-1");
+      b.replaceChildren(name, h("span", { class: "count" + (hot && n > 0 ? " hot" : "") }, String(n)));
+      if (b._n != null && b._n !== n && !still()) { b.classList.remove("pop"); void b.offsetWidth; b.classList.add("pop"); }
+      b._n = n;
+    });
+    moveInk();
+  }
+
+  function countOf(s, st) {
+    const col = s.board.find((c) => c.state === st);
+    return col ? col.total : 0;
+  }
+
+  function render(opts) {
+    const before = opts && opts.tabChange ? null : rectsOf(document.getElementById("app"));
+    state.entering = !!(opts && opts.tabChange) && !still();
+    const m = model(state.snap);
+    renderControls();
+    renderTabs(m);
+    updateBoard(m);
+    let body;
+    if (state.tab === "hoy") body = renderHoy(m);
+    else if (state.tab === "procesos") body = renderProcesos(m);
+    else if (state.tab === "cola") body = renderCola();
+    else body = renderLearn();
+    const app = document.getElementById("app");
+    app.setAttribute("aria-labelledby", "tab-" + state.tab);
+    // A redraw replaces every element, so the one that had the keyboard focus is found again in the
+    // new page, with its caret, instead of leaving the focus on nothing.
+    const focused = focusMark(document.activeElement);
+    app.replaceChildren(...body.flat(Infinity).filter((node) => node != null && node !== false));
+    restoreFocus(focused);
+    if (before) glide(before, app);
+    if (state.entering) enterView(app);
+    applyCursor();
+    persist();
+    // Things that need the new nodes to be in the page (a car gliding to its stop, a ring filling).
+    const later = state.after.splice(0);
+    later.forEach((run) => run());
+    // The drawer is not redrawn here: it depends on the application that was opened, not on the
+    // snapshot, and rebuilding it would lose its screenshot, its notes and its open sections.
+  }
+
+  // How to find an element of the page again after it is drawn anew: by its id, or by the card it
+  // sits in and the one data attribute that names what it does.
+  function focusMark(el) {
+    const app = document.getElementById("app");
+    if (el == null || !app.contains(el)) return null;
+    let selector = null;
+    if (el.id) selector = "#" + CSS.escape(el.id);
+    else {
+      const card = el.closest("[data-card]");
+      const scope = card ? '[data-card="' + CSS.escape(card.dataset.card) + '"] ' : "";
+      for (const attr of ["data-done", "data-open", "data-action", "data-filter", "data-grade", "data-ticket-act", "data-ticket-open", "data-ticket-skip", "data-car"]) {
+        if (el.hasAttribute(attr)) selector = scope + "[" + attr + '="' + CSS.escape(el.getAttribute(attr)) + '"]';
+      }
+      const fold = el.closest("details[data-fold]");
+      if (selector == null && el.tagName === "SUMMARY" && fold) selector = 'details[data-fold="' + CSS.escape(fold.dataset.fold) + '"] > summary';
+    }
+    if (selector == null) return null;
+    const caret = "selectionStart" in el ? [el.selectionStart, el.selectionEnd] : null;
+    return { selector, caret };
+  }
+
+  function restoreFocus(mark) {
+    if (mark == null) return;
+    const el = document.getElementById("app").querySelector(mark.selector);
+    if (el == null) return;
+    el.focus({ preventScroll: true });
+    if (mark.caret && "setSelectionRange" in el) el.setSelectionRange(mark.caret[0], mark.caret[1]);
+  }
+
+  // A fold that remembers whether Gonza opened it, across the redraws of every refresh.
+  function fold(id, defaultOpen, summary, content) {
+    const open = id in state.folds ? state.folds[id] : defaultOpen;
+    const el = h("details", { class: "group", "data-fold": id, open: open }, h("summary", {}, summary), content);
+    el.addEventListener("toggle", () => { state.folds[id] = el.open; persist(); });
+    return el;
+  }
+
+  // ---- Hoy: what is on Gonza's plate
+
+  function taskRow(item, nowMs) {
+    const { task, owner } = item;
+    const left = countdown(task, nowMs);
+    const cls = "item" + (left && left.tone === "late" ? " late" : left && left.tone === "soon" ? " now" : "")
+      + (state.ticketId === "task:" + task.id ? " next" : "") + (state.fresh.has("task:" + task.id) ? " fresh" : "");
+    return h("li", { class: cls, "data-task": task.id },
+      h("div", { class: "item-main" },
+        h("span", { class: "item-title" }, task.text),
+        h("div", { class: "row small muted" },
+          owner ? h("span", { class: "chip" }, owner.company + ": " + (STATE_LABELS[owner.state] || owner.state)) : null,
+          task.link ? link(task.link, "Abrir enlace") : null)),
+      h("div", { class: "item-side" },
+        left ? h("span", { class: "when " + left.tone }, left.text) : null,
+        h("button", { "data-done": task.id, title: "Ya lo hice: sale de la lista", "aria-label": "Hecha: " + task.text.slice(0, 90),
+          onclick: twoStep("Hecha", (button) => act("/api/task/done", { id: task.id }, button)) }, "Hecha")));
+  }
+
+  function summaryLine(tasks, nowMs) {
+    if (tasks.length === 0) return "No tienes tareas abiertas.";
+    const late = tasks.filter((t) => t.task.overdue).length;
+    const dated = tasks.filter((t) => t.task.due_at && !t.task.overdue);
+    let text = plural(tasks.length, "tarea abierta", "tareas abiertas");
+    if (late) text += ", " + plural(late, "vencida", "vencidas");
+    if (dated.length) {
+      const next = countdown(dated[0].task, nowMs);
+      text += ". La más cercana: " + next.text.charAt(0).toLowerCase() + next.text.slice(1);
+    }
+    return text + ".";
+  }
+
+  function renderTasks(m) {
+    const dated = m.tasks.filter((t) => t.task.due_at);
+    const undated = m.tasks.filter((t) => !t.task.due_at);
+    const s = state.snap.today;
+    return h("div", {},
+      h("h2", {}, "Tu turno"),
+      h("p", { class: "lead", id: "today-summary" }, summaryLine(m.tasks, m.nowMs)),
+      dated.length
+        ? h("section", { class: "block" }, h("h3", {}, "Con fecha", h("span", { class: "count" }, String(dated.length))),
+            h("ul", { class: "items" }, dated.map((t) => taskRow(t, m.nowMs))))
+        : null,
+      h("section", { class: "block" },
+        h("h3", {}, "Cuando puedas", h("span", { class: "count" }, String(undated.length))),
+        undated.length === 0
+          ? h("p", { class: "empty" }, "Sin tareas abiertas.")
+          : h("ul", { class: "items" }, undated.map((t) => taskRow(t, m.nowMs)))),
+      s.tasks_total > s.tasks.length ? h("p", { class: "muted small" }, "y " + (s.tasks_total - s.tasks.length) + " más…") : null);
+  }
+
+  function cardTitle(c) {
+    return h("button", { class: "link", "data-open": c.key, onclick: () => openJob(c.key) }, c.company + " — " + c.title);
+  }
+
+  function actionButton(action, key) {
+    const run = (button) => act("/api/" + action, { key }, button);
+    return h("button", {
+      class: action === "approve" ? "primary" : "", "data-action": action, title: ACTION_HINTS[action],
+      onclick: PERMANENT_ACTIONS.includes(action) ? twoStep(ACTION_LABELS[action], run) : (e) => run(e.currentTarget),
+    }, ACTION_LABELS[action]);
+  }
+  const PERMANENT_ACTIONS = ["approve", "confirm"];
+  const PERMANENT_MARKS = ["withdrawn", "rejected", "accepted"];
+
+  // One application that waits for Gonza: what it is, why, and the buttons for the engine's own
+  // decisions. The long reason stays behind a fold; the short sentence says what to do.
+  function decisionRow(c) {
+    const long = c.reason && c.reason_kind !== "manual_apply" && c.reason_kind !== "other" ? c.reason : null;
+    return h("li", { class: "item plain stack", "data-card": c.key },
+      h("div", { class: "item-main" },
+        cardTitle(c),
+        c.reason_short && c.reason_kind !== "other" ? h("span", { class: "small muted" }, c.reason_short) : null,
+        c.reason_kind === "other" && c.reason ? h("span", { class: "small muted wrap-any" }, c.reason) : null,
+        long ? h("details", { class: "fold" }, h("summary", {}, "Ver el detalle"), h("pre", { class: "wrap" }, long)) : null,
+        h("span", { class: "small muted" }, "Puntaje " + c.score + " en " + c.source),
+        h("div", { class: "row act-row" },
+          c.actions.map((a) => actionButton(a, c.key)),
+          c.url ? h("span", { class: "small" }, link(c.url, "Ver el aviso")) : null)));
+  }
+
+  function decisions(s) {
+    const groups = REASON_GROUPS.map((g) => ({
+      ...g,
+      cards: g.kind === "approve" ? s.awaiting_approval.cards : s.needs_gonza.cards.filter((c) => (c.reason_kind || "other") === g.kind),
+    })).filter((g) => g.cards.length > 0);
+    const total = s.needs_gonza.total + s.awaiting_approval.total;
+    return h("section", { id: "decisions" },
+      h("h2", {}, "Esperan tu decisión"),
+      h("p", { class: "lead" }, total === 0 ? "Nada pendiente." : plural(total, "postulación espera", "postulaciones esperan") + " algo de ti, por tipo de ayuda."),
+      groups.length === 0
+        ? h("p", { class: "empty" }, "Nada pendiente.")
+        : groups.map((g) => fold("dec-" + g.kind, g.cards.length <= OPEN_BELOW,
+            [g.title, h("span", { class: "count" }, String(g.cards.length))],
+            h("ul", { class: "items" }, g.cards.map(decisionRow)))),
+      s.needs_gonza.total > s.needs_gonza.cards.length ? h("p", { class: "muted small" }, "y " + (s.needs_gonza.total - s.needs_gonza.cards.length) + " más…") : null,
+      s.awaiting_approval.cards.length === 0 ? h("p", { class: "small muted" }, "Por aprobar: nada por aprobar.") : null);
+  }
+
+  function mailView(mail, nowMs) {
+    return h("li", { class: "mail" + (state.fresh.has("mail:" + mailId(mail)) ? " fresh" : ""), "data-email": mail.kind },
+      h("div", { class: "row" },
+        h("span", { class: "chip" }, KIND_LABELS[mail.kind] || mail.kind),
+        h("span", { class: "item-title" }, mail.company || mail.from)),
+      h("div", { class: "wrap-any" }, mail.subject || "(sin asunto)"),
+      mail.summary ? h("div", { class: "small muted wrap-any" }, mail.summary) : null,
+      h("div", { class: "small muted" }, ago(mail.received_at, nowMs) + ", " + when(mail.received_at) + (mail.company ? " · " + mail.from : "")));
+  }
+
+  function renderHoy(m) {
+    const s = state.snap;
+    const t = s.today;
+    return [
+      h("div", { id: "today", class: "hoy" },
+        ticketSlot(m),
+        h("div", {}, renderNight(m), renderTasks(m)),
+        h("div", {},
+          decisions(s),
+          h("section", { class: "block", id: "recent" },
+            h("h3", {}, "Respuestas de los últimos 7 días", h("span", { class: "count" }, String(t.emails_total))),
+            t.emails.length === 0
+              ? h("p", { class: "empty" }, "Sin respuestas nuevas.")
+              : h("ul", { class: "items" }, t.emails.map((mail) => mailView(mail, m.nowMs))),
+            t.emails_total > t.emails.length ? h("p", { class: "muted small" }, "y " + (t.emails_total - t.emails.length) + " más…") : null))),
+    ];
+  }
+
+  // ---- Procesos: where every application is, and whose turn it is
+
+  function stationLine(f, s) {
+    // Each stop is a share of the one it came from. The technical test is optional, so tests and
+    // interviews are both shares of the answers, and an offer is a share of the interviews.
+    const stops = [
+      { label: "Enviadas", n: f.sent, base: null, of: "desde siempre" },
+      { label: "Respondieron", n: f.answered, base: f.sent, of: "de las enviadas" },
+      { label: "Prueba técnica", n: f.tests, base: f.answered, of: "de las que respondieron" },
+      { label: "Entrevista", n: f.interviews, base: f.answered, of: "de las que respondieron" },
+      { label: "Oferta", n: f.offers, base: f.interviews, of: "de las entrevistas" },
+    ];
+    return h("div", { class: "line", id: "stations" }, stops.map((stop, i) => {
+      const rate = stop.base == null ? stop.of : stop.base > 0 ? pct(stop.n / stop.base) + " " + stop.of : "";
+      return h("div", { class: "station" + (stop.n === 0 ? " empty-stop" : ""), "data-station": stop.label },
+        h("div", { class: "station-n" }, String(stop.n)),
+        h("div", { class: "station-l" }, stop.label),
+        h("div", { class: "station-c" }, rate));
+    }));
+  }
+
+  function stepper(card) {
+    const here = STATIONS.findIndex((st) => st.state === card.state);
+    if (here < 0) return h("span", { class: "chip" }, STATE_LABELS[card.state] || card.state);
+    return h("div", {},
+      h("div", { class: "steps", role: "img", "aria-label": "Etapa: " + STATIONS[here].label },
+        STATIONS.map((st, i) => h("span", { class: "step" + (i < here ? " done" : i === here ? " here" : "") }))),
+      h("div", { class: "step-label" }, STATIONS[here].label));
+  }
+
+  const TURN = {
+    mine: { text: "Te toca", cls: "turn" },
+    check: { text: "Define el paso", cls: "check" },
+    wait: { text: "La empresa", cls: "wait" },
+  };
+
+  function procRow(p, nowMs) {
+    const c = p.card;
+    const turn = TURN[p.turn];
+    let next = "Esperar su respuesta";
+    if (p.task) {
+      const left = countdown(p.task, nowMs);
+      next = [p.task.text, left ? " (" + left.text.charAt(0).toLowerCase() + left.text.slice(1) + ")" : ""].join("");
+    } else if (c.state === "ghosted") next = "Sin noticias: decide si insistes";
+    else if (p.turn === "check") next = "Sin tarea: agrega el siguiente paso";
+    else if (c.state === "offer") next = "Decide la oferta";
+    const since = p.days === 0 ? "hoy" : plural(p.days, "día", "días");
+    const noteText = c.note ? c.note : "Sin notas";
+    return h("li", { class: "proc" + (p.turn === "mine" ? " mine" : "") + (state.fresh.has("card:" + c.key) ? " fresh" : ""), "data-card": c.key, "data-state": c.state, "data-turn": p.turn },
+      h("div", { class: "proc-name" }, cardTitle(c), h("span", { class: "small muted" }, c.source)),
+      stepper(c),
+      h("div", { class: "since small" + (p.stale ? " stale" : "") }, ring(p), since + (p.stale ? " sin noticias" : "")),
+      h("div", { class: "small wrap-any clamp", title: noteText }, noteText),
+      h("div", { class: "small wrap-any clamp", title: next }, next),
+      h("div", {}, h("span", { class: "chip " + turn.cls }, turn.text)));
+  }
+
+  function renderProcesos(m) {
+    const s = state.snap;
+    const mine = m.procs.filter((p) => p.turn === "mine" || p.turn === "check").length;
+    const waiting = m.procs.filter((p) => p.turn === "wait").length;
+    const stale = m.procs.filter((p) => p.stale).length;
+    const filters = [
+      ["all", "Todas", m.procs.length],
+      ["mine", "Te tocan", mine],
+      ["wait", "Esperando a la empresa", waiting],
+      ["stale", "Sin noticias hace " + STALE_DAYS + " días o más", stale],
+    ];
+    const shown = m.procs.filter((p) => state.filter === "all"
+      || (state.filter === "mine" && p.turn !== "wait")
+      || (state.filter === "wait" && p.turn === "wait")
+      || (state.filter === "stale" && p.stale));
+    const closed = s.board.filter((col) => CLOSED.includes(col.state));
+    const closedTotal = closed.reduce((n, col) => n + col.total, 0);
+    const metrics = s.metrics;
+    return [
+      h("h2", {}, "Procesos"),
+      h("p", { class: "lead", id: "metrics-line" },
+        "Últimos 7 días: " + plural(metrics.sent_week, "enviada", "enviadas") + ", " + plural(metrics.responses_week, "respuesta", "respuestas") +
+          " (" + pct(metrics.response_rate) + "), " + plural(metrics.tests_week, "prueba", "pruebas") + ", " +
+          plural(metrics.interviews_week, "entrevista", "entrevistas") +
+          (metrics.interview_to_offer == null ? "." : ". De entrevista a oferta: " + pct(metrics.interview_to_offer) + ".")),
+      h("section", { class: "block" }, h("h3", {}, "Hasta dónde han llegado"),
+        h("div", { class: "plan" }, h("div", { class: "plan-in" }, stationLine(s.funnel, s), planMap(m, s.funnel))),
+        h("p", { class: "muted small map-legend" },
+          h("span", {}, "Cada vagón es una postulación abierta:"),
+          h("span", {}, h("i", { class: "sw mine" }), "te toca"),
+          h("span", {}, h("i", { class: "sw check" }), "define el siguiente paso"),
+          h("span", {}, h("i", { class: "sw" }), "espera a la empresa"),
+          h("span", {}, h("i", { class: "sw ghost" }), "sin respuesta"))),
+      h("section", { class: "block" },
+        h("h3", {}, "Procesos abiertos", h("span", { class: "count" }, String(m.procs.length))),
+        h("div", { class: "filters", role: "group", "aria-label": "Filtro" }, filters.map(([key, label, n]) =>
+          h("button", { "data-filter": key, "aria-pressed": String(state.filter === key),
+            onclick: () => { state.filter = key; render(); } }, label + " (" + n + ")"))),
+        h("div", { class: "grid-head" },
+          h("span", {}, "Proceso"), h("span", {}, "Etapa"), h("span", {}, "Tiempo"), h("span", {}, "Último movimiento"),
+          h("span", {}, "Siguiente paso"), h("span", {}, "Turno")),
+        shown.length === 0
+          ? h("p", { class: "empty" }, m.procs.length === 0 ? "Todavía no hay procesos abiertos." : "Ninguno cumple este filtro.")
+          : h("ul", { class: "items" }, shown.map((p) => procRow(p, m.nowMs)))),
+      fold("closed", false, ["Cerradas", h("span", { class: "count" }, String(closedTotal))],
+        h("div", {}, closed.map((col) => h("div", { "data-column": col.state },
+          h("h4", {}, col.label + " (" + col.total + ")"),
+          col.cards.length === 0 ? h("p", { class: "empty" }, "Ninguna.") : h("ul", { class: "items" }, col.cards.map(queueRow)),
+          col.total > col.cards.length ? h("p", { class: "muted small" }, "y " + (col.total - col.cards.length) + " más…") : null)))),
+    ];
+  }
+
+  // ---- Cola: what jobbot has found and prepared
+
+  function queueRow(c) {
+    return h("li", { class: "queue-row", "data-card": c.key, "data-state": c.state },
+      h("span", { class: "score" }, c.score),
+      h("div", { class: "item-main" }, cardTitle(c), h("span", { class: "small muted" }, c.source + (c.note ? " · " + c.note : "")), miniPath(c)),
+      c.actions.length ? h("div", { class: "row" }, c.actions.map((a) => actionButton(a, c.key))) : null);
+  }
+
+  function renderCola() {
+    const s = state.snap;
+    const cols = ["prepared", "scored"].map((st) => s.board.find((c) => c.state === st)).filter(Boolean);
+    return [
+      h("h2", {}, "Cola"),
+      h("p", { class: "lead" }, "Lo que jobbot encontró y preparó, de mejor a peor puntaje. Todavía no se envió."),
+      renderRoute(s),
+      h("div", { class: "cola-pair" }, renderThreshold(s), renderTrust(s)),
+      cols.map((col) => h("section", { class: "block", "data-column": col.state },
+        h("h3", {}, col.label, h("span", { class: "count" }, String(col.total))),
+        col.cards.length === 0 ? h("p", { class: "empty" }, "Ninguna.") : h("ul", { class: "items" }, col.cards.map(queueRow)),
+        col.total > col.cards.length ? h("p", { class: "muted small" }, "y " + (col.total - col.cards.length) + " más…") : null)),
+    ];
+  }
+
+  // ---- The story's ideas as views: what jobbot did in the last day, the five layers between a posting and a
+  // send, the threshold, trust. Each one answers a question in a sentence and draws the same thing; none of
+  // them writes anything.
+
+  const hourOf = (iso) => {
+    try { return new Date(iso).toLocaleTimeString("es-CL", { timeZone: "America/Santiago", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }); } catch (e) { return iso; }
+  };
+  const dayOf = (iso) => {
+    try { return new Date(iso).toLocaleDateString("sv-SE", { timeZone: "America/Santiago" }); } catch (e) { return iso; }
+  };
+  const hourNumber = (iso) => {
+    try { return Number(new Date(iso).toLocaleString("en-GB", { timeZone: "America/Santiago", hour: "2-digit", hourCycle: "h23" }).slice(0, 2)); } catch (e) { return 0; }
+  };
+  // A label that sits at a place along a drawing: its box is the drawing's width, so a percentage is the place.
+  function atPercent(tag, cls, percent, text) {
+    const el = h(tag, { class: cls }, text);
+    el.style.left = Math.max(0, Math.min(100, percent)).toFixed(2) + "%";
+    return el;
+  }
+  const sumFrom = (counts, at) => counts.slice(Math.max(0, at)).reduce((n, x) => n + x, 0);
+
+  // The last 24 hours, left to right up to now: the postings jobbot kept as bars, every move of an application as
+  // a dot, and the hours it stays quiet (your busy ones) hatched, like the dial of the board.
+  function renderNight(m) {
+    const s = state.snap;
+    const a = s.activity;
+    if (!a || !Array.isArray(a.slots) || a.slots.length === 0) return null;
+    const from = Date.parse(a.from);
+    const span = Math.max(1, Date.parse(a.to) - from);
+    const W = 960;
+    const slotW = W / a.slots.length;
+    const seenTotal = a.slots.reduce((n, slot) => n + slot.seen, 0);
+    const maxSeen = Math.max(1, ...a.slots.map((slot) => slot.seen));
+    const BASE = 76;
+    const waiting = new Set(s.needs_gonza.cards.concat(s.awaiting_approval.cards).map((c) => c.key));
+    // moves from oldest to newest, each in the first row where it does not touch the one before
+    const rowEnd = [];
+    const placed = a.moves.slice().sort((x, y) => Date.parse(x.at) - Date.parse(y.at)).map((mv) => {
+      const x = Math.max(0, Math.min(W, ((Date.parse(mv.at) - from) / span) * W));
+      let row = rowEnd.findIndex((end) => x - end >= 13);
+      if (row < 0) row = rowEnd.length;
+      row = Math.min(row, 4);
+      rowEnd[row] = x;
+      return { mv, x, row };
+    });
+    const H = BASE + 22 + Math.max(1, rowEnd.length) * 14;
+    const capped = a.moves_total > a.moves.length;
+    const sentCount = a.moves.filter((mv) => mv.to === "submitted").length;
+    let line = "Sin avisos nuevos ni movimientos en las últimas 24 horas.";
+    if (seenTotal > 0 || a.moves_total > 0) {
+      line = "En las últimas 24 horas guardó " + plural(seenTotal, "aviso nuevo", "avisos nuevos") + " y registró " + plural(a.moves_total, "movimiento", "movimientos")
+        + (!capped && sentCount > 0 ? " (" + (sentCount === 1 ? "1 es un envío" : sentCount + " son envíos") + ")" : "") + ".";
+    }
+
+    const busy = a.slots.map((slot, i) => (slot.open === false ? sv("rect", { class: "n-busy", x: (i * slotW).toFixed(2), y: 0, width: (slotW + 0.5).toFixed(2), height: H }) : null));
+    const bars = a.slots.map((slot, i) => {
+      if (slot.seen === 0) return null;
+      const tall = 6 + 64 * (slot.seen / maxSeen);
+      const rect = sv("rect", { class: "n-bar", x: (i * slotW + 2).toFixed(2), width: (slotW - 4).toFixed(2), y: (BASE - tall).toFixed(1), height: tall.toFixed(1), rx: 2 },
+        sv("title", {}, hourOf(slot.at) + ": " + plural(slot.seen, "aviso nuevo", "avisos nuevos")));
+      rect.style.setProperty("--bi", String(i));
+      return rect;
+    });
+    const dots = placed.map(({ mv, x, row }) => {
+      const tone = waiting.has(mv.key) ? " ask" : mv.to === "submitted" ? " sent" : "";
+      const label = mv.company + " — " + mv.title + ": " + (STATE_LABELS[mv.to] || mv.to) + ", " + hourOf(mv.at);
+      const g = sv("g", { class: "n-dot" + tone, "data-move": mv.key, "aria-hidden": "true", transform: "translate(" + x.toFixed(1) + " " + (BASE + 18 + row * 14) + ")" },
+        sv("title", {}, label), sv("circle", { r: 5.5 }));
+      g.style.setProperty("--bi", String(Math.floor((x / W) * a.slots.length)));
+      g.addEventListener("click", () => openJob(mv.key, g));
+      return g;
+    });
+    const nowX = Math.max(0, Math.min(W, ((m.nowMs - from) / span) * W));
+    const svg = sv("svg", { class: "night-svg", viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": line },
+      sv("defs", {}, sv("pattern", { id: "night-hatch", width: 7, height: 7, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" }, sv("line", { class: "n-hatch", x1: 0, y1: 0, x2: 0, y2: 7 }))),
+      busy,
+      sv("line", { class: "n-base", x1: 0, y1: BASE, x2: W, y2: BASE }),
+      bars, dots,
+      sv("line", { class: "n-now", x1: nowX.toFixed(1), y1: 0, x2: nowX.toFixed(1), y2: H }));
+
+    const marks = [];
+    a.slots.forEach((slot, i) => {
+      if (new Date(slot.at).getUTCMinutes() !== 0 || hourNumber(slot.at) % 3 !== 0) return;
+      const at = (i / a.slots.length) * 100;
+      if (Math.abs(at - (nowX / W) * 100) < 11 || at < 2) return;
+      marks.push(atPercent("span", "", at, String(hourNumber(slot.at)).padStart(2, "0") + ":00"));
+    });
+    const nowPercent = (nowX / W) * 100;
+    marks.push(atPercent("span", "now" + (nowPercent > 94 ? " edge-r" : ""), nowPercent, "ahora"));
+
+    const anyBusy = a.slots.some((slot) => slot.open === false);
+    const list = a.moves.length === 0 ? null : fold("night-moves", false,
+      capped ? "Ver los últimos " + a.moves.length + " de " + a.moves_total + " movimientos" : "Ver " + (a.moves.length === 1 ? "el movimiento" : "los " + a.moves.length + " movimientos"),
+      h("ul", { class: "items n-list" }, a.moves.map((mv) => h("li", { class: "n-li" },
+        h("span", { class: "small muted num" }, hourOf(mv.at) + (dayOf(mv.at) === dayOf(new Date(m.nowMs).toISOString()) ? "" : " (ayer)")),
+        h("button", { class: "link", "data-night-open": mv.key, onclick: (e) => openJob(mv.key, e.currentTarget) }, mv.company + " — " + mv.title),
+        h("span", { class: "chip" + (waiting.has(mv.key) ? " turn" : "") }, STATE_LABELS[mv.to] || mv.to)))));
+
+    return h("section", { class: "block night", id: "night", "aria-labelledby": "night-h" },
+      h("h3", { id: "night-h" }, "Lo que hizo jobbot", h("span", { class: "n-sub" }, "últimas 24 horas")),
+      h("p", { class: "lead", id: "night-line" }, line),
+      h("div", { class: "night-plot" }, svg, h("div", { class: "n-axis", "aria-hidden": "true" }, marks)),
+      h("p", { class: "muted small map-legend" },
+        h("span", {}, h("i", { class: "sw bar" }), "avisos nuevos"),
+        h("span", {}, h("i", { class: "sw dot-ask" }), "te toca"),
+        h("span", {}, h("i", { class: "sw dot-sent" }), "enviada"),
+        h("span", {}, h("i", { class: "sw dot" }), "otro movimiento"),
+        anyBusy ? h("span", {}, h("i", { class: "sw hatch" }), "tus horas ocupadas: no corre") : null),
+      list);
+  }
+
+  // The five layers between a posting and a send, the same ones the story draws.
+  const LAYERS = [
+    { id: "aviso", label: "Aviso" }, { id: "puntaje", label: "Puntaje" }, { id: "cv", label: "CV" },
+    { id: "respuestas", label: "Respuestas" }, { id: "compuerta", label: "Compuerta" },
+  ];
+  const SENT_STATES = ["submitted", "replied", "technical_test", "interview", "offer", "accepted", "rejected", "ghosted"];
+
+  // Where an application stands among the layers (`at` is the one it is in) and whose turn it is there: the
+  // robot's ("robot"), Gonza's ("you"), or neither because it already went out ("done") or closed ("closed").
+  function layerOf(c) {
+    if (SENT_STATES.includes(c.state)) return { at: LAYERS.length, who: "done", text: "" };
+    if (c.state === "scored") return { at: 2, who: "robot", text: "jobbot prepara el CV en la próxima ventana" };
+    if (c.state === "prepared") {
+      // "approve" is offered exactly while a dry-run capture waits for Gonza
+      if (c.approved) return { at: 4, who: "robot", text: "aprobada por ti: sale en la próxima ventana" };
+      if (c.actions.includes("approve")) return { at: 4, who: "you", text: "espera tu aprobación" };
+      return { at: 3, who: "robot", text: "jobbot llena el formulario en prueba en seco" };
+    }
+    if (c.state === "needs_gonza") {
+      const kind = c.reason_kind || "other";
+      const at = kind === "missing_answers" || kind === "blocked" || kind === "error" ? 3 : 4;
+      return { at, who: "you", text: c.reason_short || "necesita una mirada tuya" };
+    }
+    return { at: -1, who: "closed", text: "" };
+  }
+
+  // Five dots and the name of the layer, under a row of the queue.
+  function miniPath(c) {
+    const l = layerOf(c);
+    if (l.at < 0 || l.who === "done") return null;
+    const name = LAYERS[l.at].label;
+    return h("div", { class: "mini", "data-layer": LAYERS[l.at].id },
+      h("span", { class: "steps", role: "img", "aria-label": "Capa " + (l.at + 1) + " de 5: " + name },
+        LAYERS.map((ly, i) => h("span", { class: "step" + (i < l.at ? " done" : i === l.at ? " here" + (l.who === "you" ? " you" : "") : "") }))),
+      h("span", { class: "small muted" }, name + " · " + l.text));
+  }
+
+  // Cola: how far this week's postings got, as the same river as Procesos, narrowing at each layer.
+  function renderRoute(s) {
+    const p = s.pipeline;
+    if (!p) return null;
+    const counts = [p.seen, p.above, p.with_cv, p.complete, p.sent];
+    const names = ["Avisos guardados", "Pasaron el umbral", "Con CV a la medida", "Formulario completo", "Enviados"];
+    const of = ["", "de los guardados", "de los que pasaron", "de los que tienen CV", "de los completos"];
+    let sentence = "Sin avisos guardados en los últimos " + p.days + " días.";
+    if (p.seen > 0) {
+      sentence = "De " + plural(p.seen, "aviso guardado", "avisos guardados") + " en " + p.days + " días, " + p.above + (p.threshold != null ? " pasaron tu umbral de " + Math.round(p.threshold) : " pasaron el umbral")
+        + ", " + p.complete + " tienen el formulario completo y " + p.sent + (p.sent === 1 ? " ya se envió." : " ya se enviaron.");
+    }
+    const TRACK = 38;
+    const reveal = sv("rect", { x: 0, y: -10, width: 1000, height: 100 });
+    state.after.push(() => {
+      if (!state.entering || still()) return;
+      reveal.animate([{ width: "0px" }, { width: "1000px" }], { duration: 1000, delay: 200, easing: "cubic-bezier(.16,1,.3,1)", fill: "backwards" });
+      document.querySelectorAll("#route .map-stop").forEach((el, i) => {
+        el.animate([{ opacity: 0, transform: "scale(.4)" }, { opacity: 1, transform: "scale(1)" }], { duration: 420, delay: 300 + i * 130, easing: "cubic-bezier(.23,1,.32,1)", fill: "backwards" });
+      });
+    });
+    const line = h("div", { class: "line", id: "route-line" }, counts.map((n, i) => {
+      const share = i === 0 ? "en " + p.days + " días" : counts[i - 1] > 0 ? pct(n / counts[i - 1]) + " " + of[i] : "";
+      return h("div", { class: "station" + (n === 0 ? " empty-stop" : ""), "data-layer": LAYERS[i].id },
+        h("div", { class: "station-n" }, String(n)), h("div", { class: "station-l" }, names[i]), h("div", { class: "station-c" }, share));
+    }));
+    const svg = sv("svg", { class: "map route-map", viewBox: "0 0 1000 76", role: "img", "aria-label": sentence },
+      sv("defs", {}, sv("linearGradient", { id: "route-g", x1: 0, y1: 0, x2: 1, y2: 0 },
+        sv("stop", { class: "rg-a", offset: "0%" }), sv("stop", { class: "rg-a", offset: "78%" }), sv("stop", { class: "rg-b", offset: "100%" })),
+        sv("clipPath", { id: "route-clip" }, reveal)),
+      sv("g", { "clip-path": "url(#route-clip)" },
+        sv("path", { class: "route-river", d: riverShape(counts, TRACK) }),
+        sv("line", { class: "map-track", x1: 0, y1: TRACK, x2: 1000, y2: TRACK })),
+      counts.map((n, i) => sv("circle", { class: "map-stop" + (n === 0 ? " off" : ""), cx: stopX(i), cy: TRACK, r: 10 })));
+    return h("section", { class: "block", id: "route", "aria-labelledby": "route-h" },
+      h("h3", { id: "route-h" }, "Del aviso al envío", h("span", { class: "n-sub" }, "últimos " + p.days + " días")),
+      h("p", { class: "lead" }, sentence),
+      h("div", { class: "plan" }, h("div", { class: "plan-in" }, line, svg)));
+  }
+
+  // Cola: the scores of the same postings, a line where the threshold is, and a slider to try another one. It
+  // only shows what would happen: the threshold itself lives in profile/criteria.toml.
+  const HIST_LO = 20;
+  function renderThreshold(s) {
+    const p = s.pipeline;
+    if (!p || p.threshold == null || p.seen === 0 || !Array.isArray(p.score_counts) || p.score_counts.length < 101) return null;
+    const t0 = Math.round(p.threshold);
+    const counts = p.score_counts;
+    const values = [];
+    for (let score = HIST_LO; score <= 100; score++) values.push(score === HIST_LO ? counts.slice(0, HIST_LO + 1).reduce((n, x) => n + x, 0) : counts[score]);
+    const max = Math.max(1, ...values);
+    const at = (score) => ((score - HIST_LO) / (100 - HIST_LO + 1)) * 100;
+    const bars = values.map((n, i) => {
+      if (n === 0) return null;
+      const tall = Math.max(3, 104 * (n / max));
+      const rect = sv("rect", { class: "h-bar", x: i * 10, width: 9, y: (108 - tall).toFixed(1), height: tall.toFixed(1) },
+        sv("title", {}, (i === 0 ? "20 o menos" : String(HIST_LO + i)) + ": " + plural(n, "aviso", "avisos")));
+      rect.dataset.score = String(HIST_LO + i);
+      rect.style.setProperty("--bi", String(i));
+      return rect;
+    });
+    const thr = sv("line", { class: "h-thr", x1: (t0 - HIST_LO) * 10, x2: (t0 - HIST_LO) * 10, y1: 0, y2: 108 });
+    const tryLine = sv("line", { class: "h-if", x1: 0, x2: 0, y1: 0, y2: 108, visibility: "hidden" });
+    const svg = sv("svg", { class: "thr-svg", viewBox: "0 0 810 108", preserveAspectRatio: "none", role: "img",
+      "aria-label": "Cuántos avisos tienen cada puntaje; el umbral está en " + t0 }, bars, thr, tryLine);
+    const ticks = [40, 80, 100].filter((v) => Math.abs(v - t0) >= 8).map((v) => atPercent("span", "", at(v) + 0.6, String(v)));
+    ticks.unshift(atPercent("span", "", 0.6, "≤" + HIST_LO));
+    ticks.push(atPercent("span", "tag", at(t0), "umbral " + t0));
+
+    const noteIn = h("span", { class: "thr-note in", id: "thr-in" });
+    const noteOut = h("span", { class: "thr-note out", id: "thr-out-note" });
+    const say = h("p", { class: "small", id: "thr-say", role: "status" });
+    const out = h("output", { id: "thr-out", for: "thr-range" }, String(t0));
+    const reset = h("button", { id: "thr-reset", hidden: true, onclick: () => { range.value = String(t0); paint(t0); } }, "Volver a " + t0);
+    const range = h("input", { type: "range", id: "thr-range", min: "40", max: "100", step: "1", value: String(state.whatIf != null ? state.whatIf : t0),
+      "aria-label": "Probar otro umbral", oninput: () => paint(Number(range.value)) });
+    const total = sumFrom(counts, 0);
+    function paint(v) {
+      state.whatIf = v === t0 ? null : v;
+      bars.forEach((rect) => { if (rect) rect.classList.toggle("in", Number(rect.dataset.score) >= v); });
+      out.textContent = String(v);
+      reset.hidden = v === t0;
+      // what each side of the line holds, so the picture says it too
+      const passing = sumFrom(counts, v);
+      noteIn.textContent = passing + (passing === 1 ? " pasa" : " pasan");
+      noteOut.textContent = (total - passing) + " quedan fuera";
+      noteIn.style.left = Math.min(100, at(v) + 1) + "%";
+      noteOut.style.left = Math.max(0, at(v) - 1) + "%";
+      if (v === t0) {
+        tryLine.setAttribute("visibility", "hidden");
+        say.textContent = "Mueve el deslizador para ver qué pasaría con otro umbral. Solo es una vista: no cambia nada; el umbral se cambia en profile/criteria.toml.";
+      } else {
+        tryLine.setAttribute("x1", String((v - HIST_LO) * 10));
+        tryLine.setAttribute("x2", String((v - HIST_LO) * 10));
+        tryLine.setAttribute("visibility", "visible");
+        const diff = sumFrom(counts, v) - sumFrom(counts, t0);
+        say.textContent = "Con " + v + " pasarían " + sumFrom(counts, v) + " de " + total + " avisos: "
+          + (diff === 0 ? "los mismos que con " + t0 : plural(Math.abs(diff), diff > 0 ? "más" : "menos", diff > 0 ? "más" : "menos") + " que con " + t0) + ". Solo es una vista: no cambia nada.";
+      }
+    }
+    paint(state.whatIf != null ? state.whatIf : t0);
+    return h("section", { class: "block", id: "threshold", "aria-labelledby": "thr-h" },
+      h("h3", { id: "thr-h" }, "Tu umbral", h("span", { class: "n-sub" }, "puntaje de esos avisos")),
+      h("div", { class: "thr-plot" }, svg, noteIn, noteOut, h("div", { class: "thr-axis", "aria-hidden": "true" }, ticks)),
+      h("div", { class: "thr-try" }, h("label", { for: "thr-range" }, "Probar otro umbral"), range, out, reset),
+      say);
+  }
+
+  // Cola: how much jobbot may do on its own. The first sends need your approval; after them it keeps to a cap.
+  function renderTrust(s) {
+    const t = s.trust;
+    if (!t) return null;
+    const boxes = [];
+    for (let i = 0; i < t.first_n; i++) {
+      const box = h("li", { class: "t-box" + (i < t.reviewed ? " done" : ""), "data-n": String(i + 1) }, h("span", { class: "sr" }, i < t.reviewed ? "aprobada" : "por aprobar"));
+      box.style.setProperty("--bi", String(i));
+      boxes.push(box);
+    }
+    const sentence = t.review_phase
+      ? "Llevas " + t.reviewed + " de " + t.first_n + " envíos aprobados por ti. Después de los primeros " + t.first_n + ", jobbot envía solo, hasta " + t.cap_after + " al día."
+      : "Ya envía solo: revisaste los primeros " + t.first_n + ". Tiene un tope de " + t.cap + " envíos por día.";
+    const meter = h("i", {});
+    meter.style.setProperty("--w", String(t.cap > 0 ? Math.min(1, t.sent_24h / t.cap) : 0));
+    return h("section", { class: "block", id: "trust", "aria-labelledby": "trust-h" },
+      h("h3", { id: "trust-h" }, "Confianza"),
+      h("p", { class: "lead" }, sentence),
+      t.review_phase ? h("ol", { class: "t-boxes", "aria-label": "Envíos aprobados por ti" }, boxes) : null,
+      h("div", { class: "cap" },
+        h("div", { class: "cap-label" }, h("span", {}, "Envíos de las últimas 24 horas"), h("strong", { class: "num" }, t.sent_24h + " de " + t.cap)),
+        h("div", { class: "cap-bar", role: "img", "aria-label": t.sent_24h + " de " + t.cap + " envíos permitidos" }, meter)));
+  }
+
+  // ---- Detalle de una postulación
+
+  function revokeShot() {
+    if (state.shotUrl) { URL.revokeObjectURL(state.shotUrl); }
+    state.shotUrl = null;
+    state.shotKey = null;
+  }
+
+  function shotImage() {
+    return h("img", { class: "shot", src: state.shotUrl, alt: "Captura de la prueba en seco" });
+  }
+
+  async function loadShot(key) {
+    try {
+      const res = await fetch("/api/shot?key=" + encodeURIComponent(key), { headers: { "X-Panel-Token": token } });
+      if (!res.ok || state.openKey !== key) return;
+      const blob = await res.blob();
+      revokeShot();
+      state.shotUrl = URL.createObjectURL(blob);
+      state.shotKey = key;
+      const slot = document.getElementById("shot-slot");
+      if (slot) slot.replaceChildren(shotImage());
+    } catch (e) { /* the drawer just shows no picture */ }
+  }
+
+  const drawerOpen = () => document.getElementById("detail").classList.contains("open");
+
+  // The element a drawer grows out of (and goes back into): the row's title, the car, the ticket's button.
+  function originOf(key) {
+    const app = document.getElementById("app");
+    for (const attr of ["data-open", "data-ticket-open", "data-car"]) {
+      for (const el of app.querySelectorAll("[" + attr + '="' + CSS.escape(key) + '"]')) if (el.getClientRects().length > 0) return el;
+    }
+    return null;
+  }
+
+  async function openJob(key, origin, dir) {
+    const same = state.openKey === key && state.detail != null;
+    if (!same) { state.note = ""; revokeShot(); state.journeyIn = true; }
+    state.openKey = key;
+    const r = await api("/api/job?key=" + encodeURIComponent(key));
+    if (!r.ok) {
+      state.openKey = null;
+      state.detail = null;
+      toast(said(r, "No se pudo abrir la postulación."), false);
+      renderDetail();
+      return;
+    }
+    // Another application was asked for while this one loaded: that one wins.
+    if (state.openKey !== key) return;
+    const wasOpen = drawerOpen();
+    const show = () => { state.detail = r.data; renderDetail(); };
+    if (same) {
+      show();
+    } else if (wasOpen) {
+      // from one application to the next: the drawer's content slides the way you went
+      transition(typeof dir === "string" ? dir : "next", show);
+      writeHash(false);
+    } else {
+      const o = origin && origin.getClientRects && origin.getClientRects().length ? origin : originOf(key);
+      const active = document.activeElement;
+      state.returnTo = active && active !== document.body ? active : o;
+      const travels = o && !(o instanceof SVGElement);
+      if (travels && document.startViewTransition && !still()) o.style.viewTransitionName = "job";
+      const clear = () => { if (o) o.style.viewTransitionName = ""; };
+      transition("open", () => { clear(); show(); document.getElementById("detail").focus({ preventScroll: true }); }).then(clear);
+      state.drawerPushed = writeHash(true);
+    }
+    if (r.data.card.has_screenshot && state.shotKey !== key) loadShot(key);
+  }
+
+  function closeJob(opts) {
+    if (state.openKey == null && state.detail == null) return;
+    const o = state.openKey ? originOf(state.openKey) : null;
+    const back = state.returnTo;
+    const finish = () => {
+      state.openKey = null;
+      state.detail = null;
+      state.note = "";
+      revokeShot();
+      renderDetail();
+      if (o && !(o instanceof SVGElement) && document.startViewTransition && !still()) o.style.viewTransitionName = "job";
+    };
+    transition("close", finish).then(() => {
+      if (o) o.style.viewTransitionName = "";
+      const target = back && back.isConnected ? back : o;
+      if (target && target.focus) target.focus({ preventScroll: true });
+    });
+    if (state.drawerPushed && !(opts && opts.fromPop)) {
+      // the address had a step for the drawer: take it back, so "Back" does not reopen it
+      state.drawerPushed = false;
+      state.ignorePop += 1;
+      history.back();
+    } else {
+      state.drawerPushed = false;
+      writeHash(false);
+    }
+  }
+
+  function markJob(key, newState, button) {
+    const box = document.getElementById("mark-note");
+    const note = (box ? box.value : state.note).trim();
+    return act("/api/mark", { key, state: newState, note: note || null }, button, () => { state.note = ""; });
+  }
+
+  // One bar per factor of the score, as long as the points it gave, and the total at the end.
+  function scoreBars(detail) {
+    const entries = Object.entries(detail);
+    const top = Math.max(1, ...entries.map(([, v]) => Math.abs(Number(v)) || 0));
+    return h("div", { class: "bars", role: "list", "aria-label": "Puntos de cada factor" }, entries.map(([k, v]) => {
+      const fill = h("i", {});
+      fill.style.setProperty("--w", String(Math.min(1, Math.abs(Number(v)) / top)));
+      return h("div", { class: "bar-row", role: "listitem" }, h("span", { class: "bar-k" }, k), h("span", { class: "bar-t", "aria-hidden": "true" }, fill), h("span", { class: "bar-v num" }, String(v)));
+    }));
+  }
+
+  // Where one application stands among the five layers, as a line you can follow from the top: what is done, where
+  // it is now and whose turn it is, and what is still ahead. Once it went out, the line goes on with the stations
+  // of Procesos. The buttons that act on the layer it is stuck at sit right there.
+  const STATUS_WORD = { done: "hecho", robot: "jobbot trabaja aquí", you: "te toca", todo: "falta" };
+  const asSentence = (text) => { const t = text.charAt(0).toUpperCase() + text.slice(1); return /[.!?»]$/.test(t) ? t : t + "."; };
+  function journeyView(c, d, enter) {
+    const l = layerOf(c);
+    const actions = c.actions.length ? h("div", { class: "row" }, c.actions.map((a) => actionButton(a, c.key))) : null;
+    if (l.at < 0) return actions;
+    const p = state.snap && state.snap.pipeline;
+    const threshold = p && p.threshold != null ? Math.round(p.threshold) : null;
+    const beyond = l.who === "done";
+    const done = {
+      aviso: "Guardado" + (d.first_seen ? " el " + when(d.first_seen) : "") + " desde " + c.source,
+      puntaje: c.score + " de 100" + (threshold != null ? " · tu umbral es " + threshold : ""),
+      cv: c.has_cv ? "CV a la medida listo" : "Listo",
+      respuestas: "Formulario completo",
+      compuerta: c.approved ? "Aprobada por ti" : "Pasó la revisión final",
+    };
+    const ol = h("ol", { class: "journey" + (enter ? " enter" : ""), "aria-label": "Las cinco capas entre el aviso y el envío" },
+      LAYERS.map((ly, i) => {
+        const st = beyond || i < l.at ? "done" : i === l.at ? l.who : "todo";
+        const detail = st === "done" ? done[ly.id] : st === "todo" ? "" : asSentence(l.text);
+        const li = h("li", { class: "j-" + st, "data-layer": ly.id, "aria-current": i === l.at && !beyond ? "step" : null },
+          h("span", { class: "j-mark", "aria-hidden": "true" }),
+          h("div", { class: "j-body" },
+            h("div", { class: "j-name" }, ly.label, st === "you" ? h("span", { class: "chip turn" }, "Te toca") : null, h("span", { class: "sr" }, "(" + STATUS_WORD[st] + ")")),
+            detail ? h("div", { class: "small muted wrap-any" }, detail) : null,
+            i === l.at && !beyond ? actions : null));
+        li.style.setProperty("--i", String(i));
+        return li;
+      }));
+    const after = beyond ? h("div", { class: "j-after" }, h("div", { class: "small muted" }, "Después del envío"), stepper(c)) : null;
+    return h("div", { class: "journey-box", id: "journey" }, h("h3", {}, "Recorrido"), ol, after, beyond ? actions : null);
+  }
+
+  function renderDetail() {
+    const drawer = document.getElementById("detail");
+    const d = state.detail;
+    if (!d) { drawer.className = "detail"; drawer.replaceChildren(); return; }
+    drawer.className = "detail open";
+    const c = d.card;
+    const snap = state.snap;
+    const nowMs = snap ? Date.parse(snap.generated_at) : Date.now();
+    const mails = snap ? snap.today.emails.filter((mail) => mail.job_key === c.key) : [];
+    const tasks = snap ? snap.today.tasks.filter((task) => task.job_key === c.key) : [];
+    let salary = "Sueldo: no publicado";
+    if (d.salary_min != null || d.salary_max != null) {
+      salary = "Sueldo publicado: " + [d.salary_min, d.salary_max].filter((x) => x != null).map((x) => "US$" + Math.round(x)).join(" a ") + " al mes";
+    }
+    const journey = journeyView(c, d, state.journeyIn);
+    state.journeyIn = false;
+    fill(drawer,
+      h("div", { class: "row between" },
+        h("h2", {}, c.company + " — " + c.title),
+        h("div", { class: "row" }, seqControls(c.key), h("button", { id: "close-detail", onclick: () => closeJob() }, "Cerrar"))),
+      h("p", { class: "row" }, h("span", { class: "chip" }, STATE_LABELS[c.state] || c.state),
+        h("span", { class: "muted" }, "Puntaje " + c.score + ", " + d.location + (d.remote ? ", remoto" : ""))),
+      h("p", { class: "muted" }, salary),
+      h("p", {}, link(c.url, "Ver el aviso"), " y ", link(d.apply_url, "abrir el formulario")),
+      journey,
+      c.reason_short && layerOf(c).at < 0 ? h("p", {}, c.reason_short) : null,
+      c.reason ? h("details", { class: "fold" }, h("summary", {}, "Texto completo del motivo"), h("pre", { class: "wrap" }, c.reason)) : null,
+      c.note && !c.reason ? h("p", { class: "muted" }, "Nota: " + c.note) : null,
+      tasks.length
+        ? h("div", {}, h("h3", {}, "Tareas abiertas de esta postulación"),
+            h("ul", {}, tasks.map((task) => h("li", {}, task.text + (task.due_at ? " (" + (countdown(task, nowMs) || { text: "" }).text.toLowerCase() + ")" : "")))))
+        : null,
+      mails.length
+        ? h("div", {}, h("h3", {}, "Correos de esta postulación"),
+            h("ul", {}, mails.map((mail) => h("li", {}, (KIND_LABELS[mail.kind] || mail.kind) + ": " + (mail.subject || "(sin asunto)") + ", " + ago(mail.received_at, nowMs)))))
+        : null,
+      c.has_screenshot
+        ? h("div", { id: "shot-slot" }, state.shotUrl && state.shotKey === c.key ? shotImage() : h("p", { class: "muted" }, "Cargando la captura…"))
+        : h("p", { class: "muted" }, "Sin captura de prueba en seco."),
+      c.marks.length
+        ? h("div", {},
+            h("h3", {}, "Registrar una respuesta"),
+            h("input", { id: "mark-note", type: "text", maxlength: "200", value: state.note,
+              placeholder: "nota (por ejemplo, la fecha de la entrevista)",
+              oninput: (e) => { state.note = e.target.value; } }),
+            h("div", { class: "row" }, c.marks.map((m) => {
+              const label = MARK_LABELS[m] || m;
+              const run = (button) => markJob(c.key, m, button);
+              return h("button", { "data-mark": m, onclick: PERMANENT_MARKS.includes(m) ? twoStep(label, run) : (e) => run(e.currentTarget) }, label);
+            })))
+        : null,
+      h("h3", {}, "Historial"),
+      d.events.length === 0 ? h("p", { class: "muted" }, "Sin movimientos.")
+        : h("ul", { class: "timeline" }, d.events.map((e) => h("li", {},
+            h("span", { class: "tl-when small muted" }, when(e.at)),
+            h("span", { class: "tl-what" }, (e.from ? (STATE_LABELS[e.from] || e.from) + " a " : "") + (STATE_LABELS[e.to] || e.to) + (e.note ? ", " + e.note : ""))))),
+      h("h3", {}, "Cómo se calculó el puntaje"),
+      Object.keys(d.score_detail).length ? scoreBars(d.score_detail) : h("p", { class: "muted" }, "Sin detalle."),
+      d.gaps.length
+        ? h("div", {}, h("h3", {}, "Para repasar de esta oferta"),
+            h("ul", {}, d.gaps.map((g) => h("li", {}, g.topic + (g.seen ? " (repasada)" : " (por repasar, pestaña Aprender)")))))
+        : null,
+      d.dossier
+        ? h("details", { open: true }, h("summary", {}, "Dossier"), h("pre", { class: "wrap" }, d.dossier))
+        : h("p", { class: "muted" }, "Sin dossier todavía: se escribe cuando la empresa responde."),
+      h("details", {}, h("summary", {}, "Descripción del aviso"), h("pre", { class: "wrap" }, d.description)),
+    );
+    // the title is what travels between the row and the drawer
+    const title = drawer.querySelector("h2");
+    if (title) title.style.viewTransitionName = "job";
+  }
+
+  // ---- Aprender
+
+  async function nextCard() {
+    const d = state.drill;
+    const r = await api("/api/learn/next" + (d.topic ? "?topic=" + encodeURIComponent(d.topic) : ""));
+    if (!r.ok) { toast(said(r, "No se pudo pedir la pregunta."), false); return; }
+    d.card = r.data.card;
+    d.empty = !r.data.card;
+    d.shown = false;
+    d.answer = "";
+    d.text = "";
+    render();
+  }
+
+  async function revealAnswer() {
+    const d = state.drill;
+    if (!d.card) return;
+    const r = await api("/api/learn/answer?id=" + encodeURIComponent(d.card.id));
+    if (!r.ok) { toast(said(r, "No se pudo pedir la respuesta."), false); return; }
+    d.answer = r.data.answer;
+    d.shown = true;
+    render();
+  }
+
+  async function gradeCard(grade, button) {
+    const d = state.drill;
+    if (!d.card) return;
+    button.disabled = true;
+    const r = await api("/api/learn/grade", { id: d.card.id, grade });
+    toast(said(r, r.ok ? "Nota registrada." : "No se pudo registrar."), r.ok);
+    if (r.ok) { d.card = null; d.shown = false; d.answer = ""; d.text = ""; d.empty = false; }
+    await refresh(true);
+  }
+
+  function drillView(l) {
+    const d = state.drill;
+    const topics = Array.from(new Set(l.topics.map((t) => t.topic)));
+    const select = h("select", { id: "topic", onchange: (e) => { d.topic = e.target.value; } },
+      h("option", { value: "" }, "todos los temas"),
+      topics.map((t) => h("option", { value: t, selected: t === d.topic }, t)));
+    return h("section", { class: "block" },
+      h("h3", {}, "Repaso"),
+      h("div", { class: "row", style: null }, select,
+        h("button", { id: "next-card", class: "primary", onclick: nextCard }, d.card ? "Otra pregunta" : "Siguiente pregunta")),
+      d.card
+        ? h("div", { class: "block card-q" },
+            h("p", { class: "muted" }, d.card.topic + (d.card.offer ? ", de la oferta " + d.card.offer : "")),
+            h("p", { id: "question", class: "question" }, d.card.question),
+            h("p", {}, h("textarea", { id: "my-answer", rows: "4", placeholder: "Tu respuesta, antes de mirar la de referencia (no se guarda)",
+              oninput: (e) => { d.text = e.target.value; } }, d.text)),
+            d.shown
+              ? h("div", {},
+                  h("pre", { id: "answer", class: "wrap" }, d.answer),
+                  h("p", {}, "¿Cómo te fue? 0 = en blanco, 5 = perfecto."),
+                  h("div", { class: "row" }, [0, 1, 2, 3, 4, 5].map((g) => h("button", { "data-grade": g, onclick: (e) => gradeCard(g, e.currentTarget) }, String(g)))))
+              : h("div", { class: "row" }, h("button", { id: "reveal", onclick: revealAnswer }, "Mostrar la respuesta")))
+        : h("p", { id: "drill-empty", class: "empty" },
+            d.empty ? "Estás al día: no hay preguntas pendientes." : "Elige un tema o pulsa «Siguiente pregunta»."));
+  }
+
+  function renderLearn() {
+    const l = state.snap.learn;
+    return [
+      h("div", { class: "learn" },
+        h("h2", {}, "Aprender"),
+        h("p", { class: "lead", id: "learn-stats" }, "Vistas " + l.seen + " de " + l.total + ", pendientes hoy: " + l.due),
+        drillView(l),
+        h("section", { class: "block" },
+          h("h3", {}, "Temas débiles"),
+          l.weak_topics.length
+            ? h("ul", { class: "items" }, l.weak_topics.map((t) => h("li", { class: "item plain" }, h("span", {}, t.topic), h("span", { class: "muted" }, "promedio " + t.average.toFixed(1)))))
+            : h("p", { class: "empty" }, "Sin temas débiles todavía."),
+          fold("progress", false, "Avance por tema",
+            h("table", {}, h("tbody", {}, l.topics.map((t) => h("tr", {}, h("td", {}, t.topic), h("td", {}, t.seen + "/" + t.total), h("td", {}, t.due + " pendientes"))))))),
+        h("section", { class: "block" },
+          h("h3", {}, "Huecos que salen de las ofertas", h("span", { class: "count" }, String(l.gaps.length))),
+          l.gaps.length === 0
+            ? h("p", { class: "empty" }, "Cuando un dossier detecta algo para repasar, aparece aquí.")
+            : h("ul", { class: "items" }, l.gaps.map((g) => h("li", { class: "item plain" }, h("span", {}, g.topic + ", " + g.offer), h("span", { class: "muted" }, g.seen ? "repasada" : "por repasar")))))),
+    ];
+  }
+
+  // ---- Moving between things: sections, the drawer and the lists keep their place and show where they went
+
+  function routeOfHash() {
+    const m = /^#(hoy|procesos|cola|learn)(?:\/(.+))?$/.exec(location.hash);
+    if (!m) return null;
+    let job = null;
+    try { job = m[2] ? decodeURIComponent(m[2]) : null; } catch (e) { /* a broken address is just no job */ }
+    return { tab: m[1], job };
+  }
+
+  // The address says where you are, so Back and Forward walk the sections and close the drawer.
+  function writeHash(push) {
+    if (embedded) return false;
+    const hash = "#" + state.tab + (state.openKey ? "/" + encodeURIComponent(state.openKey) : "");
+    if (location.hash === hash) return false;
+    if (push) history.pushState(null, "", location.pathname + hash);
+    else history.replaceState(null, "", location.pathname + hash);
+    return push;
+  }
+
+  // Runs a change of the page inside a view transition when the browser has them and nobody asked for
+  // less motion; otherwise the change just happens. `kind` tells the style sheet which way things move.
+  function transition(kind, update, origin, stops) {
+    const root = document.documentElement;
+    if (!document.startViewTransition || still() || state.vtBusy) { update(); return Promise.resolve(); }
+    state.vtBusy = true;
+    root.dataset.vt = kind;
+    if (kind === "fwd" || kind === "back") root.style.setProperty("--vt-time", (0.56 + 0.12 * ((stops || 1) - 1)).toFixed(2) + "s");
+    const done = () => { state.vtBusy = false; delete root.dataset.vt; };
+    // The sun is aimed once the new page is in place, because the circle is measured on the new page.
+    const run = () => { update(); if (kind === "sun") aimSun(origin); };
+    try {
+      return document.startViewTransition(run).finished.then(done, done);
+    } catch (e) {
+      done();
+      update();
+      return Promise.resolve();
+    }
+  }
+
+  // A short light runs along the platform edge from the section you left to the one you chose.
+  function ride(fromName, toName, ms) {
+    const bar = document.getElementById("platform");
+    const from = centerOf(document.querySelector('[data-tab="' + fromName + '"]'));
+    const to = centerOf(document.querySelector('[data-tab="' + toName + '"]'));
+    if (!bar || !from || !to || still()) return;
+    const rider = h("i", { class: "rider", "aria-hidden": "true" });
+    bar.append(rider);
+    const run = rider.animate([
+      { transform: "translateX(" + (from.x - 28) + "px)", opacity: 0 },
+      { opacity: 1, offset: .18 },
+      { opacity: 1, offset: .78 },
+      { transform: "translateX(" + (to.x - 28) + "px)", opacity: 0 },
+    ], { duration: ms, easing: "cubic-bezier(.16,1,.3,1)" });
+    run.onfinish = run.oncancel = () => rider.remove();
+  }
+
+  const centerOf = (el) => {
+    if (!el || !el.getBoundingClientRect) return null;
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  };
+
+  // A circle that starts at the point you pointed at and grows until it covers the window.
+  function aimSun(origin) {
+    const root = document.documentElement;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const at = origin || { x: vw / 2, y: 0 };
+    const box = document.querySelector("main").getBoundingClientRect();
+    root.style.setProperty("--vt-x", (at.x - box.left).toFixed(0) + "px");
+    root.style.setProperty("--vt-y", (at.y - box.top).toFixed(0) + "px");
+    root.style.setProperty("--vt-r", Math.ceil(Math.hypot(Math.max(at.x, vw - at.x), Math.max(at.y, vh - at.y)) + 40) + "px");
+  }
+
+  // What happens to a page that was just opened: its rows come in one after another and the funnel counts.
+  const ENTERING = ".ticket-wrap, .lead, li.item, li.proc, li.queue-row, .mail, .station, .block > h3, .card-q, .ticket-clear";
+  function enterView(app) {
+    let i = 0;
+    app.querySelectorAll(ENTERING).forEach((el) => { if (el.getClientRects().length > 0) el.style.setProperty("--i", String(Math.min(i++, 16))); });
+    app.querySelectorAll(".station-n").forEach((el) => el.style.setProperty("--n", el.textContent));
+    app.classList.add("entering");
+    clearTimeout(state.enterTimer);
+    state.enterTimer = setTimeout(() => app.classList.remove("entering"), 1800);
+  }
+
+  function go(name, opts) {
+    const o = opts || {};
+    if (!TABS.includes(name)) return Promise.resolve();
+    const prev = state.tab;
+    const same = name === prev;
+    if (same && !o.force) return Promise.resolve();
+    state.scroll[prev] = window.scrollY;
+    state.tab = name;
+    if (!same && !o.silent) writeHash(true);
+    const update = () => {
+      if (state.snap) render({ tabChange: !same });
+      if (!same) window.scrollTo(0, o.scroll != null ? o.scroll : state.scroll[name] || 0);
+      if (o.then) o.then();
+    };
+    if (same) { update(); return Promise.resolve(); }
+    const stops = Math.abs(TABS.indexOf(name) - TABS.indexOf(prev));
+    const kind = o.kind || (TABS.indexOf(name) > TABS.indexOf(prev) ? "fwd" : "back");
+    if (kind !== "sun") ride(prev, name, 560 + 120 * (stops - 1));
+    return transition(kind, update, o.origin || centerOf(document.querySelector('[data-tab="' + name + '"]')), stops);
+  }
+
+  // The gold bar under the tabs is one piece that slides to the section you chose.
+  function moveInk() {
+    const nav = document.querySelector("nav.tabs");
+    if (!nav) return;
+    let ink = nav.querySelector(".tab-ink");
+    const created = !ink;
+    if (!ink) { ink = h("i", { class: "tab-ink", "aria-hidden": "true" }); nav.append(ink); ink.style.transition = "none"; }
+    const on = nav.querySelector('[aria-selected="true"]');
+    if (!on) return;
+    ink.style.transform = "translateX(" + on.offsetLeft + "px)";
+    ink.style.width = on.offsetWidth + "px";
+    if (created) { void ink.offsetWidth; ink.style.transition = ""; }
+  }
+
+  // Rows that change place glide to it instead of jumping (a filter, a new order, an approval that
+  // leaves the list shorter). Nothing glides when the tab itself changed or when the page is hidden.
+  const flipKey = (el) => (el.dataset.card ? "c:" + el.dataset.card : el.dataset.task ? "t:" + el.dataset.task : null);
+  function rectsOf(app) {
+    const out = new Map();
+    app.querySelectorAll("[data-card], [data-task]").forEach((el) => {
+      const key = flipKey(el);
+      const box = el.getBoundingClientRect();
+      if (key && box.width > 0 && !out.has(key)) out.set(key, box);
+    });
+    return out;
+  }
+  function glide(before, app) {
+    if (still() || before.size === 0) return;
+    app.querySelectorAll("[data-card], [data-task]").forEach((el) => {
+      const was = before.get(flipKey(el));
+      if (!was) return;
+      const now = el.getBoundingClientRect();
+      const dx = was.left - now.left;
+      const dy = was.top - now.top;
+      if (Math.abs(dx) + Math.abs(dy) < 2 || Math.abs(dy) > window.innerHeight * 1.5) return;
+      el.animate([{ transform: "translate(" + dx + "px," + dy + "px)" }, { transform: "none" }], { duration: 340, easing: "cubic-bezier(.23,1,.32,1)" });
+    });
+  }
+
+  // Points at a thing the page just took you to.
+  function locate(el) {
+    if (!el) return;
+    el.scrollIntoView({ block: "start", behavior: still() ? "auto" : "smooth" });
+    el.classList.remove("locate");
+    void el.offsetWidth;
+    el.classList.add("locate");
+    setTimeout(() => el.classList.remove("locate"), 1800);
+  }
+
+  // The board's numbers are doors: each one takes you to the list it counts.
+  function jump(target, origin) {
+    if (target === "turn") return go("hoy", { force: true, origin, kind: "sun", then: () => locate(document.getElementById("ticket")) });
+    if (target === "approve") {
+      return go("hoy", { force: true, origin, kind: "sun", then: () => {
+        const fold = document.querySelector('[data-fold="dec-approve"]');
+        if (fold) { fold.open = true; locate(fold); } else locate(document.getElementById("decisions"));
+      } });
+    }
+    if (target === "wait" || target === "stale") {
+      state.filter = target;
+      return go("procesos", { force: true, origin, kind: "sun", then: () => locate(document.querySelector("#app .filters")) });
+    }
+    return Promise.resolve();
+  }
+
+  // The keyboard's place in a list: j and k move it, Enter opens what it is on.
+  const rowKey = (el) => (el.dataset.card ? "c:" + el.dataset.card : "t:" + el.dataset.task);
+  const cursorRows = () => Array.from(document.querySelectorAll("#app li[data-card], #app li[data-task]")).filter((el) => el.getClientRects().length > 0);
+  function applyCursor() {
+    document.querySelectorAll("#app li.cur").forEach((el) => el.classList.remove("cur"));
+    if (!state.cursor) return;
+    const el = cursorRows().find((row) => rowKey(row) === state.cursor);
+    if (el) el.classList.add("cur"); else state.cursor = null;
+  }
+  function moveCursor(step) {
+    const rows = cursorRows();
+    if (rows.length === 0) return;
+    let at = rows.findIndex((row) => rowKey(row) === state.cursor);
+    at = at < 0 ? (step > 0 ? 0 : rows.length - 1) : Math.min(rows.length - 1, Math.max(0, at + step));
+    state.cursor = rowKey(rows[at]);
+    applyCursor();
+    rows[at].scrollIntoView({ block: "nearest", behavior: still() ? "auto" : "smooth" });
+  }
+  function openCursor() {
+    const el = state.cursor ? cursorRows().find((row) => rowKey(row) === state.cursor) : null;
+    if (!el) return false;
+    if (el.dataset.card) { openJob(el.dataset.card, el.querySelector("[data-open]")); return true; }
+    const done = el.querySelector("[data-done]");
+    if (done) { done.focus(); return true; }
+    return false;
+  }
+
+  // Applications in the order the list behind the drawer shows them, so the drawer can step through them.
+  const jobKeys = () => Array.from(new Set(Array.from(document.querySelectorAll("#app [data-open]")).map((b) => b.dataset.open)));
+  function stepJob(dir) {
+    const keys = jobKeys();
+    const at = keys.indexOf(state.openKey);
+    if (at < 0 || keys.length < 2) return;
+    const next = keys[(at + dir + keys.length) % keys.length];
+    state.cursor = "c:" + next;
+    applyCursor();
+    const row = document.querySelector("#app li.cur");
+    if (row) row.scrollIntoView({ block: "nearest", behavior: still() ? "auto" : "smooth" });
+    openJob(next, null, dir > 0 ? "next" : "prev");
+  }
+  function seqControls(key) {
+    const keys = jobKeys();
+    const at = keys.indexOf(key);
+    if (at < 0 || keys.length < 2) return null;
+    return h("span", { class: "seq" },
+      h("button", { id: "seq-prev", title: "Anterior (k)", "aria-label": "Postulación anterior", onclick: () => stepJob(-1) }, "‹"),
+      h("span", { "aria-live": "polite" }, (at + 1) + " de " + keys.length),
+      h("button", { id: "seq-next", title: "Siguiente (j)", "aria-label": "Postulación siguiente", onclick: () => stepJob(1) }, "›"));
+  }
+
+  // A car on the map and its row in the table are the same application: pointing at one lights the other.
+  function linkHover(root) {
+    const set = (key, on) => {
+      if (!key) return;
+      root.querySelectorAll('[data-car="' + CSS.escape(key) + '"], .proc[data-card="' + CSS.escape(key) + '"]').forEach((el) => el.classList.toggle("hl", on));
+    };
+    const keyOf = (node) => {
+      const el = node && node.closest ? node.closest("[data-car], .proc[data-card]") : null;
+      return el ? el.dataset.car || el.dataset.card : null;
+    };
+    root.addEventListener("pointerover", (e) => set(keyOf(e.target), true));
+    root.addEventListener("pointerout", (e) => set(keyOf(e.target), false));
+    root.addEventListener("focusin", (e) => set(keyOf(e.target), true));
+    root.addEventListener("focusout", (e) => set(keyOf(e.target), false));
+  }
+
+  // The shortcuts, one key press away.
+  let keysBox = null;
+  function closeKeys() { if (keysBox) { keysBox.remove(); keysBox = null; } }
+  // Theme: the system's until someone chooses; the choice (T or the button) is kept on this machine.
+  const THEMES = ["auto", "light", "dark"];
+  const THEME_NAMES = { auto: "automático", light: "claro", dark: "oscuro" };
+  function cycleTheme() {
+    const root = document.documentElement;
+    const now = root.getAttribute("data-theme") || "auto";
+    const next = THEMES[(THEMES.indexOf(now) + 1) % THEMES.length];
+    if (next === "auto") root.removeAttribute("data-theme"); else root.setAttribute("data-theme", next);
+    try { if (next === "auto") localStorage.removeItem("panel.theme"); else localStorage.setItem("panel.theme", next); } catch (e) { /* no storage */ }
+    toast("Tema " + THEME_NAMES[next], true);
+  }
+
+  function toggleKeys() {
+    if (keysBox) { closeKeys(); return; }
+    const rows = [["1 – 4", "Hoy, Procesos, Cola, Aprender"], ["j  k", "Moverte por la lista"], ["Enter", "Abrir la postulación"],
+      ["j  k", "Con el detalle abierto: la siguiente o la anterior"], ["Ctrl K  /", "Buscar"], ["t", "Tema: automático, claro u oscuro"], ["Esc", "Cerrar"], ["?", "Esta ayuda"]];
+    keysBox = h("div", { class: "keys", role: "dialog", "aria-label": "Atajos de teclado" },
+      h("h3", {}, "Atajos"),
+      h("dl", {}, rows.map(([k, text]) => [h("dt", {}, h("kbd", {}, k)), h("dd", {}, text)])));
+    keysBox.addEventListener("click", closeKeys);
+    document.body.append(keysBox);
+  }
+
+  document.addEventListener("keydown", (e) => {
+    if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || palette.box) return;
+    if (e.key === "Escape") {
+      if (keysBox) closeKeys();
+      else if (state.openKey) closeJob();
+      else if (state.cursor) { state.cursor = null; applyCursor(); }
+      return;
+    }
+    const t = e.target;
+    if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return;
+    const key = e.key;
+    if (key >= "1" && key <= "4") { e.preventDefault(); go(TABS[Number(key) - 1]); return; }
+    if (key === "?") { e.preventDefault(); toggleKeys(); return; }
+    if (key === "t") { e.preventDefault(); cycleTheme(); return; }
+    if (state.openKey) {
+      if (key === "j" || key === "]") { e.preventDefault(); stepJob(1); }
+      else if (key === "k" || key === "[") { e.preventDefault(); stepJob(-1); }
+      return;
+    }
+    if (key === "j") { e.preventDefault(); moveCursor(1); }
+    else if (key === "k") { e.preventDefault(); moveCursor(-1); }
+    else if (key === "Enter" && state.cursor && (t === document.body || t === document.documentElement)) { if (openCursor()) e.preventDefault(); }
+  });
+
+  window.addEventListener("popstate", () => {
+    if (state.ignorePop > 0) { state.ignorePop -= 1; return; }
+    const route = routeOfHash() || { tab: "hoy", job: null };
+    if (route.tab !== state.tab) go(route.tab, { silent: true });
+    if (route.job && route.job !== state.openKey) openJob(route.job);
+    else if (!route.job && state.openKey) closeJob({ fromPop: true });
+  });
+
+  // ---- The command palette: Ctrl+K (or "/") to jump to a section or straight to an application
+
+  const palette = { box: null, input: null, list: null, items: [], at: 0, from: null };
+
+  function paletteItems(query) {
+    const items = [];
+    for (const [id, label] of [["hoy", "Hoy"], ["procesos", "Procesos"], ["cola", "Cola"], ["learn", "Aprender"]]) {
+      items.push({ kind: "Ir a", text: label, run: () => selectTab(id) });
+    }
+    if (state.snap) {
+      for (const col of state.snap.board) {
+        for (const c of col.cards) items.push({ kind: STATE_LABELS[c.state] || c.state, text: c.company + " — " + c.title, extra: c.source, run: () => openJob(c.key) });
+      }
+    }
+    const words = norm(query).split(/\s+/).filter(Boolean);
+    return items.filter((it) => words.every((w) => norm(it.kind + " " + it.text).includes(w))).slice(0, 12);
+  }
+
+  function markPalette() {
+    Array.from(palette.list.children).forEach((li, i) => {
+      li.classList.toggle("on", i === palette.at);
+      li.setAttribute("aria-selected", String(i === palette.at));
+    });
+    palette.input.setAttribute("aria-activedescendant", palette.items.length ? "pal-" + palette.at : "");
+    const on = palette.list.children[palette.at];
+    if (on && on.scrollIntoView) on.scrollIntoView({ block: "nearest" });
+  }
+
+  function paintPalette() {
+    palette.items = paletteItems(palette.input.value);
+    palette.at = Math.min(palette.at, Math.max(0, palette.items.length - 1));
+    fill(palette.list, ...(palette.items.length
+      ? palette.items.map((it, i) => h("li", { id: "pal-" + i, role: "option", class: "pal-item",
+          onclick: () => runPalette(i), onmousemove: () => { if (palette.at !== i) { palette.at = i; markPalette(); } } },
+          h("span", { class: "pal-kind" }, it.kind), h("span", { class: "pal-text" }, it.text), it.extra ? h("span", { class: "pal-extra" }, it.extra) : null))
+      : [h("li", { class: "pal-empty" }, "Nada coincide.")]));
+    markPalette();
+  }
+
+  function closePalette() {
+    if (!palette.box) return;
+    palette.box.remove();
+    palette.box = null;
+    if (palette.from && palette.from.isConnected && palette.from.focus) palette.from.focus({ preventScroll: true });
+  }
+
+  function runPalette(i) {
+    const it = palette.items[i];
+    if (!it) return;
+    closePalette();
+    it.run();
+  }
+
+  function openPalette() {
+    if (palette.box) { palette.input.focus(); return; }
+    palette.from = document.activeElement;
+    palette.at = 0;
+    palette.input = h("input", { id: "palette-input", type: "text", role: "combobox", "aria-expanded": "true", "aria-controls": "palette-list",
+      "aria-label": "Buscar", autocomplete: "off", spellcheck: "false", placeholder: "Busca una postulación o una sección",
+      oninput: () => { palette.at = 0; paintPalette(); } });
+    palette.list = h("ul", { id: "palette-list", role: "listbox", class: "pal-list" });
+    palette.box = h("div", { class: "pal-back", onmousedown: (e) => { if (e.target === palette.box) closePalette(); } },
+      h("div", { class: "pal", role: "dialog", "aria-modal": "true", "aria-label": "Buscar" },
+        palette.input, palette.list, h("div", { class: "pal-foot" }, "Flechas para moverte, Enter para ir, Esc para cerrar")));
+    palette.input.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown") { e.preventDefault(); palette.at = Math.min(palette.at + 1, palette.items.length - 1); markPalette(); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); palette.at = Math.max(palette.at - 1, 0); markPalette(); }
+      else if (e.key === "Enter") { e.preventDefault(); runPalette(palette.at); }
+      else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closePalette(); }
+      else if (e.key === "Tab") e.preventDefault();
+    });
+    document.body.append(palette.box);
+    paintPalette();
+    palette.input.focus();
+  }
+
+  document.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); openPalette(); return; }
+    const t = e.target;
+    const typingNow = t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable);
+    if (e.key === "/" && !typingNow && !palette.box && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); openPalette(); }
+  });
+
+  const tabButtons = Array.from(document.querySelectorAll("[data-tab]"));
+  const selectTab = (name) => go(name);
+  tabButtons.forEach((b) => b.addEventListener("click", () => selectTab(b.dataset.tab)));
+  // Arrow keys, Home and End move between the tabs, as in any tab list.
+  document.querySelector("nav.tabs").addEventListener("keydown", (e) => {
+    const i = tabButtons.indexOf(document.activeElement);
+    if (i < 0) return;
+    let next = -1;
+    if (e.key === "ArrowRight") next = (i + 1) % tabButtons.length;
+    else if (e.key === "ArrowLeft") next = (i - 1 + tabButtons.length) % tabButtons.length;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = tabButtons.length - 1;
+    if (next < 0) return;
+    e.preventDefault();
+    selectTab(tabButtons[next].dataset.tab);
+    tabButtons[next].focus();
+  });
+  buildBoard();
+  linkHover(document.getElementById("app"));
+  window.addEventListener("resize", moveInk);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(moveInk);
+  refresh(true).then((ok) => {
+    if (!ok) return;
+    if (startRoute && startRoute.job) openJob(startRoute.job);
+    else writeHash(false);
+  });
+  setInterval(() => { if (document.visibilityState === "visible") refresh(false); }, 30000);
+})();
+</script>
+</body>
+</html>

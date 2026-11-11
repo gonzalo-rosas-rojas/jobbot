@@ -1,0 +1,10 @@
+# `cargo mutants` (see docs/engineering/mutation-testing.md): the spec mutates the domain only.
+examine_globs = ["crates/jobbot-domain/src/**/*.rs"]
+# Test helpers, not rules: the fixtures and the reader of the shipped profile.
+exclude_globs = [
+    "crates/jobbot-domain/src/fixtures.rs",
+    "crates/jobbot-domain/src/shipped.rs",
+]
+# By default a mutant is tested by the domain's own unit and property tests; the full pass adds
+# --test-package with the seven packages that test domain rules (see the doc).
+test_workspace = false

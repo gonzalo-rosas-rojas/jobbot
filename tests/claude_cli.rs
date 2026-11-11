@@ -79,17 +79,14 @@ async fn the_child_runs_in_the_work_dir_with_claude_md_loading_off() {
     );
 }
 
-// Windows only: there `set_var` is sound even with the other tests of this binary running (see
-// its docs). Elsewhere the unit tests in `src/claude.rs` check the same rule via `get_envs`.
-#[cfg(windows)]
 #[tokio::test]
 #[allow(unsafe_code)] // edition 2024: `set_var` is unsafe; the one justified use is below
 async fn the_child_gets_the_own_config_folder_even_when_the_parent_has_another() {
     let dir = tempfile::tempdir().unwrap();
     let decoy = dir.path().join("someone-elses-dot-claude");
-    // SAFETY: this test is built only on Windows, where std documents `set_var` as safe in a
-    // multi-threaded program. The children never see the value: the runner removes the
-    // variable from their environment and sets its own folder.
+    // SAFETY: the only readers of this variable in the test binary are the children's
+    // environments, which the runner builds by removing it; on Windows the OS call is
+    // thread-safe. Nothing else in these tests reads it.
     unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", &decoy) };
     let reply = fake("env", ClaudeConfig::default(), dir.path())
         .run(&request("x"))
@@ -177,7 +174,7 @@ async fn an_api_key_a_team_plan_or_another_folder_are_refused() {
 async fn another_address_is_refused_and_never_printed_in_full() {
     let dir = tempfile::tempdir().unwrap();
     let config = ClaudeConfig {
-        expected_email: "tester@example.com".to_string(),
+        expected_email: "tester@example.com".into(),
         ..ClaudeConfig::default()
     };
     // The same expectation lets the right address through.

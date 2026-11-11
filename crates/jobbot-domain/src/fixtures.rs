@@ -37,15 +37,15 @@ pub fn make_job_with(f: impl FnOnce(&mut Job)) -> Job {
     job
 }
 
-/// A small CV master: a contact line, skills, an entry for an employer on the example exclusion
-/// list (`profile/exclusions.toml`), one more entry and a project. The phone and the email are
-/// made up.
+/// A small CV master with the same shape as the real one (contact line, skills, an entry for the
+/// current employer that is on the exclusion list, two other entries, a project). The phone and
+/// the email are made up.
 pub const SAMPLE_CV: &str = "# JANE DOE
 **Senior Full-Stack AI Engineer**
 jane.doe@example.com • +56 9 1234 5678 • Santiago, Chile • Remote
 
 ## SUMMARY
-Full-Stack AI Engineer building LLM systems and workflow platforms for logistics operations.
+Full-Stack AI Engineer building LLM systems and workflow platforms for healthcare operations.
 
 ## TECHNICAL SKILLS
 **Languages:** Python, TypeScript, SQL
@@ -55,7 +55,7 @@ Full-Stack AI Engineer building LLM systems and workflow platforms for logistics
 
 **Fractional Operations Contractor**
 Harbor Light Shipping and Logistics Center LLC — Logistics company, USA | Jun 2026 – Present
-• Design and build internal workflow-automation and reporting software for a multi-office logistics operation
+• Design and build internal workflow-automation and reporting software for a multi-office healthcare practice
 
 **Senior Full-Stack AI Engineer**
 stackwave.io — AI Development Agency | Apr 2025 – Mar 2026

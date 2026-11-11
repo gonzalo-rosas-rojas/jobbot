@@ -20,15 +20,83 @@ static RANGE: LazyLock<Regex> = LazyLock::new(|| {
 static HOURLY: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)/\s?h(?:ou)?r|per hour|hourly|/h\b").unwrap());
 
+/// Letters written against a `$` that make it another currency: `A$`, `NZ$`, `R$`... (`US$` and
+/// `USD` are US dollars and stay).
+const FOREIGN_DOLLAR_SYMBOLS: [&str; 9] = ["au", "a", "nz", "ca", "c", "hk", "mx", "s", "r"];
+/// Currency codes of other currencies, as whole words next to a range.
+const FOREIGN_CODES: [&str; 12] = [
+    "aud", "nzd", "cad", "sgd", "hkd", "mxn", "brl", "clp", "cop", "ars", "pen", "uyu",
+];
+
+/// Whether the range that starts at `start` (its `$`) and ends at `end` is in a currency other
+/// than US dollars: a foreign symbol or code just before it, or a code, `pesos` or Australian
+/// `super` just after it.
+fn is_foreign_currency(text: &str, start: usize, end: usize) -> bool {
+    let before = text[..start].to_lowercase();
+    // A symbol written against the `$`. A letter before it means a longer word: "US$" and
+    // "USA $" are not `S$`.
+    let symbol = FOREIGN_DOLLAR_SYMBOLS.iter().any(|symbol| {
+        before
+            .strip_suffix(symbol)
+            .is_some_and(|rest| !rest.chars().next_back().is_some_and(char::is_alphanumeric))
+    });
+    if symbol {
+        return true;
+    }
+    // The 8 characters before the range, without a word cut in half by the window.
+    let skip = before.chars().count().saturating_sub(8);
+    let mut window = before.chars().skip(skip).collect::<String>();
+    let cut_word = before
+        .chars()
+        .nth(skip.wrapping_sub(1))
+        .is_some_and(char::is_alphanumeric);
+    if cut_word {
+        let keep = window
+            .find(|c: char| !c.is_alphanumeric())
+            .unwrap_or(window.len());
+        window.drain(..keep);
+    }
+    if FOREIGN_CODES
+        .iter()
+        .any(|code| contains_word_lc(&window, code))
+    {
+        return true;
+    }
+    // The 16 characters after it, extended to the end of the word the cut lands in.
+    let after = text[end..].to_lowercase();
+    let mut tail: String = after.chars().take(16).collect();
+    tail.extend(
+        after[tail.len()..]
+            .chars()
+            .take_while(|c| c.is_alphanumeric()),
+    );
+    ["pesos", "super", "superannuation"]
+        .iter()
+        .chain(FOREIGN_CODES.iter())
+        .any(|word| contains_word_lc(&tail, word))
+}
+
 /// Reads the first pay range in `text` as `(min, max)` US dollars per month: hourly
 /// rates times 160, annual amounts divided by 12, monthly amounts as they are. A range
-/// that is not clearly pay (`$5 - $10 million`) is ignored.
+/// that is not clearly pay (`$5 - $10 million`, or a number too long for any pay) is ignored,
+/// and so is one in another currency (`A$150k`, `$120,000 + super`, `CLP $1,500,000`): only
+/// US dollars are converted, no exchange rate is ever guessed.
 pub fn parse_salary_monthly_usd(text: &str) -> (Option<f64>, Option<f64>) {
     for caps in RANGE.captures_iter(text) {
         let (Some(low_text), Some(high_text)) = (caps.get(1), caps.get(3)) else {
             continue;
         };
-        let parse = |s: &str| s.replace(',', "").parse::<f64>().ok();
+        if let Some(whole) = caps.get(0)
+            && is_foreign_currency(text, whole.start(), whole.end())
+        {
+            continue;
+        }
+        let parse = |s: &str| {
+            s.replace(',', "")
+                .parse::<f64>()
+                .ok()
+                .filter(|amount| amount.is_finite())
+        };
         let (Some(mut low), Some(mut high)) = (parse(low_text.as_str()), parse(high_text.as_str()))
         else {
             continue;
@@ -205,6 +273,49 @@ mod tests {
     use crate::rules::Criteria;
     use crate::shipped;
 
+    #[test]
+    fn a_range_in_another_currency_is_not_read_as_us_dollars() {
+        for text in [
+            "AUD $120,000 - $150,000",
+            "$120,000 - $150,000 AUD",
+            "A$120k - $150k",
+            "$120,000 - $140,000 + super",
+            "$120,000 - $140,000 plus superannuation",
+            "CLP $1,500,000 - $2,000,000 mensual",
+            "NZ$90,000 - $110,000",
+            "Pay: C$100k - $120k",
+            "$2,000,000 - $3,000,000 pesos",
+        ] {
+            assert_eq!(parse_salary_monthly_usd(text), (None, None), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_us_dollar_range_is_still_read() {
+        for text in [
+            "US$120,000 - $150,000",
+            "$120,000 - $150,000 USD",
+            "Salary: $120,000 - $150,000",
+            "Based in the USA $120,000 - $150,000",
+            "Open role $120,000 - $150,000",
+            "Australia: A$150,000 - A$180,000. United States: $120,000 - $150,000",
+        ] {
+            assert_eq!(
+                parse_salary_monthly_usd(text),
+                (Some(10_000.0), Some(12_500.0)),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_foreign_range_is_skipped_and_the_next_one_is_read() {
+        assert_eq!(
+            parse_salary_monthly_usd("AUD $90,000 - $100,000 or $120,000 - $150,000"),
+            (Some(10_000.0), Some(12_500.0))
+        );
+    }
+
     fn close(actual: Option<f64>, expected: f64, tolerance: f64) {
         let actual = actual.expect("expected a value");
         assert!(
@@ -254,6 +365,19 @@ mod tests {
     fn monthly_range_is_kept() {
         assert_eq!(
             parse_salary_monthly_usd("$4,000 - $6,000 per month"),
+            (Some(4000.0), Some(6000.0))
+        );
+    }
+
+    #[test]
+    fn a_number_longer_than_any_pay_is_not_read_as_a_range() {
+        let huge = "9".repeat(320);
+        assert_eq!(
+            parse_salary_monthly_usd(&format!("$100,000 - ${huge} a year")),
+            (None, None)
+        );
+        assert_eq!(
+            parse_salary_monthly_usd(&format!("${huge} - $1 and later $4,000 - $6,000 per month")),
             (Some(4000.0), Some(6000.0))
         );
     }
@@ -354,7 +478,7 @@ mod tests {
 
     #[test]
     fn pay_between_floor_and_target_scales_up() {
-        // Halfway between the shipped floor (3000) and the low end of the target (5000).
+        // Halfway between the shipped floor and the low end of the target.
         let job = make_job_with(|j| j.salary_max_monthly_usd = Some(4000.0));
         assert_eq!(score_job(&job, &CRITERIA).detail["compensation"], 10.0);
     }

@@ -2,7 +2,7 @@
 //! decides which page the browser opens and where Gonza's data is typed, so the link is checked
 //! before the browser moves and again where the browser lands (a redirect can change the host).
 
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use url::{Host, Url};
 
@@ -67,9 +67,64 @@ pub fn check(raw: &str, policy: NavPolicy) -> Result<Url, NavRefusal> {
     Ok(url)
 }
 
+/// An address the browser may open. The only way to make one is `parse`, which is `check`, so code
+/// that holds one holds an address that passed the rules, and the page the browser opens is exactly
+/// the address that was checked (trimmed and normalised by the parse).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NavigableUrl(Url);
+
+impl NavigableUrl {
+    pub fn parse(raw: &str, policy: NavPolicy) -> Result<NavigableUrl, NavRefusal> {
+        check(raw, policy).map(NavigableUrl)
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
 /// True when the browser may open `raw` under the strict policy.
 pub fn is_navigable(raw: &str) -> bool {
     check(raw, NavPolicy::STRICT).is_ok()
+}
+
+/// The host of a `CONNECT host:port` line, once it passed the rules: an address the browser's proxy
+/// may connect to as it is, or a name it must resolve (and then judge every answer with
+/// `is_public_ip`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConnectHost {
+    Ip(IpAddr),
+    Name(String),
+}
+
+/// Judges the host text a `CONNECT` line carries (an IPv6 address in brackets) with the same rules
+/// as `check`, read the way the browser reads a host: `127.1` and `2130706433` are IPv4 addresses, a
+/// name comes back lowercased and in its ASCII form.
+pub fn connect_host(host: &str) -> Result<ConnectHost, NavRefusal> {
+    let host = Host::parse(host).map_err(|_| NavRefusal::NotAWebAddress)?;
+    let borrowed = match &host {
+        Host::Ipv4(ip) => Host::Ipv4(*ip),
+        Host::Ipv6(ip) => Host::Ipv6(*ip),
+        Host::Domain(name) => Host::Domain(name.as_str()),
+    };
+    if reach_of(&borrowed) != Reach::Public {
+        return Err(NavRefusal::PrivateHost(host.to_string()));
+    }
+    Ok(match host {
+        Host::Ipv4(ip) => ConnectHost::Ip(IpAddr::V4(ip)),
+        Host::Ipv6(ip) => ConnectHost::Ip(IpAddr::V6(ip)),
+        Host::Domain(name) => ConnectHost::Name(name),
+    })
+}
+
+/// True when `ip` is an address on the public internet under the rules `check` applies to a host
+/// written as an address (an IPv6 address is judged by the IPv4 one it carries).
+pub fn is_public_ip(ip: IpAddr) -> bool {
+    let host = match ip {
+        IpAddr::V4(ip) => Host::Ipv4(ip),
+        IpAddr::V6(ip) => Host::Ipv6(ip),
+    };
+    reach_of(&host) == Reach::Public
 }
 
 fn reach_of(host: &Host<&str>) -> Reach {
@@ -188,6 +243,18 @@ mod tests {
             "  https://example.com/apply  ",
         ] {
             assert!(is_navigable(raw), "{raw} should be allowed");
+        }
+    }
+
+    #[test]
+    fn the_strict_check_refuses_what_its_policy_refuses() {
+        for raw in [
+            "http://example.com/apply",
+            "https://127.0.0.1/apply",
+            "https://user:pass@example.com/x",
+            "/apply/1",
+        ] {
+            assert!(!is_navigable(raw), "{raw} should be refused");
         }
     }
 
@@ -332,6 +399,7 @@ mod tests {
                 "{raw} should be refused as local or private"
             );
         }
+        assert!(is_navigable("https://[64:ff9b:2::1]/x"));
     }
 
     #[test]
@@ -370,6 +438,22 @@ mod tests {
     }
 
     #[test]
+    fn a_navigable_url_is_made_only_from_an_address_that_passes_the_check() {
+        let url =
+            NavigableUrl::parse("  https://jobs.example.com/apply/1  ", NavPolicy::STRICT).unwrap();
+        assert_eq!(
+            url.as_str(),
+            "https://jobs.example.com/apply/1",
+            "the browser opens exactly the address that was checked"
+        );
+        assert_eq!(
+            NavigableUrl::parse("https://127.0.0.1/", NavPolicy::STRICT),
+            Err(NavRefusal::PrivateHost("127.0.0.1".into()))
+        );
+        assert!(NavigableUrl::parse("https://127.0.0.1/", NavPolicy::LOCAL_TESTS).is_ok());
+    }
+
+    #[test]
     fn a_refusal_says_which_rule_it_broke() {
         assert_eq!(
             NavRefusal::PrivateHost("169.254.169.254".into()).to_string(),
@@ -379,5 +463,74 @@ mod tests {
             NavRefusal::Scheme("ftp".into()).to_string(),
             "the scheme `ftp` is not allowed (https only)"
         );
+    }
+
+    #[test]
+    fn the_proxy_judges_a_connect_host_with_the_navigation_rules() {
+        assert_eq!(
+            connect_host("jobs.example"),
+            Ok(ConnectHost::Name("jobs.example".into()))
+        );
+        assert_eq!(
+            connect_host("Bücher.Example"),
+            Ok(ConnectHost::Name("xn--bcher-kva.example".into())),
+            "the name is resolved as the browser spells it"
+        );
+        assert_eq!(
+            connect_host("93.184.216.34"),
+            Ok(ConnectHost::Ip("93.184.216.34".parse().unwrap()))
+        );
+        assert_eq!(
+            connect_host("[2606:2800:220:1:248:1893:25c8:1946]"),
+            Ok(ConnectHost::Ip(
+                "2606:2800:220:1:248:1893:25c8:1946".parse().unwrap()
+            ))
+        );
+        for host in [
+            "127.0.0.1",
+            "127.1",
+            "2130706433",
+            "0x7f.0.0.1",
+            "[::1]",
+            "[::ffff:127.0.0.1]",
+            "[64:ff9b::192.168.1.1]",
+            "[2002:a00:1::1]",
+            "10.0.0.1",
+            "169.254.169.254",
+            "localhost",
+            "router.lan",
+            "intranet",
+        ] {
+            assert!(
+                matches!(connect_host(host), Err(NavRefusal::PrivateHost(_))),
+                "{host} should be refused as local or private"
+            );
+        }
+        for host in ["", "[::1", "jobs example", "a/b"] {
+            assert_eq!(
+                connect_host(host),
+                Err(NavRefusal::NotAWebAddress),
+                "{host:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn is_public_ip_follows_the_same_rules() {
+        for ip in [
+            "127.0.0.1",
+            "192.168.1.1",
+            "100.64.0.1",
+            "0.0.0.0",
+            "::1",
+            "::",
+            "fe80::1",
+            "64:ff9b::a9fe:a9fe",
+        ] {
+            assert!(!is_public_ip(ip.parse().unwrap()), "{ip} is not public");
+        }
+        for ip in ["8.8.8.8", "2606:2800:220:1:248:1893:25c8:1946"] {
+            assert!(is_public_ip(ip.parse().unwrap()), "{ip} is public");
+        }
     }
 }

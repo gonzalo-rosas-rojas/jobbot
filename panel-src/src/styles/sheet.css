@@ -1,0 +1,31 @@
+/* The sheet and the small things that float above the stage (spec §4.5, §6.4, §3.8, §3.11): the glass sheet on the left, the veil
+   of the prologue, the toast and the skip link. Glass without border or rounded corner: "zero card DNA" (verdict §1.3). The sheet
+   is the one surface Papel (the light theme) changes: it only swaps the tokens (--sheet-bg, --ink…), never a rule here. At most
+   two glass surfaces are on screen at once, this and the drawer (§3.10). JS writes the sheet's opacity (the crossfade of a jump)
+   straight to its style; no class holds it. */
+
+.sheet { position: absolute; left: var(--gutter); top: calc(var(--hud) + 22px); width: var(--sheet); max-height: calc(100% - var(--hud) - 48px); display: flex; flex-direction: column; padding: 34px 40px 26px; color: var(--ink); background: var(--sheet-bg); -webkit-backdrop-filter: var(--sheet-filter); backdrop-filter: var(--sheet-filter); }
+/* Hoy and Cola are as tall as what they hold; Procesos goes from the HUD to the floor and its list scrolls inside (§4.5). */
+.sheet[data-moment="procesos"] { bottom: 26px; max-height: none; }
+.sheet-host { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: clamp(16px, 2.6vh, 38px); overflow-y: auto; overscroll-behavior-y: contain; }
+/* The prologue has no sheet: its copy sits on the left over a veil of --night-0 at 55 %, from the HUD to the floor. The veil is only
+   as wide as the copy (44 vw): the dial of the prologue (its hero pose, spec §3.3) starts at about 0.72 vw - 0.44 of its box, which
+   never reaches left of 44 vw + the gutter at any window from 1024 to 3440, so the veil's edge never cuts through the dial. */
+.sheet[data-moment="prologo"] { top: var(--hud); bottom: 0; width: min(var(--sheet), 44vw); max-height: none; padding-top: 22px; background: var(--veil); -webkit-backdrop-filter: none; backdrop-filter: none; }
+
+.toast { position: absolute; right: var(--gutter); bottom: 52px; z-index: 40; display: flex; align-items: center; gap: 14px; max-width: min(460px, calc(100% - 2 * var(--gutter))); padding: 10px 14px; font-family: var(--body); font-size: var(--fs-2); color: var(--text); background: var(--night-2); border-left: 2px solid var(--text-dim); opacity: 0; visibility: hidden; transform: translateY(8px); transition: opacity 150ms var(--ease), transform 150ms var(--ease), visibility 0s 150ms; }
+.toast.show { opacity: 1; visibility: visible; transform: none; transition-delay: 0s; }
+.toast.bad { border-left-color: var(--gold); }
+.toast-undo { flex: none; font-family: var(--body); font-size: var(--fs-1); letter-spacing: 0; color: var(--gold); }
+.toast-close { flex: none; display: inline-flex; color: var(--text-dim); }
+.toast-close:hover, .toast-undo:hover { color: var(--text); }
+
+.skip { position: absolute; left: 16px; top: -64px; z-index: 50; padding: 10px 14px; color: var(--text); background: var(--night-2); }
+.skip:focus { top: 8px; }
+
+@media (max-width: 759px) {
+  .sheet, .sheet[data-moment="procesos"], .sheet[data-moment="prologo"] { position: static; width: auto; max-height: none; margin: 0 16px; padding: 20px 16px 24px; }
+  .sheet[data-moment="prologo"] { background: transparent; }
+  .sheet-host { overflow: visible; }
+  .toast { left: 16px; right: 16px; bottom: 16px; max-width: none; }
+}

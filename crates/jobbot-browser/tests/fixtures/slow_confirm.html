@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Apply - slow confirmation (test fixture)</title></head>
+<body>
+<!-- Nothing here is sent anywhere. Clicking Submit shows a progress message in an alert region, as
+     many boards do while the request is on its way, and the thank-you text arrives 1.5 s later. -->
+<h1>Apply for Senior AI Engineer</h1>
+<form id="app" onsubmit="return false">
+  <div><label for="first_name">First name *</label> <input id="first_name" name="first_name" type="text" required></div>
+  <div><label for="resume">Resume/CV *</label> <input id="resume" name="resume" type="file" required></div>
+  <button type="submit" id="send">Submit application</button>
+</form>
+<div id="status"></div>
+<script>
+  document.getElementById('send').addEventListener('click', () => {
+    const status = document.getElementById('status');
+    status.setAttribute('role', 'alert');
+    status.textContent = 'Submitting your application...';
+    setTimeout(() => {
+      status.removeAttribute('role');
+      status.textContent = 'Thank you for applying';
+    }, 1500);
+  });
+</script>
+</body>
+</html>

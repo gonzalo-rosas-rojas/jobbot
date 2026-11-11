@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Engine lab</title>
+<style nonce="__NONCE__">
+/*__STYLE__*/
+.lab-sheet { position: absolute; left: 24px; right: 24px; top: 80px; bottom: 80px; background: var(--sheet-bg); z-index: 5; padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+.lab-sheet [data-lenis-prevent] { flex: 1; min-height: 0; overflow-y: auto; border: 1px solid var(--line); }
+.lab-sheet [data-lenis-prevent] p { height: 40px; padding: 8px; }
+.lab-tabs { position: absolute; left: 24px; top: 20px; z-index: 6; display: flex; gap: 8px; }
+</style>
+</head>
+<body>
+<div id="doc" class="doc">
+  <div id="stage" class="stage">
+    <div id="tabs" class="lab-tabs" role="tablist"></div>
+    <main id="sheet" class="lab-sheet">
+      <input id="field" type="text" aria-label="field">
+      <div id="list" data-lenis-prevent></div>
+    </main>
+  </div>
+  <section class="stop-spacer" data-stop="hoy" aria-hidden="true"></section>
+  <section class="stop-spacer" data-stop="procesos" aria-hidden="true"></section>
+  <section class="stop-spacer" data-stop="cola" aria-hidden="true"></section>
+  <section class="stop-spacer" data-stop="aprender" aria-hidden="true"></section>
+  <section class="stop-spacer" data-stop="sistema" aria-hidden="true"></section>
+</div>
+<script nonce="__NONCE__">
+/*__SCRIPT__*/
+</script>
+</body>
+</html>

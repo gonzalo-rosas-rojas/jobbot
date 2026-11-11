@@ -1,0 +1,17 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>webrtc probe</title>
+<!--
+  WebRTC gathers its candidates over UDP, outside any HTTP proxy. This page asks the STUN server
+  the test names (?port=N on 127.0.0.1) for one; the egress tests count the datagrams that arrive.
+-->
+<script>
+  const port = new URLSearchParams(location.search).get("port");
+  window.probe = (async () => {
+    const peer = new RTCPeerConnection({ iceServers: [{ urls: `stun:127.0.0.1:${port}` }] });
+    peer.createDataChannel("probe");
+    await peer.setLocalDescription(await peer.createOffer());
+    window.peer = peer;
+    return "offered";
+  })().catch((e) => String(e));
+</script>

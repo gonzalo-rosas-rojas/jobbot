@@ -1,0 +1,1594 @@
+{
+  "generated_at": "2026-10-07T15:00:00Z",
+  "controls": {
+    "stopped": false,
+    "window_open": false,
+    "next_window": "2026-10-07 18:00",
+    "last_run_at": "2026-10-07T08:00:00Z",
+    "engine": "recent",
+    "last_run_result": null,
+    "last_run_steps": null,
+    "claude_account": {
+      "ok": true,
+      "message": null,
+      "subscription": "max",
+      "email": "d***@example.com",
+      "checked_at": "2026-10-07T07:00:00Z",
+      "auth_method": "claude.ai",
+      "api_provider": "firstParty",
+      "org_id": "org-demo",
+      "config_dir": "%LOCALAPPDATA%\\demo\\claude",
+      "cli_version": "2.1.0",
+      "anchored": true
+    },
+    "scheduled_task": {
+      "exists": true,
+      "next_run_at": "2026-10-08T02:00:00Z"
+    },
+    "auto_approve_min": null
+  },
+  "metrics": {
+    "sent_week": 9,
+    "responses_week": 3,
+    "response_rate": 0.3333333333333333,
+    "tests_week": 1,
+    "interviews_week": 1,
+    "interviews_total": 3,
+    "offers_total": 1,
+    "interview_to_offer": 0.3333333333333333
+  },
+  "funnel": {
+    "sent": 38,
+    "answered": 11,
+    "tests": 4,
+    "interviews": 3,
+    "offers": 1,
+    "by_source": {
+      "ashby": {
+        "n": 12,
+        "sent": 9,
+        "answered": 3,
+        "tests": 1,
+        "interviews": 1,
+        "offers": 0
+      },
+      "greenhouse": {
+        "n": 20,
+        "sent": 16,
+        "answered": 5,
+        "tests": 2,
+        "interviews": 1,
+        "offers": 1
+      },
+      "lever": {
+        "n": 9,
+        "sent": 6,
+        "answered": 1,
+        "tests": 0,
+        "interviews": 1,
+        "offers": 0
+      }
+    }
+  },
+  "pipeline": {
+    "days": 7,
+    "threshold": 60,
+    "seen": 120,
+    "above": 14,
+    "with_cv": 12,
+    "complete": 10,
+    "sent": 9,
+    "score_counts": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1,
+      1,
+      2,
+      2,
+      2,
+      2,
+      3,
+      3,
+      3,
+      4,
+      4,
+      4,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      4,
+      4,
+      4,
+      3,
+      3,
+      3,
+      2,
+      2,
+      2,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "trust": {
+    "reviewed": 3,
+    "first_n": 5,
+    "review_phase": true,
+    "sent_24h": 2,
+    "cap": 10,
+    "cap_after": 25
+  },
+  "activity": {
+    "from": "2026-10-06T15:30:00Z",
+    "to": "2026-10-07T15:30:00Z",
+    "slot_minutes": 30,
+    "slots": [
+      {
+        "at": "2026-10-06T15:30:00Z",
+        "open": false,
+        "seen": 0
+      },
+      {
+        "at": "2026-10-06T16:00:00Z",
+        "open": false,
+        "seen": 0
+      },
+      {
+        "at": "2026-10-06T16:30:00Z",
+        "open": false,
+        "seen": 0
+      },
+      {
+        "at": "2026-10-06T17:00:00Z",
+        "open": false,
+        "seen": 0
+      },
+      {
+        "at": "2026-10-06T17:30:00Z",
+        "open": false,
+        "seen": 0
+      },
+      {
+        "at": "2026-10-06T18:00:00Z",
+        "open": false,
+        "seen": 0
+      },
+      {
+        "at": "2026-10-06T18:30:00Z",
+        "open": false,
+        "seen": 0
+      },
+      {
+        "at": "2026-10-06T19:00:00Z",
+        "open": false,
+        "seen": 0
+      },
+      {
+        "at": "2026-10-06T19:30:00Z",
+        "open": false,
+        "seen": 0
+      },
+      {
+        "at": "2026-10-06T20:00:00Z",
+        "open": false,
+        "seen": 0
+      },
+      {
+        "at": "2026-10-06T20:30:00Z",
+        "open": false,
+        "seen": 0
+      },
+      {
+        "at": "2026-10-06T21:00:00Z",
+        "open": true,
+        "seen": 5
+      },
+      {
+        "at": "2026-10-06T21:30:00Z",
+        "open": true,
+        "seen": 5
+      },
+      {
+        "at": "2026-10-06T22:00:00Z",
+        "open": true,
+        "seen": 5
+      },
+      {
+        "at": "2026-10-06T22:30:00Z",
+        "open": true,
+        "seen": 5
+      },
+      {
+        "at": "2026-10-06T23:00:00Z",
+        "open": true,
+        "seen": 6
+      },
+      {
+        "at": "2026-10-06T23:30:00Z",
+        "open": true,
+        "seen": 6
+      },
+      {
+        "at": "2026-10-07T00:00:00Z",
+        "open": true,
+        "seen": 0
+      },
+      {
+        "at": "2026-10-07T00:30:00Z",
+        "open": true,
+        "seen": 0
+      },
+      {
+        "at": "2026-10-07T01:00:00Z",
+        "open": true,
+        "seen": 1
+      },
+      {
+        "at": "2026-10-07T01:30:00Z",
+        "open": true,
+        "seen": 1
+      },
+      {
+        "at": "2026-10-07T02:00:00Z",
+        "open": true,
+        "seen": 1
+      },
+      {
+        "at": "2026-10-07T02:30:00Z",
+        "open": true,
+        "seen": 1
+      },
+      {
+        "at": "2026-10-07T03:00:00Z",
+        "open": true,
+        "seen": 1
+      },
+      {
+        "at": "2026-10-07T03:30:00Z",
+        "open": true,
+        "seen": 2
+      },
+      {
+        "at": "2026-10-07T04:00:00Z",
+        "open": true,
+        "seen": 2
+      },
+      {
+        "at": "2026-10-07T04:30:00Z",
+        "open": true,
+        "seen": 2
+      },
+      {
+        "at": "2026-10-07T05:00:00Z",
+        "open": true,
+        "seen": 2
+      },
+      {
+        "at": "2026-10-07T05:30:00Z",
+        "open": true,
+        "seen": 3
+      },
+      {
+        "at": "2026-10-07T06:00:00Z",
+        "open": true,
+        "seen": 3
+      },
+      {
+        "at": "2026-10-07T06:30:00Z",
+        "open": true,
+        "seen": 3
+      },
+      {
+        "at": "2026-10-07T07:00:00Z",
+        "open": true,
+        "seen": 3
+      },
+      {
+        "at": "2026-10-07T07:30:00Z",
+        "open": true,
+        "seen": 4
+      },
+      {
+        "at": "2026-10-07T08:00:00Z",
+        "open": true,
+        "seen": 4
+      },
+      {
+        "at": "2026-10-07T08:30:00Z",
+        "open": true,
+        "seen": 4
+      },
+      {
+        "at": "2026-10-07T09:00:00Z",
+        "open": true,
+        "seen": 4
+      },
+      {
+        "at": "2026-10-07T09:30:00Z",
+        "open": true,
+        "seen": 5
+      },
+      {
+        "at": "2026-10-07T10:00:00Z",
+        "open": true,
+        "seen": 5
+      },
+      {
+        "at": "2026-10-07T10:30:00Z",
+        "open": true,
+        "seen": 5
+      },
+      {
+        "at": "2026-10-07T11:00:00Z",
+        "open": true,
+        "seen": 5
+      },
+      {
+        "at": "2026-10-07T11:30:00Z",
+        "open": true,
+        "seen": 6
+      },
+      {
+        "at": "2026-10-07T12:00:00Z",
+        "open": false,
+        "seen": 0
+      },
+      {
+        "at": "2026-10-07T12:30:00Z",
+        "open": false,
+        "seen": 0
+      },
+      {
+        "at": "2026-10-07T13:00:00Z",
+        "open": false,
+        "seen": 0
+      },
+      {
+        "at": "2026-10-07T13:30:00Z",
+        "open": false,
+        "seen": 0
+      },
+      {
+        "at": "2026-10-07T14:00:00Z",
+        "open": false,
+        "seen": 0
+      },
+      {
+        "at": "2026-10-07T14:30:00Z",
+        "open": false,
+        "seen": 0
+      },
+      {
+        "at": "2026-10-07T15:00:00Z",
+        "open": false,
+        "seen": 0
+      }
+    ],
+    "moves": [
+      {
+        "at": "2026-10-07T13:00:00Z",
+        "key": "fx:7",
+        "company": "Eta Test Co",
+        "title": "Site Reliability Engineer",
+        "to": "offer"
+      },
+      {
+        "at": "2026-10-07T12:00:00Z",
+        "key": "fx:11",
+        "company": "Lambda Test Co",
+        "title": "Platform Engineer",
+        "to": "needs_gonza"
+      },
+      {
+        "at": "2026-10-07T10:00:00Z",
+        "key": "fx:9",
+        "company": "Iota Test Co",
+        "title": "Backend Engineer",
+        "to": "needs_gonza"
+      },
+      {
+        "at": "2026-10-07T06:00:00Z",
+        "key": "fx:12",
+        "company": "Mu Test Co",
+        "title": "Full-stack Engineer",
+        "to": "prepared"
+      },
+      {
+        "at": "2026-10-07T05:00:00Z",
+        "key": "fx:13",
+        "company": "Nu Test Co",
+        "title": "Rust Engineer",
+        "to": "prepared"
+      },
+      {
+        "at": "2026-10-07T01:00:00Z",
+        "key": "fx:15",
+        "company": "Omicron Test Co",
+        "title": "Gameplay Programmer",
+        "to": "scored"
+      },
+      {
+        "at": "2026-10-06T19:00:00Z",
+        "key": "fx:19",
+        "company": "Tau Test Co",
+        "title": "Staff Backend Engineer",
+        "to": "submitted"
+      },
+      {
+        "at": "2026-10-06T16:00:00Z",
+        "key": "fx:20",
+        "company": "Upsilon Test Co",
+        "title": "ML Engineer",
+        "to": "submitted"
+      }
+    ],
+    "moves_total": 8,
+    "moves_by_state": {
+      "offer": 1,
+      "needs_gonza": 2,
+      "prepared": 2,
+      "scored": 1,
+      "submitted": 2
+    }
+  },
+  "claude": {
+    "spent_24h": 1.84,
+    "daily_budget": 5,
+    "by_stage": [
+      {
+        "stage": "score",
+        "calls": 12,
+        "dollars": 0.9
+      },
+      {
+        "stage": "cv",
+        "calls": 3,
+        "dollars": 0.94
+      }
+    ]
+  },
+  "today": {
+    "tasks_total": 6,
+    "tasks": [
+      {
+        "id": 101,
+        "text": "Reply to the Beta Test Co recruiter",
+        "job_key": "fx:2",
+        "due_at": "2026-10-07T13:00:00Z",
+        "overdue": true,
+        "link": null,
+        "kind": "manual",
+        "created_at": "2026-10-07T12:00:00Z"
+      },
+      {
+        "id": 103,
+        "text": "Prepare the Delta Test Co interview: review distributed systems",
+        "job_key": "fx:4",
+        "due_at": "2026-10-08T17:00:00Z",
+        "overdue": false,
+        "link": null,
+        "kind": "recruiter",
+        "created_at": "2026-10-07T09:00:00Z"
+      },
+      {
+        "id": 102,
+        "text": "Deliver the Gamma Test Co technical test",
+        "job_key": "fx:3",
+        "due_at": "2026-10-08T21:00:00Z",
+        "overdue": false,
+        "link": null,
+        "kind": "manual",
+        "created_at": "2026-10-07T06:00:00Z"
+      },
+      {
+        "id": 104,
+        "text": "Update the portfolio with the new case study",
+        "job_key": null,
+        "due_at": null,
+        "overdue": false,
+        "link": null,
+        "kind": "recruiter",
+        "created_at": "2026-10-07T03:00:00Z"
+      },
+      {
+        "id": 105,
+        "text": "Review the Theta Test Co posting",
+        "job_key": null,
+        "due_at": null,
+        "overdue": false,
+        "link": "https://example.com/theta",
+        "kind": "manual",
+        "created_at": "2026-10-07T00:00:00Z"
+      },
+      {
+        "id": 106,
+        "text": "Compare Alpha Test Co and Beta Test Co before answering",
+        "job_key": null,
+        "due_at": null,
+        "overdue": false,
+        "link": null,
+        "kind": "recruiter",
+        "created_at": "2026-10-06T21:00:00Z"
+      }
+    ],
+    "emails_total": 3,
+    "emails": [
+      {
+        "received_at": "2026-10-07T14:10:00Z",
+        "from": "talent@beta.example",
+        "company": "Beta Test Co",
+        "job_key": "fx:2",
+        "kind": "recruiter",
+        "subject": "Can we talk on Wednesday?",
+        "summary": "They want a 30 minute call and ask for your availability."
+      },
+      {
+        "received_at": "2026-10-07T12:00:00Z",
+        "from": "people@delta.example",
+        "company": "Delta Test Co",
+        "job_key": "fx:4",
+        "kind": "interview_invite",
+        "subject": "Technical interview invitation",
+        "summary": "Thursday 16:00 with the models team. Two interviewers."
+      },
+      {
+        "received_at": "2026-10-02T15:00:00Z",
+        "from": "no-reply@rho.example",
+        "company": "Rho Test Co",
+        "job_key": "fx:17",
+        "kind": "rejection",
+        "subject": "About your application",
+        "summary": "They moved forward with someone else."
+      }
+    ]
+  },
+  "needs_gonza": {
+    "total": 3,
+    "cards": [
+      {
+        "key": "fx:9",
+        "company": "Iota Test Co",
+        "title": "Backend Engineer",
+        "score": 85,
+        "state": "needs_gonza",
+        "source": "greenhouse",
+        "url": "https://example.com/fx/9",
+        "reason": "handoff: the page asks for a new account",
+        "reason_kind": "handoff",
+        "reason_short": "Envía tú el formulario: la hoja de respuestas está lista",
+        "note": null,
+        "approved": false,
+        "has_screenshot": false,
+        "has_cv": true,
+        "has_dossier": false,
+        "updated_at": "2026-10-07T10:00:00Z",
+        "actions": [
+          "resolve",
+          "confirm"
+        ],
+        "marks": [],
+        "posted_at": "2026-09-30T15:00:00Z",
+        "first_seen": "2026-10-01T15:00:00Z",
+        "salary_min": null,
+        "salary_max": null,
+        "days_in_state": 0,
+        "snoozed_until": null,
+        "waiting_since": "2026-10-07T10:00:00Z",
+        "age_days": 7,
+        "prune_in_days": 15,
+        "has_handoff": true,
+        "undo": null
+      },
+      {
+        "key": "fx:10",
+        "company": "Kappa Test Co",
+        "title": "Software Engineer",
+        "score": 81,
+        "state": "needs_gonza",
+        "source": "lever",
+        "url": "https://example.com/fx/10",
+        "reason": "faltan respuestas: expected salary",
+        "reason_kind": "missing_answers",
+        "reason_short": "El formulario pide respuestas que no tengo",
+        "note": null,
+        "approved": false,
+        "has_screenshot": false,
+        "has_cv": true,
+        "has_dossier": false,
+        "updated_at": "2026-10-06T13:00:00Z",
+        "actions": [
+          "resolve",
+          "confirm"
+        ],
+        "marks": [],
+        "posted_at": "2026-10-05T15:00:00Z",
+        "first_seen": "2026-10-06T15:00:00Z",
+        "salary_min": 4500,
+        "salary_max": 5500,
+        "days_in_state": 1,
+        "snoozed_until": null,
+        "waiting_since": "2026-10-06T13:00:00Z",
+        "age_days": 2,
+        "prune_in_days": 20,
+        "has_handoff": false,
+        "undo": null
+      },
+      {
+        "key": "fx:11",
+        "company": "Lambda Test Co",
+        "title": "Platform Engineer",
+        "score": 83,
+        "state": "needs_gonza",
+        "source": "ashby",
+        "url": "https://example.com/fx/11",
+        "reason": "captcha",
+        "reason_kind": "blocked",
+        "reason_short": "Una página me frenó (captcha, ingreso o bloqueo)",
+        "note": null,
+        "approved": false,
+        "has_screenshot": false,
+        "has_cv": true,
+        "has_dossier": false,
+        "updated_at": "2026-10-07T12:00:00Z",
+        "actions": [
+          "resolve",
+          "confirm"
+        ],
+        "marks": [],
+        "posted_at": "2026-09-29T15:00:00Z",
+        "first_seen": "2026-09-30T15:00:00Z",
+        "salary_min": 4500,
+        "salary_max": 5500,
+        "days_in_state": 0,
+        "snoozed_until": null,
+        "waiting_since": "2026-10-07T12:00:00Z",
+        "age_days": 8,
+        "prune_in_days": 14,
+        "has_handoff": false,
+        "undo": null
+      }
+    ]
+  },
+  "awaiting_approval": {
+    "total": 1,
+    "cards": [
+      {
+        "key": "fx:12",
+        "company": "Mu Test Co",
+        "title": "Full-stack Engineer",
+        "score": 89,
+        "state": "prepared",
+        "source": "greenhouse",
+        "url": "https://example.com/fx/12",
+        "reason": null,
+        "reason_kind": null,
+        "reason_short": null,
+        "note": null,
+        "approved": false,
+        "has_screenshot": true,
+        "has_cv": true,
+        "has_dossier": false,
+        "updated_at": "2026-10-07T06:00:00Z",
+        "actions": [
+          "approve"
+        ],
+        "marks": [
+          "withdrawn"
+        ],
+        "posted_at": "2026-10-02T15:00:00Z",
+        "first_seen": "2026-10-03T15:00:00Z",
+        "salary_min": 4500,
+        "salary_max": 5500,
+        "days_in_state": 0,
+        "snoozed_until": null,
+        "waiting_since": null,
+        "age_days": 5,
+        "prune_in_days": 17,
+        "has_handoff": false,
+        "undo": null
+      }
+    ]
+  },
+  "board": [
+    {
+      "state": "scored",
+      "label": "Puntuadas",
+      "total": 2,
+      "cards": [
+        {
+          "key": "fx:15",
+          "company": "Omicron Test Co",
+          "title": "Gameplay Programmer",
+          "score": 86,
+          "state": "scored",
+          "source": "greenhouse",
+          "url": "https://example.com/fx/15",
+          "reason": null,
+          "reason_kind": null,
+          "reason_short": null,
+          "note": null,
+          "approved": false,
+          "has_screenshot": false,
+          "has_cv": false,
+          "has_dossier": false,
+          "updated_at": "2026-10-07T01:00:00Z",
+          "actions": [],
+          "marks": [
+            "withdrawn"
+          ],
+          "posted_at": "2026-10-05T15:00:00Z",
+          "first_seen": "2026-10-06T15:00:00Z",
+          "salary_min": 4500,
+          "salary_max": 5500,
+          "days_in_state": 0,
+          "snoozed_until": null,
+          "waiting_since": null,
+          "age_days": 2,
+          "prune_in_days": 20,
+          "has_handoff": false,
+          "undo": null
+        },
+        {
+          "key": "fx:16",
+          "company": "Pi Test Co",
+          "title": "Data Platform Engineer",
+          "score": 72,
+          "state": "scored",
+          "source": "greenhouse",
+          "url": "https://example.com/fx/16",
+          "reason": null,
+          "reason_kind": null,
+          "reason_short": null,
+          "note": null,
+          "approved": false,
+          "has_screenshot": false,
+          "has_cv": false,
+          "has_dossier": false,
+          "updated_at": "2026-10-06T09:00:00Z",
+          "actions": [],
+          "marks": [
+            "withdrawn"
+          ],
+          "posted_at": "2026-10-04T15:00:00Z",
+          "first_seen": "2026-10-05T15:00:00Z",
+          "salary_min": null,
+          "salary_max": null,
+          "days_in_state": 1,
+          "snoozed_until": null,
+          "waiting_since": null,
+          "age_days": 3,
+          "prune_in_days": 19,
+          "has_handoff": false,
+          "undo": null
+        }
+      ]
+    },
+    {
+      "state": "prepared",
+      "label": "Preparadas",
+      "total": 3,
+      "cards": [
+        {
+          "key": "fx:13",
+          "company": "Nu Test Co",
+          "title": "Rust Engineer",
+          "score": 92,
+          "state": "prepared",
+          "source": "ashby",
+          "url": "https://example.com/fx/13",
+          "reason": null,
+          "reason_kind": null,
+          "reason_short": null,
+          "note": null,
+          "approved": true,
+          "has_screenshot": true,
+          "has_cv": true,
+          "has_dossier": false,
+          "updated_at": "2026-10-07T05:00:00Z",
+          "actions": [],
+          "marks": [
+            "withdrawn"
+          ],
+          "posted_at": "2026-10-03T15:00:00Z",
+          "first_seen": "2026-10-04T15:00:00Z",
+          "salary_min": null,
+          "salary_max": null,
+          "days_in_state": 0,
+          "snoozed_until": null,
+          "waiting_since": null,
+          "age_days": 4,
+          "prune_in_days": 18,
+          "has_handoff": false,
+          "undo": null
+        },
+        {
+          "key": "fx:12",
+          "company": "Mu Test Co",
+          "title": "Full-stack Engineer",
+          "score": 89,
+          "state": "prepared",
+          "source": "greenhouse",
+          "url": "https://example.com/fx/12",
+          "reason": null,
+          "reason_kind": null,
+          "reason_short": null,
+          "note": null,
+          "approved": false,
+          "has_screenshot": true,
+          "has_cv": true,
+          "has_dossier": false,
+          "updated_at": "2026-10-07T06:00:00Z",
+          "actions": [
+            "approve"
+          ],
+          "marks": [
+            "withdrawn"
+          ],
+          "posted_at": "2026-10-02T15:00:00Z",
+          "first_seen": "2026-10-03T15:00:00Z",
+          "salary_min": 4500,
+          "salary_max": 5500,
+          "days_in_state": 0,
+          "snoozed_until": null,
+          "waiting_since": null,
+          "age_days": 5,
+          "prune_in_days": 17,
+          "has_handoff": false,
+          "undo": null
+        },
+        {
+          "key": "fx:14",
+          "company": "Xi Test Co",
+          "title": "Backend Engineer",
+          "score": 80,
+          "state": "prepared",
+          "source": "lever",
+          "url": "https://example.com/fx/14",
+          "reason": null,
+          "reason_kind": null,
+          "reason_short": null,
+          "note": null,
+          "approved": false,
+          "has_screenshot": false,
+          "has_cv": true,
+          "has_dossier": false,
+          "updated_at": "2026-10-07T07:00:00Z",
+          "actions": [],
+          "marks": [
+            "withdrawn"
+          ],
+          "posted_at": "2026-10-01T15:00:00Z",
+          "first_seen": "2026-10-02T15:00:00Z",
+          "salary_min": null,
+          "salary_max": null,
+          "days_in_state": 0,
+          "snoozed_until": null,
+          "waiting_since": null,
+          "age_days": 6,
+          "prune_in_days": 16,
+          "has_handoff": false,
+          "undo": null
+        }
+      ]
+    },
+    {
+      "state": "needs_gonza",
+      "label": "Necesitan a Gonza",
+      "total": 3,
+      "cards": [
+        {
+          "key": "fx:9",
+          "company": "Iota Test Co",
+          "title": "Backend Engineer",
+          "score": 85,
+          "state": "needs_gonza",
+          "source": "greenhouse",
+          "url": "https://example.com/fx/9",
+          "reason": "handoff: the page asks for a new account",
+          "reason_kind": "handoff",
+          "reason_short": "Envía tú el formulario: la hoja de respuestas está lista",
+          "note": null,
+          "approved": false,
+          "has_screenshot": false,
+          "has_cv": true,
+          "has_dossier": false,
+          "updated_at": "2026-10-07T10:00:00Z",
+          "actions": [
+            "resolve",
+            "confirm"
+          ],
+          "marks": [],
+          "posted_at": "2026-09-30T15:00:00Z",
+          "first_seen": "2026-10-01T15:00:00Z",
+          "salary_min": null,
+          "salary_max": null,
+          "days_in_state": 0,
+          "snoozed_until": null,
+          "waiting_since": "2026-10-07T10:00:00Z",
+          "age_days": 7,
+          "prune_in_days": 15,
+          "has_handoff": true,
+          "undo": null
+        },
+        {
+          "key": "fx:11",
+          "company": "Lambda Test Co",
+          "title": "Platform Engineer",
+          "score": 83,
+          "state": "needs_gonza",
+          "source": "ashby",
+          "url": "https://example.com/fx/11",
+          "reason": "captcha",
+          "reason_kind": "blocked",
+          "reason_short": "Una página me frenó (captcha, ingreso o bloqueo)",
+          "note": null,
+          "approved": false,
+          "has_screenshot": false,
+          "has_cv": true,
+          "has_dossier": false,
+          "updated_at": "2026-10-07T12:00:00Z",
+          "actions": [
+            "resolve",
+            "confirm"
+          ],
+          "marks": [],
+          "posted_at": "2026-09-29T15:00:00Z",
+          "first_seen": "2026-09-30T15:00:00Z",
+          "salary_min": 4500,
+          "salary_max": 5500,
+          "days_in_state": 0,
+          "snoozed_until": null,
+          "waiting_since": "2026-10-07T12:00:00Z",
+          "age_days": 8,
+          "prune_in_days": 14,
+          "has_handoff": false,
+          "undo": null
+        },
+        {
+          "key": "fx:10",
+          "company": "Kappa Test Co",
+          "title": "Software Engineer",
+          "score": 81,
+          "state": "needs_gonza",
+          "source": "lever",
+          "url": "https://example.com/fx/10",
+          "reason": "faltan respuestas: expected salary",
+          "reason_kind": "missing_answers",
+          "reason_short": "El formulario pide respuestas que no tengo",
+          "note": null,
+          "approved": false,
+          "has_screenshot": false,
+          "has_cv": true,
+          "has_dossier": false,
+          "updated_at": "2026-10-06T13:00:00Z",
+          "actions": [
+            "resolve",
+            "confirm"
+          ],
+          "marks": [],
+          "posted_at": "2026-10-05T15:00:00Z",
+          "first_seen": "2026-10-06T15:00:00Z",
+          "salary_min": 4500,
+          "salary_max": 5500,
+          "days_in_state": 1,
+          "snoozed_until": null,
+          "waiting_since": "2026-10-06T13:00:00Z",
+          "age_days": 2,
+          "prune_in_days": 20,
+          "has_handoff": false,
+          "undo": null
+        }
+      ]
+    },
+    {
+      "state": "submitted",
+      "label": "Enviadas",
+      "total": 4,
+      "cards": [
+        {
+          "key": "fx:1",
+          "company": "Alpha Test Co",
+          "title": "Backend Engineer",
+          "score": 91,
+          "state": "submitted",
+          "source": "greenhouse",
+          "url": "https://example.com/fx/1",
+          "reason": null,
+          "reason_kind": null,
+          "reason_short": null,
+          "note": null,
+          "approved": false,
+          "has_screenshot": false,
+          "has_cv": true,
+          "has_dossier": false,
+          "updated_at": "2026-09-25T15:00:00Z",
+          "actions": [],
+          "marks": [
+            "replied",
+            "technical_test",
+            "interview",
+            "rejected",
+            "ghosted",
+            "withdrawn"
+          ],
+          "posted_at": "2026-10-04T15:00:00Z",
+          "first_seen": "2026-10-05T15:00:00Z",
+          "salary_min": null,
+          "salary_max": null,
+          "days_in_state": 12,
+          "snoozed_until": null,
+          "waiting_since": null,
+          "age_days": 3,
+          "prune_in_days": null,
+          "has_handoff": false,
+          "undo": null
+        },
+        {
+          "key": "fx:19",
+          "company": "Tau Test Co",
+          "title": "Staff Backend Engineer",
+          "score": 87,
+          "state": "submitted",
+          "source": "greenhouse",
+          "url": "https://example.com/fx/19",
+          "reason": null,
+          "reason_kind": null,
+          "reason_short": null,
+          "note": null,
+          "approved": false,
+          "has_screenshot": false,
+          "has_cv": true,
+          "has_dossier": false,
+          "updated_at": "2026-10-06T19:00:00Z",
+          "actions": [],
+          "marks": [
+            "replied",
+            "technical_test",
+            "interview",
+            "rejected",
+            "ghosted",
+            "withdrawn"
+          ],
+          "posted_at": "2026-10-03T15:00:00Z",
+          "first_seen": "2026-10-04T15:00:00Z",
+          "salary_min": null,
+          "salary_max": null,
+          "days_in_state": 0,
+          "snoozed_until": null,
+          "waiting_since": null,
+          "age_days": 4,
+          "prune_in_days": null,
+          "has_handoff": false,
+          "undo": null
+        },
+        {
+          "key": "fx:20",
+          "company": "Upsilon Test Co",
+          "title": "ML Engineer",
+          "score": 82,
+          "state": "submitted",
+          "source": "lever",
+          "url": "https://example.com/fx/20",
+          "reason": null,
+          "reason_kind": null,
+          "reason_short": null,
+          "note": null,
+          "approved": false,
+          "has_screenshot": false,
+          "has_cv": true,
+          "has_dossier": false,
+          "updated_at": "2026-10-06T16:00:00Z",
+          "actions": [],
+          "marks": [
+            "replied",
+            "technical_test",
+            "interview",
+            "rejected",
+            "ghosted",
+            "withdrawn"
+          ],
+          "posted_at": "2026-10-02T15:00:00Z",
+          "first_seen": "2026-10-03T15:00:00Z",
+          "salary_min": 4500,
+          "salary_max": 5500,
+          "days_in_state": 0,
+          "snoozed_until": null,
+          "waiting_since": null,
+          "age_days": 5,
+          "prune_in_days": null,
+          "has_handoff": false,
+          "undo": null
+        },
+        {
+          "key": "fx:5",
+          "company": "Epsilon Test Co",
+          "title": "Frontend Engineer",
+          "score": 79,
+          "state": "submitted",
+          "source": "ashby",
+          "url": "https://example.com/fx/5",
+          "reason": null,
+          "reason_kind": null,
+          "reason_short": null,
+          "note": null,
+          "approved": false,
+          "has_screenshot": false,
+          "has_cv": true,
+          "has_dossier": false,
+          "updated_at": "2026-10-04T15:00:00Z",
+          "actions": [],
+          "marks": [
+            "replied",
+            "technical_test",
+            "interview",
+            "rejected",
+            "ghosted",
+            "withdrawn"
+          ],
+          "posted_at": "2026-10-01T15:00:00Z",
+          "first_seen": "2026-10-02T15:00:00Z",
+          "salary_min": null,
+          "salary_max": null,
+          "days_in_state": 3,
+          "snoozed_until": null,
+          "waiting_since": null,
+          "age_days": 6,
+          "prune_in_days": null,
+          "has_handoff": false,
+          "undo": null
+        }
+      ]
+    },
+    {
+      "state": "replied",
+      "label": "Respondieron",
+      "total": 2,
+      "cards": [
+        {
+          "key": "fx:2",
+          "company": "Beta Test Co",
+          "title": "Full-stack Engineer",
+          "score": 88,
+          "state": "replied",
+          "source": "lever",
+          "url": "https://example.com/fx/2",
+          "reason": null,
+          "reason_kind": null,
+          "reason_short": null,
+          "note": "Asked for availability this week",
+          "approved": false,
+          "has_screenshot": false,
+          "has_cv": true,
+          "has_dossier": false,
+          "updated_at": "2026-10-05T15:00:00Z",
+          "actions": [],
+          "marks": [
+            "technical_test",
+            "interview",
+            "rejected",
+            "ghosted",
+            "withdrawn"
+          ],
+          "posted_at": "2026-09-30T15:00:00Z",
+          "first_seen": "2026-10-01T15:00:00Z",
+          "salary_min": null,
+          "salary_max": null,
+          "days_in_state": 2,
+          "snoozed_until": null,
+          "waiting_since": null,
+          "age_days": 7,
+          "prune_in_days": null,
+          "has_handoff": false,
+          "undo": null
+        },
+        {
+          "key": "fx:8",
+          "company": "Theta Test Co",
+          "title": "Data Engineer",
+          "score": 76,
+          "state": "replied",
+          "source": "greenhouse",
+          "url": "https://example.com/fx/8",
+          "reason": null,
+          "reason_kind": null,
+          "reason_short": null,
+          "note": null,
+          "approved": false,
+          "has_screenshot": false,
+          "has_cv": true,
+          "has_dossier": false,
+          "updated_at": "2026-10-03T15:00:00Z",
+          "actions": [],
+          "marks": [
+            "technical_test",
+            "interview",
+            "rejected",
+            "ghosted",
+            "withdrawn"
+          ],
+          "posted_at": "2026-09-29T15:00:00Z",
+          "first_seen": "2026-09-30T15:00:00Z",
+          "salary_min": 4500,
+          "salary_max": 5500,
+          "days_in_state": 4,
+          "snoozed_until": null,
+          "waiting_since": null,
+          "age_days": 8,
+          "prune_in_days": null,
+          "has_handoff": false,
+          "undo": null
+        }
+      ]
+    },
+    {
+      "state": "technical_test",
+      "label": "Prueba técnica",
+      "total": 1,
+      "cards": [
+        {
+          "key": "fx:3",
+          "company": "Gamma Test Co",
+          "title": "Platform Engineer",
+          "score": 86,
+          "state": "technical_test",
+          "source": "ashby",
+          "url": "https://example.com/fx/3",
+          "reason": null,
+          "reason_kind": null,
+          "reason_short": null,
+          "note": null,
+          "approved": false,
+          "has_screenshot": false,
+          "has_cv": true,
+          "has_dossier": false,
+          "updated_at": "2026-10-04T15:00:00Z",
+          "actions": [],
+          "marks": [
+            "interview",
+            "rejected",
+            "withdrawn"
+          ],
+          "posted_at": "2026-10-05T15:00:00Z",
+          "first_seen": "2026-10-06T15:00:00Z",
+          "salary_min": 4500,
+          "salary_max": 5500,
+          "days_in_state": 3,
+          "snoozed_until": null,
+          "waiting_since": null,
+          "age_days": 2,
+          "prune_in_days": null,
+          "has_handoff": false,
+          "undo": null
+        }
+      ]
+    },
+    {
+      "state": "interview",
+      "label": "Entrevista",
+      "total": 1,
+      "cards": [
+        {
+          "key": "fx:4",
+          "company": "Delta Test Co",
+          "title": "AI Engineer",
+          "score": 90,
+          "state": "interview",
+          "source": "greenhouse",
+          "url": "https://example.com/fx/4",
+          "reason": null,
+          "reason_kind": null,
+          "reason_short": null,
+          "note": "Interview on Thursday 16:00",
+          "approved": false,
+          "has_screenshot": false,
+          "has_cv": true,
+          "has_dossier": true,
+          "updated_at": "2026-10-06T15:00:00Z",
+          "actions": [],
+          "marks": [
+            "offer",
+            "rejected",
+            "withdrawn"
+          ],
+          "posted_at": "2026-10-04T15:00:00Z",
+          "first_seen": "2026-10-05T15:00:00Z",
+          "salary_min": null,
+          "salary_max": null,
+          "days_in_state": 1,
+          "snoozed_until": null,
+          "waiting_since": null,
+          "age_days": 3,
+          "prune_in_days": null,
+          "has_handoff": false,
+          "undo": null
+        }
+      ]
+    },
+    {
+      "state": "offer",
+      "label": "Oferta",
+      "total": 1,
+      "cards": [
+        {
+          "key": "fx:7",
+          "company": "Eta Test Co",
+          "title": "Site Reliability Engineer",
+          "score": 93,
+          "state": "offer",
+          "source": "ashby",
+          "url": "https://example.com/fx/7",
+          "reason": null,
+          "reason_kind": null,
+          "reason_short": null,
+          "note": "Offer received; answer before Friday",
+          "approved": false,
+          "has_screenshot": false,
+          "has_cv": true,
+          "has_dossier": false,
+          "updated_at": "2026-10-07T13:00:00Z",
+          "actions": [],
+          "marks": [
+            "accepted",
+            "rejected",
+            "withdrawn"
+          ],
+          "posted_at": "2026-10-03T15:00:00Z",
+          "first_seen": "2026-10-04T15:00:00Z",
+          "salary_min": null,
+          "salary_max": null,
+          "days_in_state": 0,
+          "snoozed_until": null,
+          "waiting_since": null,
+          "age_days": 4,
+          "prune_in_days": null,
+          "has_handoff": false,
+          "undo": null
+        }
+      ]
+    },
+    {
+      "state": "accepted",
+      "label": "Aceptadas",
+      "total": 0,
+      "cards": []
+    },
+    {
+      "state": "rejected",
+      "label": "Rechazadas",
+      "total": 1,
+      "cards": [
+        {
+          "key": "fx:17",
+          "company": "Rho Test Co",
+          "title": "Backend Engineer",
+          "score": 72,
+          "state": "rejected",
+          "source": "lever",
+          "url": "https://example.com/fx/17",
+          "reason": null,
+          "reason_kind": null,
+          "reason_short": null,
+          "note": "They chose someone else",
+          "approved": false,
+          "has_screenshot": false,
+          "has_cv": true,
+          "has_dossier": false,
+          "updated_at": "2026-09-29T15:00:00Z",
+          "actions": [],
+          "marks": [],
+          "posted_at": "2026-10-02T15:00:00Z",
+          "first_seen": "2026-10-03T15:00:00Z",
+          "salary_min": 4500,
+          "salary_max": 5500,
+          "days_in_state": 8,
+          "snoozed_until": null,
+          "waiting_since": null,
+          "age_days": 5,
+          "prune_in_days": null,
+          "has_handoff": false,
+          "undo": null
+        }
+      ]
+    },
+    {
+      "state": "withdrawn",
+      "label": "Retiradas",
+      "total": 1,
+      "cards": [
+        {
+          "key": "fx:18",
+          "company": "Sigma Test Co",
+          "title": "Backend Engineer",
+          "score": 68,
+          "state": "withdrawn",
+          "source": "lever",
+          "url": "https://example.com/fx/18",
+          "reason": null,
+          "reason_kind": null,
+          "reason_short": null,
+          "note": "Withdrawn: pay below my floor",
+          "approved": false,
+          "has_screenshot": false,
+          "has_cv": true,
+          "has_dossier": false,
+          "updated_at": "2026-09-26T15:00:00Z",
+          "actions": [],
+          "marks": [],
+          "posted_at": "2026-10-01T15:00:00Z",
+          "first_seen": "2026-10-02T15:00:00Z",
+          "salary_min": null,
+          "salary_max": null,
+          "days_in_state": 11,
+          "snoozed_until": null,
+          "waiting_since": null,
+          "age_days": 6,
+          "prune_in_days": null,
+          "has_handoff": false,
+          "undo": null
+        }
+      ]
+    },
+    {
+      "state": "ghosted",
+      "label": "Sin respuesta",
+      "total": 1,
+      "cards": [
+        {
+          "key": "fx:6",
+          "company": "Zeta Test Co",
+          "title": "Rust Developer",
+          "score": 84,
+          "state": "ghosted",
+          "source": "lever",
+          "url": "https://example.com/fx/6",
+          "reason": null,
+          "reason_kind": null,
+          "reason_short": null,
+          "note": null,
+          "approved": false,
+          "has_screenshot": false,
+          "has_cv": true,
+          "has_dossier": false,
+          "updated_at": "2026-09-16T15:00:00Z",
+          "actions": [],
+          "marks": [
+            "replied",
+            "rejected",
+            "withdrawn"
+          ],
+          "posted_at": "2026-09-30T15:00:00Z",
+          "first_seen": "2026-10-01T15:00:00Z",
+          "salary_min": null,
+          "salary_max": null,
+          "days_in_state": 21,
+          "snoozed_until": null,
+          "waiting_since": null,
+          "age_days": 7,
+          "prune_in_days": null,
+          "has_handoff": false,
+          "undo": null
+        }
+      ]
+    }
+  ],
+  "learn": {
+    "total": 12,
+    "seen": 5,
+    "due": 3,
+    "weak_topics": [
+      {
+        "topic": "Distributed systems",
+        "average": 2.1
+      },
+      {
+        "topic": "SQL",
+        "average": 2.8
+      }
+    ],
+    "topics": [
+      {
+        "topic": "Rust",
+        "seen": 3,
+        "total": 5,
+        "due": 1
+      },
+      {
+        "topic": "Distributed systems",
+        "seen": 1,
+        "total": 4,
+        "due": 2
+      },
+      {
+        "topic": "SQL",
+        "seen": 1,
+        "total": 3,
+        "due": 0
+      }
+    ],
+    "gaps": [
+      {
+        "id": "g1",
+        "topic": "Queues and backpressure",
+        "offer_key": "fx:3",
+        "offer": "Gamma Test Co — Platform Engineer",
+        "seen": false
+      }
+    ]
+  },
+  "snoozed": {
+    "total": 0,
+    "cards": []
+  }
+}

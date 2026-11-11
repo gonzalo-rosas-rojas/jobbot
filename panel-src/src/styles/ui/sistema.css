@@ -1,0 +1,222 @@
+/* SISTEMA, the machine room (spec §5.5, board/relay2/sistema-1920.png). This file lives in styles/ui/ so that build.mjs picks it up with
+   no change to its list (the list of src/styles/ has no name for it yet). Everything is under .sistema, so a generic name such as `.row`,
+   `.note` or `.act` never leaks into another moment. Text on the sheet is --ink, --ink-dim and --ink-accent (Papel swaps them with the
+   sheet, §2.2); no hex colour and no font size outside the closed scale of tokens.css: sizes are var(--fs-N). No card, no pill, no box
+   with a border: hairlines between rows, and the keys (`kbd`) are the only outlines. Gold is what is his to do (the key, the way back
+   from a failed account); the dots of the engine are shapes, not colours: a solid dot is fine, a ring is skipped or unknown, a square is
+   an error. Labels get their face from the global `.label`, values from `.mono`. Text from outside wraps or is cut at the edge of its box. */
+
+.sheet[data-moment="sistema"] { padding-top: 28px; }
+/* flex: none keeps the section as tall as its content: the sheet measures what it holds and only then does the host scroll */
+.sistema { --label-w: clamp(136px, 7.4vw, 160px); flex: none; display: flex; flex-direction: column; gap: clamp(8px, 1.3vh, 18px); color: var(--ink); }
+.sistema .row-v, .sistema .row-s, .sistema .err-co, .sistema .err-why, .sistema .src-name, .sistema .detail, .sistema .acc-who { overflow-wrap: anywhere; unicode-bidi: isolate; }
+.sistema .eyebrow, .sistema .status, .sistema .strip-title, .sistema .strip-marks, .sistema .strip-ticks, .sistema .fig-l,
+.sistema .block-title, .sistema .row-l, .sistema .cell-l, .sistema .note, .sistema .more, .sistema .foot-title, .sistema .pref-l, .sistema .stage, .sistema .step-l { color: var(--ink-dim); }
+
+.sistema .top { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 28px; }
+.sistema .status { text-align: right; }
+
+/* the headline: the label in mono, the answer big. The answer is "hace 56 min.", not a sentence the size of the page */
+.sistema .headline { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 6px 32px; }
+.sistema .mega { display: flex; flex-direction: column; gap: 8px; margin: 0; font-size: var(--fs-2); font-weight: 400; outline: none; }
+.sistema .mega .tail { font-size: var(--fs-6); line-height: 0.9; letter-spacing: -0.012em; color: var(--ink); }
+.sistema[data-engine="stale"] .mega .tail, .sistema[data-engine="never"] .mega .tail { color: var(--ink-dim); }
+.sistema .chip { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding-bottom: 12px; color: var(--ink); text-align: right; }
+.sistema .chip-stop { color: var(--ink-accent); font-weight: 600; }
+/* the chip and STOP are apart by the gap of the chip: no dot */
+
+/* the three shapes of a dot: solid (ran, fine), ring (skipped or old), dotted ring (never, or no data), square (an error) */
+.sistema .dot, .sistema .result[data-tone]::before, .sistema .step[data-tone] .step-v::before { content: ""; display: inline-block; flex: none; width: 8px; height: 8px; margin-right: 9px; vertical-align: 0.05em; border-radius: 50%; background: var(--ink); }
+.sistema .dot { margin-right: 0; align-self: center; }
+.sistema .chip[data-tone="stale"] .dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--ink); }
+.sistema .chip[data-tone="never"] .dot { background: transparent; border: 1.5px dotted var(--ink); }
+.sistema .step[data-tone="skip"] .step-v::before, .sistema .result[data-tone="warn"]::before { background: transparent; box-shadow: inset 0 0 0 1.5px var(--ink); }
+.sistema .step[data-tone="none"] .step-v::before, .sistema .result[data-tone="none"]::before { background: transparent; border: 1.5px dotted var(--ink-dim); }
+.sistema .step[data-tone="bad"] .step-v::before, .sistema .result[data-tone="bad"]::before { border-radius: 1px; }
+.sistema .row[data-row="account"] .row-v { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 9px; }
+.sistema .row[data-row="account"] .acc-who { margin-left: 6px; }
+.sistema .row[data-row="account"] .dot { margin-right: 0; }
+.sistema .row[data-row="account"][data-tone="bad"] .dot { border-radius: 1px; }
+.sistema .row[data-row="account"][data-tone="none"] .dot { background: transparent; border: 1.5px dotted var(--ink-dim); }
+.sistema .acc-text { font-weight: 600; }
+.sistema .acc-who { color: var(--ink-dim); }
+.sistema .acc-who:empty { display: none; }
+.sistema .acc-anchor { color: var(--ink-dim); }
+.sistema .acc-anchor::before { content: ", "; }
+.sistema .row[data-row="account"] .acc-who { margin-left: 0; }
+.sistema .acc-anchor:empty { display: none; }
+/* an account that nothing pins down: a real warning, so not gold (that is what is his to do) but the alert colour, with a square for a shape */
+.sistema .loose { display: block; }
+.sistema .row[data-row="account"][data-anchor="loose"] .row-s { grid-column: 1 / -1; }
+.sistema .loose-title { display: flex; align-items: baseline; gap: 9px; font-size: var(--fs-3); font-weight: 600; color: var(--ink-alert); }
+.sistema .loose-title::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 1px; background: var(--ink-alert); }
+.sistema .loose-why { display: block; margin-top: 2px; color: var(--ink); }
+
+/* the night's receipts: two figures on the left, the window of the night on the right */
+.sistema .receipts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px clamp(28px, 3.4vw, 64px); align-items: end; padding-top: clamp(8px, 1.3vh, 16px); border-top: 1px solid var(--line); }
+.sistema .figs { display: flex; flex-wrap: wrap; gap: 10px clamp(18px, 1.8vw, 40px); }
+/* in the markup the label comes first (what a reader of the page hears first); on the screen the number does */
+.sistema .fig { display: flex; flex-direction: column-reverse; justify-content: flex-start; gap: 4px; }
+.sistema .fig-n { font-size: var(--fs-5); line-height: 1; letter-spacing: -0.01em; color: var(--ink); white-space: nowrap; }
+/* a word where a number would be ("sin dato") is quieter and smaller: it must not read as a measurement */
+.sistema .fig-n[data-words="true"] { font-size: var(--fs-5); line-height: 1.34; color: var(--ink-dim); }
+.sistema .fig-l { white-space: nowrap; }
+.sistema .strip-wrap { display: grid; gap: 4px; min-width: 0; }
+.sistema .strip-box { position: relative; height: 44px; }
+.sistema .strip-base { position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: var(--line-strong); }
+.sistema .strip-busy, .sistema .strip-bars, .sistema .strip-dots { position: absolute; inset: 0; }
+.sistema .busy { position: absolute; top: 0; bottom: 0; left: var(--at); width: var(--w); background: repeating-linear-gradient(135deg, var(--line-strong) 0 1px, transparent 1px 4px); opacity: 0.55; }
+.sistema .bar { position: absolute; bottom: 1px; left: var(--at); width: calc(var(--w) - 0.25%); height: calc(var(--h) * 0.8); min-height: 2px; background: var(--ink); opacity: 0.5; }
+.sistema .mark { position: absolute; bottom: 1px; left: var(--at); width: 11px; height: 11px; transform: translateX(-50%); border-radius: 50%; background: var(--ink); box-shadow: 0 0 0 3px var(--sheet-bg); }
+.sistema .mark[data-mark="next"] { background: var(--sheet-bg); box-shadow: inset 0 0 0 1.5px var(--ink); }
+.sistema .mark[data-mark="now"] { top: 0; bottom: auto; width: 1px; height: 100%; transform: translateX(-50%); border-radius: 0; background: var(--ink-dim); box-shadow: none; }
+.sistema .strip-ticks { position: relative; height: calc(var(--fs-1) + 4px); }
+.sistema .tick { position: absolute; top: 0; left: var(--at); transform: translateX(-50%); }
+.sistema .tick:first-child { transform: none; }
+.sistema .tick:last-child { transform: translateX(-100%); }
+.sistema .strip-marks { display: flex; flex-wrap: wrap; gap: 2px 20px; color: var(--ink); }
+.sistema .strip-marks .none { color: var(--ink-dim); }
+.sistema .strip-marks .key { display: inline-flex; align-items: center; gap: 8px; }
+.sistema .swatch { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--ink); }
+.sistema .key[data-mark="next"] .swatch { background: transparent; box-shadow: inset 0 0 0 1.5px var(--ink); }
+
+/* the instruments: two columns, one hairline between rows, the label in mono and the value in the reading face */
+.sistema .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 clamp(28px, 3.4vw, 64px); align-items: stretch; }
+.sistema .col { display: flex; flex-direction: column; gap: clamp(10px, 1.6vh, 20px); min-width: 0; }
+.sistema .block { display: grid; gap: 4px; min-width: 0; }
+.sistema .block-title { display: flex; flex-wrap: wrap; gap: 0 14px; align-items: baseline; padding-bottom: 6px; border-bottom: 1px solid var(--line-strong); }
+/* the title and its count or note are apart by the gap of the flex row: no dot between them (a string of dots was a tell, 2026-10-24) */
+.sistema .rows { display: block; }
+.sistema .row { display: grid; grid-template-columns: var(--label-w) minmax(0, 1fr); gap: 1px 16px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.sistema .row-l { grid-column: 1; }
+.sistema .row-v { grid-column: 2; min-width: 0; font-size: var(--fs-3); color: var(--ink); font-variant-numeric: tabular-nums; }
+.sistema .row-s { grid-column: 2; min-width: 0; font-size: var(--fs-2); color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+.sistema .row-s .fix { display: block; }
+.sistema .row-s .detail { display: block; }
+.sistema .row[data-row="last"] .row-v { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 18px; }
+.sistema .result { font-weight: 600; }
+.sistema .result[data-tone="bad"] { font-weight: 600; }
+/* the steps are a row of their own across the whole column, in two lines of two: the label of each step says what the row is */
+.sistema .row[data-row="steps"] { grid-template-columns: minmax(0, 1fr); padding: 7px 0; }
+.sistema .row[data-row="steps"] .row-l { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.sistema .steps { display: grid; grid-template-columns: max-content auto max-content auto; gap: 6px 8px; font-size: var(--fs-2); }
+.sistema .step { grid-column: span 2; display: grid; grid-template-columns: subgrid; align-items: baseline; min-width: 0; }
+.sistema .step-v { padding-right: 14px; }
+.sistema .step-v { min-width: 0; color: var(--ink); }
+.sistema .step[data-tone="bad"] .step-v { font-weight: 600; }
+.sistema .row[data-row="stop"] .row-v { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 18px; }
+.sistema .row[data-row="stop"][data-on="true"] .stop-text { font-weight: 600; }
+.sistema .spend-text { display: block; }
+.sistema .meter { height: 3px; margin: 7px 0 4px; background: var(--line); }
+.sistema .meter-fill { display: block; height: 100%; width: var(--w); background: var(--ink); }
+.sistema .stages { display: block; color: var(--ink-dim); }
+.sistema .over { display: block; margin-top: 4px; font-size: var(--fs-2); font-weight: 600; color: var(--ink); }
+
+.sistema .row[data-pending] .act { opacity: 0.3; pointer-events: none; }
+
+.sistema .sources-table { width: 100%; border-collapse: collapse; }
+.sistema .sources-table th, .sistema .sources-table td { padding: 4px 0; border-bottom: 1px solid var(--line); text-align: right; vertical-align: baseline; font-size: var(--fs-3); }
+.sistema .sources-table thead th { padding: 4px 0; font-size: var(--fs-1); font-weight: 400; color: var(--ink-dim); white-space: nowrap; }
+.sistema .sources-table .col-board { text-align: left; font-weight: 400; width: 34%; }
+.sistema .sources-table thead .col-n { padding-left: 10px; }
+.sistema .src-name { display: block; font-weight: 600; overflow-wrap: break-word; }
+.sistema .src-bar { display: block; width: var(--w); height: 2px; margin-top: 4px; background: var(--line-strong); }
+.sistema .src-week { color: var(--ink); }
+.sistema .empty { padding: 8px 0; color: var(--ink-dim); font-size: var(--fs-2); }
+.sistema .more { padding: 4px 0 0; }
+.sistema .note { padding-top: 6px; max-width: 76ch; }
+
+.sistema .errors-list { display: block; }
+.sistema .err { display: grid; grid-template-columns: 3.4em minmax(0, 1fr) auto; gap: 1px 14px; align-items: baseline; padding: 7px 0; border-bottom: 1px solid var(--line); }
+.sistema .err-hour { color: var(--ink-dim); }
+.sistema .err-what { display: grid; gap: 1px; min-width: 0; }
+.sistema .err-co { font-size: var(--fs-3); font-weight: 600; }
+.sistema .err-why { font-size: var(--fs-2); color: var(--ink-dim); }
+.sistema .err[data-kind="run"] .err-co { font-weight: 600; }
+
+/* the limits and thresholds: one band, read only */
+.sistema .limits { gap: 6px; }
+.sistema .limits .block-title { border-bottom: 0; padding-bottom: 0; }
+.sistema .cells { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px clamp(20px, 2.4vw, 48px); }
+.sistema .cell { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.sistema .cell-v { order: 1; font-size: var(--fs-4); line-height: 1.15; letter-spacing: -0.005em; color: var(--ink); }
+.sistema .cell-v[data-words="true"] { font-size: var(--fs-3); line-height: 1.5; color: var(--ink-dim); }
+.sistema .cell-l { order: 0; }
+.sistema .cell-s { order: 2; font-size: var(--fs-2); color: var(--ink-dim); }
+
+.sistema[data-nofoot] .foot { display: none; }
+.sistema .foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 22px; margin-top: auto; padding-top: 4px; }
+.sistema .foot-keys { display: inline-flex; flex-wrap: wrap; gap: 6px 22px; }
+.sistema .pref { display: inline-flex; align-items: center; gap: 8px; }
+
+/* before the first snapshot: grey lines where the instruments will be, never a spinner (the dial is already turning) */
+.sistema .loading { display: none; }
+.sistema[data-loading] .loading { display: grid; gap: 8px; }
+.sistema[data-loading] .cols, .sistema[data-loading] .foot { display: none; }
+.sistema .row.skeleton { min-height: 30px; background: var(--line); opacity: 0.4; }
+
+/* a laptop: the sheet is 960 px wide (clamp(960px, 58vw, 1400px): up to a 1655 px window), so the figures lose their widest label (it breaks in
+   two) and the window of the night keeps its place at their right; under 1010 px of window the window of the night goes under them. The rule
+   stopped at 1500 px, so a 1536 or 1600 px window had the 960 px sheet and the wide labels: the window of the night kept 171 px and wrapped. */
+@media (max-width: 1655px) {
+  .sistema .receipts { gap: 12px clamp(20px, 2.6vw, 40px); }
+  .sistema .figs { gap: 10px clamp(14px, 1.6vw, 28px); }
+  .sistema .fig-l { white-space: normal; max-width: 14em; }
+  .sistema { --label-w: clamp(96px, 6.6vw, 132px); }
+  .sistema .step-l { letter-spacing: 0; }
+  .sistema .step-v { padding-right: 10px; }
+  .sistema .cells { gap: 8px clamp(12px, 1.4vw, 48px); }
+}
+@media (max-width: 1010px) {
+  .sistema .receipts { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* A browser window is rarely as tall as the screen: SISTEMA must fit the sheet without scrolling (the wheel belongs to the camera), so as
+   the window gets lower the headline and the figures tighten, and under 850 px what is only explanation goes. */
+@media (min-width: 760px) and (max-height: 1100px) {
+  .sistema .row { padding: 5px 0; }
+}
+@media (min-width: 760px) and (max-height: 1060px) {
+  /* 1600x1000, 1680x1050 and 1920x950 scrolled the sheet by 52, 69 and 20 px: what is only detail goes one step earlier than at 900 */
+  .sistema .note, .sistema .cell-s { display: none; }
+  .sistema .row[data-row="access"], .sistema .row[data-row="cli"], .sistema .stages { display: none; }
+}
+@media (min-width: 760px) and (max-height: 1010px) {
+  .sistema .mega .tail { font-size: var(--fs-5); line-height: 1; }
+  .sistema .row { padding: 5px 0; }
+  .sistema .err { padding: 5px 0; }
+}
+@media (min-width: 760px) and (max-height: 900px) {
+  .sistema .fig-n { font-size: var(--fs-4); line-height: 1.1; }
+  .sistema .fig-n[data-words="true"] { font-size: var(--fs-4); line-height: 1.3; }
+  .sistema .row-s { display: none; }
+  .sistema .row-s:has(.fix:not([hidden])), .sistema .row-s:has(.detail:not([hidden])), .sistema .row-s:has(.loose:not([hidden])) { display: block; }
+  .sistema .note { display: none; }
+  .sistema .cell-s { display: none; }
+  /* what is only detail of the account (the way in, the version of the CLI) and the keys of the page are in the palette and the title of the row */
+  .sistema .row[data-row="access"], .sistema .row[data-row="cli"], .sistema .foot, .sistema .stages { display: none; }
+}
+
+/* under 760 px (§3.11): the sheet is a block of the page, so everything is one column and the buttons are as tall as a thumb */
+@media (max-width: 759px) {
+  .sistema { --label-w: 112px; }
+  .sistema .status { text-align: left; }
+  .sistema .mega .tail { font-size: var(--fs-5); line-height: 1; }
+  .sistema .chip { padding-bottom: 0; text-align: left; }
+  .sistema .figs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 12px; }
+  .sistema .fig-n { font-size: var(--fs-4); }
+  .sistema .fig-n[data-words="true"] { font-size: var(--fs-4); }
+  .sistema .fig-l { white-space: normal; max-width: none; }
+  .sistema .cols { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .sistema .steps { grid-template-columns: minmax(0, 1fr); }
+  .sistema .step { grid-column: auto; grid-template-columns: 5.9em minmax(0, 1fr); gap: 8px; }
+  .sistema .cells { grid-template-columns: minmax(0, 1fr); }
+  /* the table turns into rows: the board on its own line and three numbers under their names; the real header stays for a screen reader */
+  .sistema .sources-table, .sistema .sources-table tbody { display: block; }
+  .sistema .sources-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .sistema .sources-table tbody tr { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .sistema .sources-table tbody th, .sistema .sources-table tbody td { display: block; padding: 0; border: 0; text-align: left; }
+  .sistema .sources-table tbody th { grid-column: 1 / -1; }
+  .sistema .sources-table tbody td::before { content: attr(data-label); display: block; margin-bottom: 1px; font-family: var(--body); font-size: var(--fs-1); letter-spacing: 0; color: var(--ink-dim); }
+  .sistema .foot { display: none; }
+}

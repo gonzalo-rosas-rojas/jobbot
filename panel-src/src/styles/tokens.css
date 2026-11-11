@@ -1,0 +1,72 @@
+/* Colours, type scale and measures of the panel (spec §4). Tinta (night glass) is the default and the only theme the sky
+   follows; Papel changes only the sheet (§2.2). Every hex colour of the page is written in this block: the colour tests of
+   Node (test/contrast.test.mjs) and Rust (crates/jobbot-panel/src/lib.rs) read it as written, and the rest of the CSS uses var(--...). */
+:root {
+  color-scheme: dark;
+  --night-0: #06080e;
+  --night-1: #0a0e19;
+  --night-2: #101626;
+  --text: #e9eff7;
+  --text-dim: #9eacbe;
+  --text-faint: #7b869e;
+  --gold: #fbc024;
+  --mint: #5bf0b8;
+  --window: #ffd9a8;
+  --paper: #edf0f6;
+  --paper-ink: #131f35;
+  --paper-dim: #4c596c;
+  --gold-ink: #704500;
+  --alert: #ff8a80;                                   /* a real warning (a thing that is wrong, not a thing that is his to do): outside the gold */
+
+  --sheet-bg: rgba(8, 12, 22, 0.72);
+  --sheet-filter: blur(22px) saturate(1.25);
+  --ink: var(--text);
+  --ink-dim: var(--text-dim);
+  --ink-accent: var(--gold);
+  --ink-alert: var(--alert);
+  --line: rgba(233, 239, 247, 0.13);
+  --line-strong: rgba(233, 239, 247, 0.3);
+  --veil: rgba(6, 8, 14, 0.55);
+
+  --display: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+  --serif: "Instrument Serif", Georgia, serif;
+  --mono: "Geist Mono", ui-monospace, Consolas, monospace;
+  --body: Inter, "Segoe UI", system-ui, sans-serif;
+  --fs-1: 12px;
+  --fs-2: 13px;
+  --fs-3: 15px;
+  --fs-4: 22px;
+  --fs-5: 34px;
+  --fs-6: 64px;
+  --fs-7: 120px;
+
+  --gutter: clamp(24px, 3.3vw, 64px);
+  --hud: 56px;
+  --sheet: min(calc(100vw - 2 * var(--gutter)), clamp(960px, 58vw, 1400px));   /* the clamp of spec A13, never wider than the window (760-1010 px) */
+  --drawer: clamp(400px, 13vw, 460px);
+  --ease: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-jump: cubic-bezier(0.2, 0, 0, 1);
+}
+
+:root[data-theme="light"] {
+  --sheet-bg: #edf0f6;
+  --sheet-filter: none;
+  --ink: #131f35;
+  --ink-dim: #4c596c;
+  --ink-accent: #704500;
+  --ink-alert: #9b1c1c;
+  --line: rgba(19, 31, 53, 0.14);
+  --line-strong: rgba(19, 31, 53, 0.32);
+}
+
+@media (min-width: 2400px) {
+  :root {
+    --fs-1: 13px;
+    --fs-2: 15px;
+    --fs-3: 16px;
+    --fs-4: 26px;
+    --fs-5: 40px;
+    --fs-6: 80px;
+    --fs-7: 150px;
+  }
+}

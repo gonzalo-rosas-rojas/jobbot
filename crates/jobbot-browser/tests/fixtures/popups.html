@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Apply - popups (test fixture)</title></head>
+<body>
+<!-- Nothing here is sent anywhere. On load the page opens three more tabs, as ad and tracking
+     scripts do; they must not outlive the application. -->
+<h1>Apply for Senior AI Engineer</h1>
+<form id="app" onsubmit="return false">
+  <div><label for="first_name">First name *</label> <input id="first_name" name="first_name" type="text" required></div>
+  <div><label for="resume">Resume/CV *</label> <input id="resume" name="resume" type="file" required></div>
+  <button type="submit" id="send">Submit application</button>
+</form>
+<script>
+  for (let i = 0; i < 3; i++) window.open('about:blank', '_blank');
+</script>
+</body>
+</html>

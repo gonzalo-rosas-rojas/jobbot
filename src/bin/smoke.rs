@@ -3,6 +3,7 @@
 //! Manual only. It needs network access, so it is never part of `cargo test`.
 //! Run from the project root: `cargo run --bin smoke`.
 
+use jobbot::http::Http;
 use jobbot::paths::Paths;
 use jobbot::sources::{build_sources, load_sources_config};
 
@@ -14,7 +15,7 @@ async fn main() -> anyhow::Result<()> {
         .user_agent("jobbot/0.1")
         .build()?;
 
-    for source in build_sources(&cfg, &client) {
+    for source in build_sources(&cfg, &Http::new(client)) {
         let result = source.fetch().await;
         println!(
             "{}: {} jobs, {} errors",

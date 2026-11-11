@@ -1,0 +1,23 @@
+version: 2
+
+# A weekly look at everything the project pulls in. The actions are pinned by commit and the
+# crates and packages by exact version, so these updates arrive as pull requests to read, never
+# as a silent change.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+
+  - package-ecosystem: npm
+    directory: /panel-src
+    schedule:
+      interval: weekly
+      day: monday

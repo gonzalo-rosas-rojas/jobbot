@@ -1,0 +1,47 @@
+*, *::before, *::after { box-sizing: border-box; }
+html { background: var(--night-0); color: var(--text); }
+body { margin: 0; min-height: 100svh; background: var(--night-1); font-family: var(--body); font-size: var(--fs-2); line-height: 1.45; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+h1, h2, h3, p, dl, dd, dt, ul, ol, figure { margin: 0; padding: 0; }
+ul, ol { list-style: none; }
+button { font-family: inherit; font-size: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+a { color: inherit; text-decoration: none; }
+[hidden] { display: none !important; }
+.sr { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* Small text has two jobs and a face for each (spec §4.2, rewritten 2026-10-24): a label names a thing in the body face, in the case it is written
+   in; a value (a time, a figure in a table, a path, a key) is in the mono. The style sheet sets no capitals and no wide tracking on either: tracked
+   capitals in mono on every label were the loudest tell of a generated page (docs/research/2026-10-24-anti-vibe), and they made the panel's best
+   sentences its hardest to read. Capitals come only from the words themselves (CV, STOP). The dial keeps its own instrument lettering (dial.css). */
+.mono { font-family: var(--mono); font-size: var(--fs-1); font-weight: 400; letter-spacing: 0.01em; }
+.label { font-family: var(--body); font-size: var(--fs-1); font-weight: 400; letter-spacing: 0; }
+.serif { font-family: var(--serif); font-style: italic; font-weight: 400; letter-spacing: -0.02em; text-transform: none; }
+.cond { font-family: var(--display); font-weight: 700; letter-spacing: -0.012em; text-transform: uppercase; }
+.num { font-variant-numeric: tabular-nums; }
+.gold { color: var(--ink-accent); }
+.wrap-any { overflow-wrap: anywhere; unicode-bidi: isolate; }
+kbd { display: inline-block; min-width: 19px; padding: 1px 5px 2px; text-align: center; font-family: var(--mono); font-size: var(--fs-1); letter-spacing: 0.04em; text-transform: none; color: var(--ink-dim); border: 1px solid var(--line-strong); }
+/* A key cap says it is pressed while the button that holds it is held (pointer, touch or Space): one pixel down and a tint of its own colour, so the
+   gold caps tint gold and the dim ones tint dim, in both themes and on the dark pieces that take back Tinta. No transition: the answer is instant. */
+button:active kbd, a:active kbd { transform: translateY(1px); background: color-mix(in srgb, currentColor 16%, transparent); }
+
+/* What you notice when you use it. The selection is gold with the night on it (it paints its own pair, so it reads on the sky, the glass and the paper
+   alike); on the paper of Papel it is the ink of the accent with the paper on it, because gold on that paper is 1.45:1 against its ground. The prologue
+   stays on the night even in Papel. test/css.details.test.mjs measures both pairs. The caret and the native controls take the accent of their surface
+   (the dark pieces re-pin it to gold, so a field in the palette or the menu does too). */
+::selection { background: var(--gold); color: var(--night-0); }
+:root[data-theme="light"] .sheet:not([data-moment="prologo"]) ::selection, :root[data-theme="light"] .detail ::selection { background: var(--gold-ink); color: var(--paper); }
+input, textarea, select, progress { accent-color: var(--ink-accent); }
+input, textarea { caret-color: var(--ink-accent); }
+/* Headlines break into even lines and paragraphs leave no widow. The eyebrows (mono, one flow of facts) are not headlines here, and a browser only balances
+   a few lines, far more than any headline of the panel has. */
+.mega, h2, h3, .ap-bigq, .loading-title { text-wrap: balance; }
+p { text-wrap: pretty; }
+/* Scrollbars wear the colours of the surface they sit on. The colour inherits, so each surface says it once and its scrollers follow: the page and the
+   dark pieces use the night's text, the sheet and the drawer use their own ink (the paper's in Papel). The width is left to the browser (scrollbar-width
+   does not inherit, and a thin bar changes how wide every list is, so it needs looking at in a real window). PROCESOS hides its own scrollbar on purpose
+   (it draws a track, a cue and edge fades of its own, procesos.css); that rule is on the element and wins over this. */
+html, .palette, .menu, .help, .sound-sheet, .sheet[data-moment="prologo"] { scrollbar-color: var(--text-dim) transparent; }
+.sheet, .detail { scrollbar-color: var(--ink-dim) transparent; }
+/* Two tones, gold between two bands of --night-0 (the shadow runs under the outline, so it fills the 2 px gap and the 2 px outside): gold alone is 1.45:1 on the paper of Papel (WCAG 1.4.11 wants 3:1), the dark ring is 17:1 there,
+   and on Tinta the dark ring melts into the night and the gold is what you see. test/contrast.test.mjs holds the pairs. */
+:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; box-shadow: 0 0 0 6px var(--night-0); }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }

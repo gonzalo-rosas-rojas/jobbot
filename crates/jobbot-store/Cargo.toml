@@ -1,0 +1,23 @@
+[package]
+name = "jobbot-store"
+description = "jobbot's SQLite storage: jobs, applications, the event log, intents, e-mails, tasks, Claude spend and the interview drill's progress."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+jobbot-app = { path = "../jobbot-app" }
+jobbot-domain = { path = "../jobbot-domain" }
+chrono.workspace = true
+rusqlite.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

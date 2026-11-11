@@ -1,0 +1,65 @@
+/* The sound, as he sees it: the small indicator in the HUD (what the sound is doing now, in a word) and the sheet "Escuchar los sonidos" (the controls and
+   one button, with its key, for every sound of the vocabulary). The indicator is the text of the HUD: --text-dim on the scrim of the strip, never a colour alone
+   (the words and the shape of the icon say the state). The sheet is a dialog like the help: solid night, a hairline, over the veil, z-index 60. Like the
+   palette it is not part of Papel (it takes back the Tinta values of the line tokens) and every size is the closed scale. Under 760 px it is the whole screen
+   and every control is 44 px. Calm motion needs nothing here: the sheet has no entrance. */
+.hud-sound { display: inline-flex; align-items: center; gap: 7px; flex: none; min-width: 0; color: var(--text-dim); text-transform: none; letter-spacing: 0; white-space: nowrap; }
+.hud-sound:hover, .hud-sound[data-mode="all"], .hud-sound[data-mode="actions"], .hud-sound[data-mode="background"] { color: var(--text); }
+.hud-sound-icon { display: inline-flex; }
+.hud-sound-text { overflow: hidden; text-overflow: ellipsis; }
+
+.sound-back { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; background: var(--veil); overscroll-behavior: contain; }
+.sound-sheet { --ink: var(--text); --ink-dim: var(--text-dim); --ink-accent: var(--gold); --line: rgba(233, 239, 247, 0.13); --line-strong: rgba(233, 239, 247, 0.3);
+  width: min(740px, 94vw); max-height: 88vh; overflow-y: auto; overscroll-behavior: contain; padding: 22px 26px 0; background: var(--night-2); color: var(--text); border: 1px solid var(--line-strong); }
+.sound-sheet:focus-visible { outline-offset: -4px; }
+.sound-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 8px; }
+.sound-head h3 { font-size: var(--fs-4); }
+.sound-close { padding: 4px 12px; color: var(--text); border: 1px solid var(--line-strong); }
+.sound-intro, .sound-bus-hint { font-size: var(--fs-2); color: var(--text-dim); }
+.sound-note { margin: 12px 0 0; padding: 8px 12px 8px 14px; font-size: var(--fs-2); color: var(--text); background: var(--line); }
+
+.sound-ctl { margin-top: 14px; }
+.sound-ctl-row { display: grid; grid-template-columns: 8.5em minmax(0, 1fr); gap: 8px 16px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+.sound-ctl-title { color: var(--text-dim); }
+.sound-ctl-body { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.sound-line { flex: 1 1 100%; font-size: var(--fs-2); color: var(--text-dim); }
+.sound-switch, .sound-choice { display: inline-flex; align-items: center; gap: 10px; min-height: 36px; padding: 4px 14px; font-size: var(--fs-2); color: var(--text); border: 1px solid var(--line-strong); }
+.sound-switch:hover, .sound-choice:hover, .sound-close:hover { border-color: var(--text-dim); }
+.sound-state { color: var(--text-dim); font-family: var(--body); font-size: var(--fs-1); letter-spacing: 0; }
+.sound-switch[aria-checked="true"], .sound-choice[aria-pressed="true"] { border-color: var(--gold); }
+.sound-switch[aria-checked="true"] .sound-state { color: var(--gold); }
+.sound-choice[aria-pressed="true"]::before { content: "\2022"; color: var(--gold); }
+.sound-radios { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.sound-bus { margin-top: 20px; }
+.sound-bus-title { padding-top: 12px; color: var(--text); border-top: 1px solid var(--line-strong); }
+.sound-group { margin-top: 14px; }
+.sound-group-title { margin-bottom: 4px; color: var(--text-dim); }
+.sound-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 14px; width: 100%; min-height: 44px; padding: 8px 10px; text-align: left; border-top: 1px solid var(--line); }
+.sound-row:hover { background: var(--line); }
+.sound-row[data-playing] { background: var(--line); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.sound-row kbd.k { min-width: 2.4em; color: var(--gold); border-color: var(--line-strong); }
+.sound-row:hover kbd.k, .sound-row[data-playing] kbd.k { border-color: var(--gold); }
+.sound-text { display: grid; gap: 2px; min-width: 0; }
+.sound-name { font-size: var(--fs-3); color: var(--text); }
+.sound-when { font-size: var(--fs-2); color: var(--text-dim); }
+.sound-go { display: inline-flex; align-items: center; gap: 12px; color: var(--text-dim); }
+.sound-row:hover .sound-go { color: var(--text); }
+/* the status line stays in view while the list scrolls: the key of a sound that is not on the screen still answers */
+.sound-heard { position: sticky; bottom: 0; min-height: 40px; padding: 11px 0 10px; background: var(--night-2); color: var(--text-dim); border-top: 1px solid var(--line); }
+
+/* The words need room: the HUD's own state of the bot (stage.css) takes the right side from 1280 px up and wraps to three lines there, so in that band the
+   indicator is the icon alone (its name and its title still say the state); below 1280 the state of the bot is gone and under 1024 the key of the palette is a lens. */
+@media (min-width: 1280px) and (max-width: 1439px), (max-width: 1023px) {
+  .hud-sound-text { display: none; }
+}
+@media (min-width: 1280px) and (max-width: 1439px) { .hud-right { gap: 14px; } }       /* the icon is one more thing in the row: the gaps give back what it takes, so the state of the bot keeps its three lines */
+
+@media (max-width: 759px) {
+  .hud-sound { min-height: 44px; min-width: 44px; justify-content: center; }
+  .sound-back { place-items: stretch; grid-template-rows: minmax(0, 1fr); }
+  .sound-sheet { width: 100%; max-height: none; padding: 16px 16px 0; border: 0; }
+  .sound-ctl-row { grid-template-columns: minmax(0, 1fr); }
+  .sound-switch, .sound-choice, .sound-close { min-height: 44px; }
+  .sound-row kbd.k { display: none; }
+}

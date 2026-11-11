@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Apply - a page that hangs (test fixture)</title></head>
+<body>
+<!-- Nothing here is sent anywhere. A busy loop freezes the page's script thread, so no call that
+     runs a script in the page ever answers. `?at=load` freezes it 200 ms after the load;
+     `?at=late` freezes it as soon as the CV is attached (the end of the fill), `?at=click` freezes it when the Submit button is clicked. -->
+<h1>Apply for Senior AI Engineer</h1>
+<form id="app" onsubmit="return false">
+  <div><label for="first_name">First name *</label> <input id="first_name" name="first_name" type="text" required></div>
+  <div><label for="resume">Resume/CV *</label> <input id="resume" name="resume" type="file" required></div>
+  <button type="submit" id="send">Submit application</button>
+</form>
+<script>
+  const freeze = () => { while (true) {} };
+  if (location.search.includes('at=load')) {
+    // The form is drawn by script a moment after the load, as a hosted board does: the scan is
+    // still waiting for it when the page freezes.
+    const form = document.getElementById('app');
+    form.remove();
+    setTimeout(() => document.body.appendChild(form), 400);
+    setTimeout(freeze, 200);
+  } else if (location.search.includes('at=late')) {
+    const watch = setInterval(() => {
+      if (document.getElementById('resume').files.length > 0) {
+        clearInterval(watch);
+        freeze();
+      }
+    }, 20);
+  } else {
+    document.getElementById('send').addEventListener('click', () => setTimeout(freeze, 300));
+  }
+</script>
+</body>
+</html>

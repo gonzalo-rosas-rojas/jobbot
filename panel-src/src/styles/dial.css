@@ -1,0 +1,75 @@
+/* The 24-hour dial (spec §3.3, §4.3, §6.1). The SVG is drawn in a 720-unit box; the box is as wide as the biggest pose
+   (--dial, set by JS) and the stage only scales it DOWN with a transform, so it is always sharp. Docked (top right, about
+   100 px) the fine detail goes and the strokes get thicker, because a stroke of 1 unit would be a fifth of a pixel. Sizes in
+   the text rules are SVG units, not screen pixels: a unit is box / 720 px, which is 0.9 px in HOY of a 1920x1080 window, 0.79 in a
+   1920x950 one and 0.40 at 1366x768. A mono text never paints under 11 px (spec §4.2), so the shrinking dial gives up detail
+   instead of text size: stage/dial.js detailOf() sets data-detail (full, mid, compact, tiny, bare) and the rules at the end of
+   this file hide what no longer fits and move the four cardinal numerals up the type scale. */
+.dial { --halo: 4px; --halo-time: 5px; position: absolute; left: 0; top: 0; width: var(--dial, 600px); height: var(--dial, 600px); transform-origin: 0 0; z-index: 3; pointer-events: none; will-change: transform; }
+.dial-svg { width: 100%; height: 100%; overflow: visible; display: block; }
+.face-stop { stop-color: var(--text); }
+.face-stop-0 { stop-opacity: 0.08; }
+.face-stop-1 { stop-opacity: 0.025; }
+.face-stop-2 { stop-opacity: 0; }
+.hatch-line { stroke: var(--text-dim); stroke-width: 1.2; opacity: 0.5; }
+.hair { fill: none; stroke: var(--line-strong); stroke-width: 1; }
+.rail { fill: none; stroke: var(--line-strong); stroke-width: 1.5; }
+.rail-lit { fill: none; stroke: var(--text); stroke-width: 3; stroke-linecap: round; }
+.sweep { fill: color-mix(in srgb, var(--gold) 7%, transparent); }
+.tick { stroke: var(--text-faint); stroke-width: 1.4; }
+.tick-win { stroke: var(--text-dim); }
+.tick-q { stroke-width: 1; opacity: 0.6; }
+/* Legibility of the labels over the sky of the day (T13): the day sky is pale at mid height and at the horizon, where --text-dim
+   is only 1.4 to 3.2:1, so stage/stage.js paints a soft pool of --night-1 under the dial on the canvas (the sky, the palette and the
+   tokens do not change). The sun's beam passes behind the numeral 18 whenever the sun is the light, so the numerals also carry a
+   halo of --night-1 (paint-order: stroke); over the dark pool it is invisible, over the light it keeps the numeral readable. The
+   halo is about 3.5 screen pixels wide at every size (--halo is in SVG units, so it grows as the dial shrinks, see the levels of
+   detail at the end) and all the text of the dial has it: the pool is lighter by day (stage.js poolAlpha) and the halo carries the
+   label. The labels are measured on captures of seven window sizes from 1366x657 to 3440x1440, at 09:00, 11:00, 12:00, 13:30 and
+   17:00, and must keep 4.5:1 (test/stage.lab.browser.test.mjs). */
+.dial-num { paint-order: stroke; stroke: color-mix(in srgb, var(--night-1) 92%, transparent); stroke-width: var(--halo); stroke-linejoin: round; font-family: var(--mono); font-size: 15px; font-weight: 400; fill: var(--text-dim); letter-spacing: 0.08em; }
+.dial-micro { paint-order: stroke; stroke: color-mix(in srgb, var(--night-1) 92%, transparent); stroke-width: var(--halo); stroke-linejoin: round; font-family: var(--mono); font-size: 13px; font-weight: 400; fill: var(--text-dim); letter-spacing: 0.2em; }
+.ring-inner { fill: none; stroke: var(--line); stroke-width: 1; }
+.cross { stroke: var(--line); stroke-width: 1; }
+.dial-time { paint-order: stroke; stroke: color-mix(in srgb, var(--night-1) 92%, transparent); stroke-width: var(--halo-time); stroke-linejoin: round; font-family: var(--display); font-size: 120px; font-weight: 700; font-stretch: 75%; fill: var(--text); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.run { fill: none; stroke: var(--text-faint); stroke-width: 1; }
+.run-big { stroke: var(--text-dim); }
+.run-done { fill: var(--text-dim); stroke: var(--text-dim); }
+.run-now { fill: var(--gold); stroke: var(--gold); }
+.mark { fill: var(--text-dim); }
+.mark-glow circle { fill: none; stroke: var(--gold); stroke-width: 2.5; }
+.hand-line { stroke: var(--gold); stroke-width: 2.5; stroke-linecap: round; }
+.hand-tip, .hub { fill: var(--gold); }
+
+.dial.is-docked .dial-time, .dial.is-docked .ring-inner, .dial.is-docked .cross, .dial.is-docked .dial-micro,
+.dial.is-docked .dial-num, .dial.is-docked .run, .dial.is-docked .tick-q, .dial.is-docked .mark { opacity: 0; }
+.dial.is-docked .tick { stroke-width: 7; }
+.dial.is-docked .rail { stroke-width: 8; }
+.dial.is-docked .rail-lit { stroke-width: 16; }
+.dial.is-docked .hand-line { stroke-width: 13; }
+.dial.is-docked .hand-tip { r: 24px; }
+.dial.is-docked .hub { r: 28px; }
+.dial.is-docked .busy { fill: color-mix(in srgb, var(--text) 12%, transparent); }
+.dial.is-docked .hair { stroke-width: 6; }
+.dial.is-docked .mark-glow circle { r: 24px; stroke-width: 9px; }
+
+/* Levels of detail (review A2), by the pixels a unit gets: full >= 0.846, mid >= 0.733, compact >= 0.5, tiny >= 0.324, bare below.
+   The cardinal numerals (00, 06, 12, 18) sit on the sky's brightest sides and keep their place; at 34 units "06" and "18" would touch the
+   end of their tick, so they step 6 units outwards. The baseline is lowered to keep the digits centred on the ring's radius. */
+.dial[data-detail="mid"] { --halo: 5px; --halo-time: 6px; }
+.dial[data-detail="compact"] { --halo: 6px; --halo-time: 7px; }
+.dial[data-detail="tiny"], .dial[data-detail="bare"] { --halo: 8px; --halo-time: 7px; }
+.dial.is-compact .dial-micro { display: none; }
+.dial[data-detail="compact"] .dial-num:not(.dial-cardinal), .dial[data-detail="tiny"] .dial-num:not(.dial-cardinal), .dial[data-detail="bare"] .dial-num { display: none; }
+.dial[data-detail="compact"] .dial-cardinal { font-size: var(--fs-4); transform: translateY(3px); }
+.dial[data-detail="tiny"] .dial-cardinal { font-size: var(--fs-5); transform: translateY(7px); }
+.dial[data-detail="tiny"] .dial-cardinal[data-hh="6"] { transform: translate(6px, 7px); }
+.dial[data-detail="tiny"] .dial-cardinal[data-hh="18"] { transform: translate(-6px, 7px); }
+
+/* D-17: in HOY the drawer opens over the hero dial (from 1920 down it covers the left of the ring and most of the time, and what peeks out
+   right of it is a stray "0" and a few arcs). The dial is decoration and the drawer is the work, so the hero steps back while it is open and
+   comes back with it; a docked dial is out of its way and a window wide enough to hold both (the dial's ring ends before the drawer) keeps it. */
+.dial { transition: opacity 220ms var(--ease); }
+@media (max-width: 2999px) { :root:has(#detail.open) .dial:not(.is-docked) { opacity: 0.18; } }
+
+@media (prefers-reduced-motion: reduce) { .dial { will-change: auto; } }

@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Apply - a page that keeps reloading itself (test fixture)</title></head>
+<body>
+<!-- Nothing here is sent anywhere. The script replaces the page with itself every 30 ms, so a call
+     that runs a script in it can land while the page it started on is being destroyed ("Execution
+     context was destroyed"): a failure of this one page, not of the browser. -->
+<h1>Apply for Senior AI Engineer</h1>
+<script>
+  const n = Number(new URLSearchParams(location.search).get('n') || 0);
+  if (n < 60) {
+    setTimeout(() => location.replace('?n=' + (n + 1)), 30);
+  }
+</script>
+</body>
+</html>

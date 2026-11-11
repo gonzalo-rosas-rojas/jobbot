@@ -1,0 +1,17 @@
+[package]
+name = "xtask"
+description = "Repository chores that are not part of jobbot: `cargo xtask export-public` builds a public copy of a commit, scanned for private terms, in a fresh one-commit repository."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+regex.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

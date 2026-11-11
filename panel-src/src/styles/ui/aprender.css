@@ -1,0 +1,203 @@
+/* APRENDER, el escritorio de noche (spec §5.4, board/relay2/aprender-1920.png). This file lives in styles/ui/ so that build.mjs picks it up with
+   no change to its list (the list of src/styles/ has no name for it yet; it can move there the day the list grows). Everything is under
+   .aprender, so a generic name such as `.row`, `.act` or `.note` never leaks into another moment. Text on the sheet is --ink, --ink-dim and
+   --ink-accent (Papel swaps them with the sheet, §2.2); no hex colour and no font size outside the closed scale of tokens.css: sizes are
+   var(--fs-N). No card, no pill, no box with a border: hairlines between rows, and the keys (`kbd`) are the only outlines. What is his to do
+   is gold (the key of the verb, the questions of the review that are due); the number of the headline is ink, like the rest of the headline.
+   The mono caps are for the labels and the numbers only: a sentence (what the page explains, what it does not know) is in the reading face,
+   sentence case, so the sheet reads as a page and not as a console. Text from outside wraps or is cut at the edge of its box. */
+
+.sheet[data-moment="aprender"] { padding-top: 28px; }
+/* flex: none keeps the section as tall as its content: the sheet measures what it holds and only then does the host scroll */
+.aprender { flex: none; display: flex; flex-direction: column; gap: clamp(10px, 1.5vh, 22px); color: var(--ink); }
+.aprender .wrap-any { overflow-wrap: anywhere; unicode-bidi: isolate; }
+.aprender .eyebrow, .aprender .ap-engine, .aprender .ap-h, .aprender .ap-h2, .aprender .fig-l, .aprender .ap-more, .aprender .ap-others,
+.aprender .ap-foot, .aprender .ap-ev, .aprender .ap-keys, .aprender .ap-label, .aprender .ap-tab, .aprender .ap-t-due, .aprender .ap-t-avg,
+.aprender .ap-g-state, .aprender .ap-g-topic, .aprender .ap-n, .aprender .ap-t-name { color: var(--ink-dim); }
+
+.aprender .ap-top { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 28px; }
+.aprender .ap-engine { text-align: right; }
+
+/* the headline: what the robot could not do, as a number in the ink of the headline; below it the one sentence that says what to do about it */
+.aprender .ap-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 4px 36px; }
+.aprender .mega { font-size: var(--fs-6); line-height: 0.9; letter-spacing: -0.012em; color: var(--ink); outline: none; }
+.aprender .mega .turn { font-size: inherit; font-style: normal; line-height: 0; }
+.aprender .ap-sub { display: grid; gap: 4px; max-width: 46ch; padding-bottom: 10px; }
+.aprender .ap-sub-line { font-size: var(--fs-3); line-height: 1.4; color: var(--ink); }
+.aprender .ap-sub-line + .ap-sub-line { color: var(--ink-dim); font-size: var(--fs-2); }
+
+/* two columns: what is his to answer on the left, the night's study on the right */
+.aprender .ap-cols { display: grid; grid-template-columns: minmax(0, 1.06fr) minmax(0, 1fr); gap: 0 clamp(32px, 3vw, 56px); align-items: start; }
+.aprender .ap-col { display: flex; flex-direction: column; gap: clamp(10px, 1.6vh, 22px); min-width: 0; }
+.aprender .ap-block { display: grid; gap: 6px; min-width: 0; align-content: start; }
+.aprender .ap-h { display: flex; flex-wrap: wrap; gap: 0 14px; padding-bottom: 6px; border-bottom: 1px solid var(--line-strong); }
+.aprender .ap-h2 { padding-top: 4px; }
+.aprender .ap-note, .aprender .ap-none, .aprender .ap-how { font-size: var(--fs-2); line-height: 1.5; color: var(--ink-dim); max-width: 70ch; }
+.aprender .ap-none[data-kind="error"], .aprender .ap-none[data-kind="unreadable"] { color: var(--ink); }
+
+/* the questions that block forms: one hairline each; the verb at the right */
+.aprender .ap-rows { display: block; }
+/* the five rows of the view are never cut; "y N más" opens the rest and then the list scrolls inside its own box */
+.aprender .ap-rows[data-expanded="true"] { max-height: calc(8 * 54px); overflow-y: auto; overscroll-behavior-y: contain; }
+.aprender .ap-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "q n acts" "who who acts"; align-items: baseline; gap: 0 18px; min-height: 40px; padding: 5px 0 5px 2px; border-bottom: 1px solid var(--line); }
+.aprender .ap-q { grid-area: q; min-width: 0; font-size: var(--fs-3); font-weight: 600; line-height: 1.25; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aprender .ap-n { grid-area: n; white-space: nowrap; }
+.aprender .ap-who { grid-area: who; min-width: 0; font-size: var(--fs-2); color: var(--ink-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aprender .ap-row .acts { grid-area: acts; align-self: center; }
+.aprender .acts { display: inline-flex; flex-wrap: wrap; gap: 8px 22px; justify-content: flex-end; }
+.aprender .ap-row[data-cursor="true"], .aprender .ap-eve-act[data-cursor="true"] { background: linear-gradient(90deg, var(--line), transparent 78%); }
+.aprender .ap-row[data-opens="true"] { cursor: pointer; }
+.aprender .ap-row[data-opens="true"]:hover:not(:has(button:hover)) .ap-q { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.aprender [data-pending] { opacity: 0.3; pointer-events: none; }
+.aprender .ap-row.skeleton { min-height: 40px; background: var(--line); opacity: 0.4; }
+.aprender .ap-more { width: fit-content; padding: 4px 0 0; }
+.aprender .ap-more:hover { color: var(--ink); }
+.aprender .ap-how { padding-top: 6px; }
+
+/* what it learned: four figures, the number in condensed caps and the label under it; "sin dato" is a word, never a number */
+.aprender .ap-figs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px clamp(14px, 1.4vw, 28px); padding-top: 4px; align-items: start; }
+.aprender .fig { display: flex; flex-direction: column-reverse; justify-content: flex-end; gap: 4px; min-width: 0; }
+.aprender .fig-n { font-size: var(--fs-5); line-height: 1; letter-spacing: -0.01em; color: var(--ink); }
+.aprender .fig-n[data-nodata="true"] { font-size: var(--fs-3); line-height: 1.5; font-family: var(--body); font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--ink-dim); }
+.aprender .fig-l { font-size: var(--fs-2); line-height: 1.3; color: var(--ink-dim); }
+
+.aprender .ap-pats { display: block; }
+.aprender .ap-pat { padding: 5px 0; border-bottom: 1px solid var(--line); font-size: var(--fs-2); }
+
+/* the eve of an interview: the role, what the dossier says, the likely questions, the stories with their evidence */
+.aprender .ap-eve-role { font-size: var(--fs-3); font-weight: 600; color: var(--ink); }
+.aprender .ap-eve-body { display: grid; gap: 3px; }
+.aprender .ap-eve-sum { font-size: var(--fs-2); line-height: 1.5; color: var(--ink); max-width: 72ch; }
+.aprender .ap-qs { display: grid; gap: 4px; padding-left: 2.1ch; list-style: decimal; font-size: var(--fs-2); line-height: 1.45; color: var(--ink); }
+.aprender .ap-qs li::marker { color: var(--ink-dim); }
+.aprender .ap-stories { display: block; }
+.aprender .ap-stories li { display: grid; gap: 0; padding: 2px 0; border-bottom: 1px solid var(--line); font-size: var(--fs-2); }
+.aprender .ap-stories strong { font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aprender .ap-ev { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-style: italic; color: var(--ink-dim); }
+.aprender .ap-eve-act { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 28px; padding: 4px 0 2px; }
+.aprender .ap-others { margin-left: auto; text-align: right; }
+
+/* the review of the night: the topics with what is due, and the one button */
+.aprender .ap-topics { display: block; }
+.aprender .ap-topics li { border-bottom: 1px solid var(--line); }
+/* The name column is measured in the mono's own advance (0.6em of glyph + 0.16em of tracking), not in `ch`, which ignores the tracking and made
+   a name of 19 letters wider than its 15ch cell. A longer name wraps inside its cell: it is never cut with an ellipsis, because text that is
+   laid out wider than its cell is also laid out over the bar beside it, and what a reader (or the A18 measure) finds under it is the bar. */
+.aprender .ap-topic { display: grid; grid-template-columns: minmax(0, calc(var(--fs-1) * 18)) minmax(60px, 1fr) auto minmax(8ch, auto); gap: 0 14px; align-items: center; width: 100%; min-height: 26px; padding: 0 2px; text-align: left; color: var(--ink); }
+.aprender .ap-topic:hover .ap-t-name { color: var(--ink); }
+.aprender .ap-t-name { min-width: 0; padding: 3px 0; line-height: 1.3; overflow-wrap: anywhere; }
+.aprender .ap-t-due { color: var(--ink); text-align: right; white-space: nowrap; }
+.aprender .ap-t-avg { text-align: right; white-space: nowrap; }
+.aprender .ap-bar { position: relative; display: block; height: 6px; background: var(--line); }
+.aprender .ap-bar-seen, .aprender .ap-bar-due { position: absolute; left: 0; top: 0; bottom: 0; }
+.aprender .ap-bar-seen { width: var(--seen); background: var(--ink-dim); opacity: 0.55; }
+.aprender .ap-bar-due { width: var(--due); background: var(--ink-accent); }
+.aprender .ap-gaps { display: block; }
+.aprender .ap-gap { display: grid; grid-template-columns: minmax(0, 19ch) minmax(0, 1fr) auto; gap: 0 14px; align-items: baseline; padding: 2px 2px; border-bottom: 1px solid var(--line); font-size: var(--fs-2); }
+.aprender .ap-g-offer { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aprender .ap-g-topic { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aprender .ap-start { align-self: start; width: fit-content; margin-top: 8px; }
+.aprender .ap-drill-sum { display: grid; gap: 4px; }
+
+/* the box of the review: the question in display type, his own attempt (never sent), the answer when he asks, six grades */
+.aprender .ap-box { display: grid; gap: 14px; padding-top: 4px; outline: none; }
+.aprender .ap-card { display: grid; gap: 14px; }
+.aprender .ap-card[data-enter="true"] { animation: ap-in 150ms var(--ease) both; }
+.aprender .ap-tab { display: flex; flex-wrap: wrap; gap: 0 16px; }
+.aprender .ap-ctopic { color: var(--ink-accent); font-weight: 600; }
+.aprender .ap-bigq { font-family: var(--display); font-weight: 700; letter-spacing: -0.012em; line-height: 1.06; color: var(--ink); outline: none; overflow-wrap: anywhere; unicode-bidi: isolate; }
+.aprender .ap-bigq[data-size="short"] { font-size: var(--fs-5); }
+.aprender .ap-bigq[data-size="mid"] { font-size: var(--fs-4); }
+.aprender .ap-bigq[data-size="long"] { font-size: var(--fs-3); font-family: var(--body); font-weight: 600; line-height: 1.35; letter-spacing: 0; }
+.aprender .ap-field { display: grid; gap: 3px; }
+.aprender .ap-hint { font-size: var(--fs-2); color: var(--ink-dim); }
+.aprender .ap-mine { width: 100%; min-height: 4.2em; padding: 6px 0; resize: vertical; font: inherit; font-size: var(--fs-3); line-height: 1.45; color: var(--ink); background: transparent; border: 0; border-bottom: 1px solid var(--line-strong); border-radius: 0; }
+/* Same mark as the find field of PROCESOS: the underline in the accent, 2 px, no dark band, a transparent outline for Windows high contrast. */
+.aprender .ap-mine:focus-visible { outline: 2px solid transparent; outline-offset: -2px; box-shadow: inset 0 -1px 0 var(--ink-accent); border-bottom-color: var(--ink-accent); }
+.aprender .ap-act { display: grid; gap: 12px; }
+.aprender .ap-ref { display: grid; gap: 4px; }
+.aprender .ap-answer { margin: 0; padding: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--body); font-size: var(--fs-3); line-height: 1.5; color: var(--ink); max-height: 22vh; overflow-y: auto; outline: none; }
+.aprender .ap-grading { display: grid; gap: 4px; }
+.aprender .ap-grades { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); border-top: 1px solid var(--line); }
+.aprender .ap-grade { display: grid; justify-items: start; gap: 2px; padding: 8px 8px 8px 0; text-align: left; color: var(--ink); border-bottom: 1px solid var(--line); }
+.aprender .ap-grade + .ap-grade { padding-left: 10px; border-left: 1px solid var(--line); }
+.aprender .g-n { font-family: var(--display); font-weight: 700; font-size: var(--fs-4); line-height: 1; color: var(--ink-accent); }
+.aprender .g-w { font-size: var(--fs-2); line-height: 1.25; color: var(--ink-dim); }
+.aprender .ap-grade:hover .g-w { color: var(--ink); }
+.aprender .ap-box[data-busy] .ap-grades { opacity: 0.5; pointer-events: none; }
+.aprender .ap-keys { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.aprender .ap-note-line { font-size: var(--fs-3); color: var(--ink); outline: none; }
+.aprender .ap-reveal { align-self: start; width: fit-content; }
+
+.aprender .ap-foot { padding-top: 2px; }
+@keyframes ap-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* a laptop: the sheet is under 1020 px wide, so the two columns are narrow: the count of forms goes under the question, beside who it holds
+   back, and the sentence under the headline keeps only what he has to do (the headline and the title of the block already say the rest) */
+@media (min-width: 760px) and (max-width: 1760px) {
+  .aprender .ap-figs { gap: 10px 18px; }
+  .aprender .ap-row { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "q q acts" "n who acts"; gap: 0 12px; }
+  .aprender .ap-sub { flex: 1 1 240px; max-width: 40ch; }
+  .aprender .ap-sub-line:first-child:not(:last-child) { display: none; }
+  .aprender .ap-sub-line + .ap-sub-line { color: var(--ink); font-size: var(--fs-2); }
+}
+
+/* A browser window is rarely as tall as the screen: APRENDER must fit the sheet without scrolling (the wheel belongs to the camera), so as
+   the window gets lower the headline and the rows tighten, and under 900 px what is only explanation goes. At 1080 the seventh topic (the
+   one with the least due) is the first to go: the list is cut by the view at seven, the page shows as many as fit. */
+@media (min-width: 760px) and (max-height: 1100px) {
+  .aprender .ap-topics li:nth-child(n + 7) { display: none; }
+}
+/* the gaps the dossiers left are also counted in the eve's line ("2 tarjetas nuevas de repaso"), and the figure that has no data says so
+   in its own words: the gaps and the note under the figures go first */
+@media (min-width: 760px) and (max-height: 1010px), (min-width: 760px) and (max-width: 1760px) and (max-height: 1100px) {
+  .aprender .ap-gaps, .aprender .ap-drill-sum .ap-h2 { display: none; }
+  .aprender .ap-block[data-block="bank"] .ap-note { display: none; }
+}
+@media (min-width: 760px) and (max-height: 1010px) {
+  .aprender .mega { font-size: var(--fs-5); line-height: 1; }
+  .aprender .ap-row { padding: 5px 0 5px 2px; }
+  .aprender .ap-topic { min-height: 26px; }
+  .aprender .ap-pat { padding: 3px 0; }
+}
+@media (min-width: 760px) and (max-height: 900px) {
+  .aprender .fig-n { font-size: var(--fs-4); }
+  .aprender .ap-sub-line + .ap-sub-line { display: none; }
+  .aprender .ap-block[data-block="rejects"], .aprender .ap-block[data-block="bank"] .ap-note { display: none; }
+  .aprender .ap-topics li:nth-child(n + 6) { display: none; }
+  .aprender .ap-stories li:nth-child(n + 3) { display: none; }
+  .aprender .ap-qs li:nth-child(n + 3) { display: none; }
+  .aprender .ap-gaps, .aprender .ap-drill-sum .ap-h2 { display: none; }
+  .aprender .ap-how { padding-top: 2px; }
+}
+@media (min-width: 760px) and (max-height: 800px) {
+  .aprender .ap-block[data-block="bank"] { display: none; }
+  .aprender .ap-eve-sum { display: none; }
+  .aprender .ap-stories li:nth-child(n + 2) { display: none; }
+  .aprender .ap-topics li:nth-child(n + 5) { display: none; }
+}
+@media (min-width: 760px) and (max-height: 740px) {
+  .aprender .ap-qs li:nth-child(n + 2) { display: none; }
+  .aprender .ap-topics li:nth-child(n + 4) { display: none; }
+  .aprender .ap-block[data-block="eve"] .ap-h2 { display: none; }
+}
+
+/* under 760 px (§3.11): the sheet is a block of the page, so everything is one column and the buttons are as tall as a thumb */
+@media (max-width: 759px) {
+  .aprender .ap-engine { text-align: left; }
+  .aprender .mega { font-size: var(--fs-5); line-height: 1; }
+  .aprender .ap-cols { grid-template-columns: minmax(0, 1fr); gap: 22px; }
+  .aprender .ap-rows[data-expanded="true"] { max-height: none; }
+  .aprender .ap-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "q q" "who who" "n acts"; gap: 2px 14px; padding: 10px 0; }
+  .aprender .ap-topic { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name due" "bar bar"; padding: 8px 2px; min-height: 44px; gap: 4px 14px; }
+  .aprender .ap-t-name { grid-area: name; }
+  .aprender .ap-bar { grid-area: bar; }
+  .aprender .ap-t-due { grid-area: due; }
+  .aprender .ap-t-avg { display: none; }
+  .aprender .ap-gap { grid-template-columns: minmax(0, 1fr); }
+  .aprender .ap-grades { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .aprender .ap-grade { padding: 10px 8px 10px 0; min-height: 48px; }
+  .aprender .ap-grade:nth-child(3n + 1) { padding-left: 0; border-left: 0; }
+  .aprender .ap-keys { display: none; }
+  .aprender .ap-foot { display: none; }
+}

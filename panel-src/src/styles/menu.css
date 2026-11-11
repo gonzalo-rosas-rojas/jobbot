@@ -1,0 +1,23 @@
+/* The small menu of ui/menu.js (postpone until when, which reason, which answer, new task): a dark box beside what it is about, in both
+   themes (like the toast, it is not part of the sheet, so Papel does not touch it). Not a dialog: nothing goes inert behind it. Text is
+   --text, --text-dim and --gold on --night-2; no hex colour and no font size outside the closed scale. The box takes back the Tinta values of
+   the three theme tokens the base `kbd` reads, so a key cap inside it is legible under Papel too. */
+.menu { --ink: var(--text); --ink-dim: var(--text-dim); --ink-accent: var(--gold); --line-strong: rgba(233, 239, 247, 0.3);
+  position: fixed; z-index: 30; display: grid; gap: 8px; min-width: 240px; max-width: min(420px, calc(100vw - 24px)); padding: 12px 14px; color: var(--text); background: var(--night-2); border: 1px solid var(--line-strong); animation: menu-in 150ms var(--ease) both; }
+.menu-title, .menu-foot, .menu-hint { color: var(--text-dim); }
+.menu-items { display: grid; gap: 2px; }
+.menu-item { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; width: 100%; min-height: 32px; padding: 2px 4px; text-align: left; font-size: var(--fs-2); color: var(--text); }
+.menu-item .k { color: var(--gold); border-color: var(--gold); }
+.menu-item:hover, .menu-item:focus-visible { color: var(--gold); }
+.menu-foot .k { color: var(--text-dim); border-color: var(--line-strong); }
+.menu-form { display: grid; gap: 10px; }
+.menu-input, .menu-select { width: 100%; min-height: 34px; padding: 4px 8px; font-family: var(--body); font-size: var(--fs-3); color: var(--text); background: var(--night-1); border: 1px solid var(--line-strong); }
+.menu-input[aria-invalid="true"] { border-color: var(--gold); }
+.menu-submit { justify-self: start; padding: 8px 0; color: var(--text); border-bottom: 1px solid var(--gold); }
+.menu-submit:hover { color: var(--gold); }
+@keyframes menu-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@media (max-width: 759px) { .menu-item { min-height: 44px; } }
+
+/* the "did you do it?" line of HOY, above everything else on the sheet */
+.hoy .prompt { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px; padding: 10px 14px; border-left: 2px solid var(--ink-accent); background: var(--line); }
+.hoy .prompt-text { flex: 1 1 auto; }

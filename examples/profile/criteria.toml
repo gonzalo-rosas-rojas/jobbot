@@ -1,0 +1,66 @@
+# Scoring and application criteria (example values for a fictional person: edit them for yourself).
+floor_monthly_usd = 3000       # the pay floor: a posting that states less is held back, never auto-applied
+target_monthly_usd = [5000, 7000]
+apply_threshold = 60
+daily_cap = 25                 # daily cap once the first reviewed applications are approved
+daily_cap_until_reviewed = 10  # daily cap until first_n_reviewed have been approved
+company_cooldown_days = 90
+first_n_reviewed = 5
+warmup_days = 14
+priority_companies = []        # companies that matter most: held back during the warm-up
+review_dry_runs_per_run = 5    # new dry runs per run while the first applications still need review
+max_posting_age_days = 45      # an older posting is withdrawn instead of sent (probably already filled)
+
+# Extra open places. Whole lowercase words; a posting that names one of these places passes the region filter,
+# unless it demands the right to work without offering sponsorship or relocation. Their threshold is lower and
+# they are never held back for being under the pay floor. Empty the list to turn this off.
+extra_open_places = ["australia", "sydney", "melbourne", "brisbane", "perth", "adelaide", "canberra", "anz", "new south wales", "queensland"]
+extra_open_apply_threshold = 25
+# Only a title with one of these words wins that threshold: the first run queued sales, legal and marketing
+# postings, and this user wants a software job. Everything else uses the normal threshold. Empty the list to let
+# every title win it.
+extra_open_title_words = [
+  "engineer", "engineering", "developer", "architect", "software", "devops", "sre", "platform",
+  "data", "machine learning", "ml", "ai", "technical", "programmer", "security", "systems",
+  "solutions", "cloud", "infrastructure", "backend", "frontend", "full stack", "full-stack",
+  "fullstack", "reliability", "automation",
+]
+
+# Technologies the user has worked with. They only add to the fit: asking for another language never subtracts.
+skills = [
+  "typescript", "javascript", "python", "golang", "react", "next.js", "node.js",
+  "fastapi", "postgresql", "pgvector", "redis", "docker", "aws", "llm", "rag",
+  "embeddings", "mcp", "agents", "openai", "anthropic", "claude", "gemini", "qwen",
+  "ollama", "llama.cpp", "voice ai", "prompt engineering", "playwright", "graphql",
+  "rest api",
+]
+
+[weights]
+fit = 30
+compensation = 15
+stability = 20
+learning = 15
+interview_style = 10
+other = 10
+
+[titles]
+# A bare "agent" is not here: it matched "Customer Support Agent" and "Insurance Agent".
+tier1 = ["applied ai", "ai engineer", "llm", "ai agent", "agentic", "agent engineer", "full-stack", "full stack", "fullstack", "ai software engineer"]
+tier2 = ["architect", "staff engineer", "principal engineer", "solutions engineer"]
+tier3 = ["automation engineer", "workflow automation", "ai automation", "automation specialist"]
+
+[signals]
+domain = [
+  "applied ai", "generative ai", "genai", "ai-powered", "llm", "agentic", "ai agent",
+  "machine learning", "full-stack", "full stack", "fullstack", "software architecture",
+  "system design", "distributed systems", "product engineering",
+]
+seniority_pos = ["senior", "sr", "staff", "principal", "lead", "architect"]
+seniority_neg = ["junior", "jr", "intern", "internship", "entry level", "entry-level", "graduate", "trainee"]
+stability_pos = ["full-time", "full time", "permanent", "employee", "w-2", "indefinido", "employer of record", "eor", "benefits", "paid time off", "health insurance"]
+stability_neg = ["contractor", "freelance", "hourly", "per hour", "1099", "fixed-term"]
+learning = ["mentor", "mentorship", "senior team", "engineering culture", "learning budget", "cutting-edge", "research", "open source", "state-of-the-art"]
+interview_pos = ["take-home", "take home", "pair programming", "ai-assisted", "ai tools", "build something"]
+interview_neg = ["leetcode", "whiteboard", "data structures and algorithms", "algorithmic"]
+other_pos = ["latam", "latin america", "chile", "americas", "eastern time", "us time zones", "relocation assistance", "relocation support", "relocation package", "we sponsor"]
+china = ["china", "shanghai", "beijing", "shenzhen", "hangzhou"]

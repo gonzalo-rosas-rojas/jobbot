@@ -1,0 +1,84 @@
+/* The frame of the stage (spec §3.1, §3.11, §4.5, §4.6, §4.7): the document, the sticky 100svh stage, the sky under everything, the
+   shell on top of it, the HUD, the stops bar, the bottom bar and the icon. The dial is dial.css and the glass sheet is sheet.css.
+   Text in the HUD and the bar is --text, --text-dim or --gold, never --text-faint: they sit on the sky, and test/ui.frame.test.mjs
+   measures that over the ten stops of it. Under 760 px there is no stage at all (a plain page, §3.11): the media query at the end
+   is the one place CSS decides it, and src/scene/flat.js uses the same number. */
+
+.doc { position: relative; overflow: clip; }
+.stage { position: sticky; top: 0; height: 100vh; height: 100svh; overflow: clip; background: var(--night-1); isolation: isolate; }
+.stop-spacer { height: 100vh; height: 100svh; }
+#sky { position: absolute; inset: 0; width: 100%; height: 100%; display: block; z-index: 0; }
+/* the near layers of the city, painted by stage/stage.js on a canvas of their own right over the dial (z 3) and under the shell (z 10) */
+.sky-front { position: absolute; inset: 0; width: 100%; height: 100%; display: block; z-index: 4; pointer-events: none; }
+#shell { position: absolute; inset: 0; z-index: 10; pointer-events: none; }
+#shell > * { pointer-events: auto; }
+
+.hud { position: absolute; top: 0; left: 0; right: 0; height: var(--hud); z-index: 20; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; column-gap: 24px; padding: 0 var(--gutter); color: var(--text-dim); }
+/* The text of the HUD and of the bar is --text-dim on the sky, which at mid-day is 4.1 to 4.5:1 and under the glow of the docked sun a
+   good deal less (review M3; test/ui.contrast.browser.test.mjs measures it on the pixels). So each is painted over a scrim of --night-0
+   that is part of its own box: a gradient that fades out under the strip, and a soft patch behind the one button of the bar. */
+.hud::before { content: ""; position: absolute; inset: 0 0 -18px 0; z-index: -1; pointer-events: none;
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--night-0) 52%, transparent), color-mix(in srgb, var(--night-0) 32%, transparent) 60%, transparent); }
+.hud-left { display: flex; align-items: baseline; gap: 0.9em; min-width: 0; white-space: nowrap; }
+.hud-brand { color: var(--text); letter-spacing: 0; }
+.hud-stop { overflow: hidden; text-overflow: ellipsis; }
+.hud-center { position: relative; }
+.hud-right { display: flex; justify-content: flex-end; align-items: center; gap: 22px; min-width: 0; }
+/* It wraps (balanced, two lines at 1440) instead of being cut: the window and the run are the only thing that says the bot's state, and 56 px holds three lines. */
+.hud-status { min-width: 0; text-align: right; text-wrap: balance; line-height: 1.35; }
+.hud-search { display: inline-flex; align-items: center; gap: 3px; flex: none; }
+.hud-search .icon { display: none; }
+.hud-search kbd, .bar-help kbd { color: var(--text); border-color: color-mix(in srgb, var(--text) 30%, transparent); }   /* the chips are small and thin: the brighter of the two inks; the HUD sits on the sky, so Papel's dark line token would vanish there */
+.hud-search:hover kbd { border-color: var(--text-dim); }
+.hud-search-word { margin-left: 5px; color: var(--text-dim); }
+.hud-search:hover .hud-search-word { color: var(--text); }
+.hud-clock { flex: none; min-width: 5ch; text-align: right; color: var(--text); }
+
+.stops { position: relative; }
+.stops-list { display: flex; justify-content: center; gap: 36px; }
+.stop { position: relative; display: inline-flex; align-items: baseline; gap: 0.55em; padding: 4px 0; white-space: nowrap; color: var(--text-dim); }
+.stop:hover { color: var(--text); }
+.stop-count { color: var(--text); }
+.stop[aria-selected="true"], .stop[aria-selected="true"] .stop-count { color: var(--gold); }
+.stop[aria-selected="true"]::after { content: ""; position: absolute; left: 0; right: 0; bottom: -3px; height: 1px; background: var(--gold); }
+.stop-here { display: none; position: absolute; left: 0; top: calc(100% + 4px); white-space: nowrap; color: var(--text-dim); }
+.stop[aria-selected="true"] .stop-here { display: block; }
+.stop-dot { width: 6px; height: 6px; align-self: center; border-radius: 50%; border: 1.5px solid var(--text-dim); }
+.stop-dot[data-state="recent"] { background: var(--text); border-color: var(--text); }
+.stops-night { display: none; position: absolute; left: 50%; top: calc(100% + 4px); transform: translateX(-50%); white-space: nowrap; color: var(--text-dim); }
+.stops[data-at="prologo"] .stops-night { display: block; }
+
+.bar { position: absolute; right: var(--gutter); bottom: 0; height: 40px; z-index: 20; display: flex; align-items: center; }
+.bar::before { content: ""; position: absolute; inset: 2px -22px 2px -22px; z-index: -1; pointer-events: none;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--night-0) 78%, transparent) 55%, transparent); }
+.bar-help { display: inline-flex; align-items: center; gap: 10px; color: var(--text-dim); }
+.bar-help:hover { color: var(--text); }
+
+.icon { width: 16px; height: 16px; flex: none; vertical-align: -3px; }
+.icon-lg { width: 20px; height: 20px; }
+symbol[id^="i-"] { stroke-width: 1.5; }
+
+@media (max-width: 1279px) { .hud-status { display: none; } }
+
+/* A narrow desktop window or a zoomed screen (a 1920 one at 200 % is 960 px): the stops bar keeps its centre, so the sides shrink: the
+   name of the stop goes (the lit tab says it), the stops come closer and the key of the palette is the lens alone. */
+@media (max-width: 1023px) {
+  .hud-stop, .hud-search kbd, .hud-search-word { display: none; }
+  .hud-search .icon { display: block; }
+  .stops-list { gap: 18px; }
+}
+
+@media (max-width: 759px) {
+  .stage { position: relative; height: auto; min-height: 100vh; min-height: 100svh; overflow: visible; }
+  #sky, #dial, .stop-spacer { display: none; }
+  .hud::before, .bar::before { display: none; }          /* the flat page has no sky: its HUD is a solid strip */
+  #shell { position: relative; inset: auto; }
+  .hud { position: sticky; top: 0; height: auto; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "left right" "center center"; row-gap: 4px; padding: 8px 16px; background: var(--night-0); }
+  .hud-left { grid-area: left; }
+  .hud-right { grid-area: right; gap: 14px; }
+  .hud-center { grid-area: center; overflow-x: auto; padding-bottom: 5px; }      /* the strip scrolls sideways, which clips what hangs below it: the underline of the lit tab */
+  .stops-list { justify-content: flex-start; gap: 22px; }
+  .stop-key, .stop-here, .stops-night, .hud-search kbd, .hud-search-word { display: none !important; }
+  .hud-search .icon { display: block; }
+  .bar { position: static; height: 56px; justify-content: center; }
+}

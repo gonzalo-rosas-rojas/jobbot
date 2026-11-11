@@ -1,61 +1,61 @@
 <#
 .SYNOPSIS
-  Registers the scheduled task that runs "run-daily" every hour, without a window and without storing a password.
+  Registra la tarea programada que corre "run-daily" cada hora, sin ventana y sin guardar claves.
 
 .DESCRIPTION
-  Creates the task "\jobbot\run-daily" for the user running this script. The task is named after the program so
-  it is easy to find and remove; change the name and folder with -TaskName and -TaskPath.
+  Crea la tarea "\Personal\jobbot run-daily" para el usuario que corre este script. El nombre dice lo que es y la tarea
+  se ve en la lista del Programador: una tarea que esconde lo que corre parece malware a quien revise el equipo.
 
-  Every hour the program itself decides: inside the run window it runs run-daily (discovery has its own 6-hour
-  cap); outside it, or with STOP, it exits at once without touching anything. That is why the trigger does not need
-  to know about schedules.
+  Cada hora el propio programa decide: dentro de la ventana de ejecucion corre run-daily (el descubrimiento tiene su
+  propio tope de 6 horas); fuera de ella, o con STOP, sale al instante sin tocar nada. Por eso el disparador no tiene
+  que saber de horarios.
 
-  How it runs:
-    - LogonType Interactive: only while your Windows session is signed in (locked is fine). No password is stored,
-      and the Claude session lives in your already-loaded profile. S4U would also run without a session, but then
-      the profile and the credential are not where the program expects them, so it is not used.
-    - RunLevel Limited: no administrator privileges.
-    - Without a console window: the command is wrapped in "conhost.exe --headless", which starts the console
-      without a window, so nothing flashes on screen every hour. -ShowWindow skips the wrapper (for debugging).
-      The task itself is not hidden: Task Scheduler lists it under \jobbot\.
-    - WorkingDirectory = the repository root, so the program finds profile\ and data\.
-    - No inherited variables: a task does NOT inherit the variables of the window you created it from; its
-      environment is built at start from the user's and the system's, and %USERPROFILE% can point to
-      C:\Users\Default if the profile is not loaded (KB 2968540). So nothing depends on them: the executable goes with
-      an absolute path (-Exe) and the Claude config directory with an absolute path in profile\claude.toml.
-    - -StartWhenAvailable (if the PC was off, it runs when it is back), -MultipleInstances IgnoreNew (a long run is
-      not stepped on by the next one) and an -ExecutionTimeLimit of 2 hours.
+  Como corre:
+    - LogonType Interactive: solo con tu sesion de Windows iniciada (bloqueada vale). No se guarda ninguna clave, y la
+      sesion de Claude vive en tu perfil ya cargado. S4U correria tambien sin sesion, pero entonces el perfil y la
+      credencial no estan donde el programa los espera: no se usa.
+    - RunLevel Limited: sin privilegios de administrador.
+    - Sin consola: el comando va envuelto en "conhost.exe --headless", que arranca la consola sin ventana, para que no
+      salte una ventana cada hora. La tarea no lleva la propiedad "Hidden" (que solo la esconderia de la lista). Con
+      -ShowWindow se omite el envoltorio (para depurar).
+    - WorkingDirectory = la raiz del repositorio, para que el programa encuentre profile\ y data\.
+    - Sin variables heredadas: una tarea NO hereda las variables de la ventana donde la creaste; su entorno se arma al
+      arrancar con las del usuario y del sistema, y %USERPROFILE% puede apuntar a C:\Users\Default si el perfil no esta
+      cargado (KB 2968540). Por eso nada depende de ellas: el ejecutable va con ruta absoluta (-Exe) y el directorio de
+      configuracion de Claude con ruta absoluta en profile\claude.toml.
+    - -StartWhenAvailable (si el PC estaba apagado, corre al volver), -MultipleInstances IgnoreNew (una corrida larga
+      no se pisa con la siguiente) y -ExecutionTimeLimit de 2 horas.
 
-  The command it runs is scripts\run-daily.cmd, which calls the executable, rotates the log (data\logs\jobbot.log)
-  and discards the log of the hours outside the window.
+  El comando que ejecuta es scripts\run-daily.cmd, que llama al ejecutable, rota el registro (data\logs\jobbot.log) y
+  descarta el registro de las horas fuera de ventana.
 
-  This script never runs by itself or on install: you run it when you want the bot to work on its own. Before that,
-  look at what it would do with -DryRun (or -WhatIf).
+  Este script NO se corre solo ni al instalar nada: tu lo ejecutas, cuando quieras que el bot trabaje solo. Antes,
+  mira lo que haria con -DryRun (o -WhatIf).
 
-  A git worktree is NOT the place: the task would point at a temporary folder (its target\release, its
-  run-daily.cmd, its profile\ and its data\) that is deleted when the branch is done. If this script is in a linked
-  worktree (its ".git" is a file, not a folder), it warns in red and requires an explicit -Exe outside the
-  worktree; with -DryRun it only shows the red warning. The safe place is the main checkout.
+  Un worktree de git NO es el lugar: la tarea quedaria apuntando a una carpeta temporal (su target\release, su
+  run-daily.cmd, su profile\ y su data\) que se borra cuando termina la rama. Si este script esta en un worktree
+  enlazado (su ".git" es un archivo, no una carpeta), avisa en rojo y exige -Exe explicito, fuera del worktree; con
+  -DryRun solo muestra el aviso rojo. Lo seguro es correrlo desde el checkout principal.
 
 .PARAMETER Exe
-  jobbot executable, absolute path. Default: target\release\jobbot.exe at the root of the repository holding this
-  script (build it first with "cargo build --release"). From a linked worktree it is required and cannot be inside
-  that worktree.
+  Ejecutable de jobbot, ruta absoluta. Por defecto, target\release\jobbot.exe en la raiz del repositorio donde esta este
+  script (compilalo antes con "cargo build --release"). Desde un worktree enlazado es obligatorio y no puede estar
+  dentro de ese worktree.
 
 .PARAMETER TaskName
-  Task name. Default "run-daily".
+  Nombre de la tarea. Por defecto "jobbot run-daily".
 
 .PARAMETER TaskPath
-  Task folder in Task Scheduler. Default "\jobbot\".
+  Carpeta de la tarea en el Programador. Por defecto "\Personal\".
 
 .PARAMETER EveryMinutes
-  How many minutes between triggers. Default 60.
+  Cada cuantos minutos se dispara. Por defecto 60.
 
 .PARAMETER ShowWindow
-  Does not hide the console (to watch a run while debugging).
+  No esconde la consola (para ver una corrida mientras depuras).
 
 .PARAMETER DryRun
-  Only prints what it would register. It does not touch Task Scheduler and does not require the executable to exist.
+  Solo imprime lo que registraria. No toca el Programador de tareas ni exige que exista el ejecutable.
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File scripts\schedule.ps1 -DryRun
@@ -66,8 +66,8 @@
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
     [string]$Exe = '',
-    [string]$TaskName = 'run-daily',
-    [string]$TaskPath = '\jobbot\',
+    [string]$TaskName = 'jobbot run-daily',
+    [string]$TaskPath = '\Personal\',
     [ValidateRange(5, 1440)][int]$EveryMinutes = 60,
     [switch]$ShowWindow,
     [switch]$DryRun
@@ -107,42 +107,42 @@ $now = Get-Date
 $start = $now.Date.AddHours($now.Hour + 1).AddMinutes(5)
 
 Write-Host ''
-Write-Host 'What would be registered:'
-Write-Host ('  Task:         {0}{1}' -f $TaskPath, $TaskName)
-Write-Host ('  User:         {0}  (LogonType Interactive, RunLevel Limited; no stored password)' -f $userId)
-Write-Host ('  Program:      {0} {1}' -f $execute, $argument)
-Write-Host ('  Folder:       {0}' -f $root)
-Write-Host ('  Trigger:      every {0} min from {1:yyyy-MM-dd HH:mm}' -f $EveryMinutes, $start)
-Write-Host '  Settings:     StartWhenAvailable, single instance (IgnoreNew), 2 h limit, runs on battery'
-Write-Host ('  Executable:   {0}  ({1})' -f $Exe, $(if (Test-Path -LiteralPath $Exe) { 'exists' } else { 'does NOT exist yet' }))
+Write-Host 'Lo que se registraria:'
+Write-Host ('  Tarea:        {0}{1}' -f $TaskPath, $TaskName)
+Write-Host ('  Usuario:      {0}  (LogonType Interactive, RunLevel Limited; sin clave guardada)' -f $userId)
+Write-Host ('  Programa:     {0} {1}' -f $execute, $argument)
+Write-Host ('  Carpeta:      {0}' -f $root)
+Write-Host ('  Disparador:   cada {0} min desde {1:yyyy-MM-dd HH:mm}' -f $EveryMinutes, $start)
+Write-Host '  Ajustes:      visible en la lista, sin ventana, StartWhenAvailable, una sola instancia (IgnoreNew), limite de 2 h, corre con bateria'
+Write-Host ('  Ejecutable:   {0}  ({1})' -f $Exe, $(if (Test-Path -LiteralPath $Exe) { 'existe' } else { 'NO existe todavia' }))
 Write-Host ''
 
 if ($inWorktree) {
-    Write-Host 'WARNING: this script is in a git worktree, not in the main checkout.' -ForegroundColor Red
-    Write-Host ('  The task would point at {0}: its run-daily.cmd, its profile\ and its data\ (the working folder)' -f $root) -ForegroundColor Red
-    Write-Host '  and would break the day the worktree is deleted. Register it from the main checkout.' -ForegroundColor Red
+    Write-Host 'AVISO: este script esta en un worktree de git, no en el checkout principal.' -ForegroundColor Red
+    Write-Host ('  La tarea quedaria apuntando a {0}: su run-daily.cmd, su profile\ y su data\ (la carpeta de trabajo)' -f $root) -ForegroundColor Red
+    Write-Host '  y se rompe el dia que se borre el worktree. Registrala desde el checkout principal.' -ForegroundColor Red
     if (-not $exeGiven) {
-        Write-Host '  Without an explicit -Exe, a real registration is refused (with -DryRun only this warning is shown).' -ForegroundColor Red
+        Write-Host '  Sin -Exe explicito, un registro real se niega (con -DryRun solo se muestra este aviso).' -ForegroundColor Red
     } elseif ($exeInsideWorktree) {
-        Write-Host '  The given -Exe is inside the worktree: a real registration is refused.' -ForegroundColor Red
+        Write-Host '  El -Exe dado esta dentro del worktree: un registro real se niega.' -ForegroundColor Red
     }
     Write-Host ''
 }
 
 if ($DryRun) {
-    Write-Host 'DryRun: nothing was registered.'
+    Write-Host 'DryRun: no se registro nada.'
     return
 }
 
 if ($inWorktree -and (-not $exeGiven -or $exeInsideWorktree)) {
-    throw "This is a git worktree ($root): pass -Exe with the absolute path of a jobbot.exe outside it, or run the script from the main checkout."
+    throw "Esto es un worktree de git ($root): pasa -Exe con la ruta absoluta de un jobbot.exe fuera de el, o corre el script desde el checkout principal."
 }
 
 if (-not (Test-Path -LiteralPath $Exe)) {
-    throw "Missing $Exe. Run first: cargo build --release"
+    throw "Falta $Exe. Ejecuta primero: cargo build --release"
 }
 if (-not (Test-Path -LiteralPath $wrapper)) {
-    throw "Missing $wrapper."
+    throw "Falta $wrapper."
 }
 
 $action = New-ScheduledTaskAction -Execute $execute -Argument $argument -WorkingDirectory $root
@@ -155,11 +155,11 @@ $principal = New-ScheduledTaskPrincipal -UserId $userId -LogonType Interactive -
 if ($PSCmdlet.ShouldProcess(('{0}{1}' -f $TaskPath, $TaskName), 'Register-ScheduledTask')) {
     Register-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -Action $action -Trigger $trigger `
         -Settings $settings -Principal $principal -Force | Out-Null
-    Write-Host ('Task registered: {0}{1}' -f $TaskPath, $TaskName)
+    Write-Host ('Tarea registrada: {0}{1}' -f $TaskPath, $TaskName)
     Get-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName | Format-List TaskPath, TaskName, State
     Write-Host ''
-    Write-Host ('Try it now:         Start-ScheduledTask -TaskPath "{0}" -TaskName "{1}"' -f $TaskPath, $TaskName)
-    Write-Host 'See the last run:   jobbot status   (shows when it ran, how it ended and which Claude account it used)'
-    Write-Host 'Stop everything:    jobbot stop     (or create the STOP file)'
-    Write-Host 'Remove it:          powershell -ExecutionPolicy Bypass -File scripts\unschedule.ps1'
+    Write-Host ('Probarla ahora:     Start-ScheduledTask -TaskPath "{0}" -TaskName "{1}"' -f $TaskPath, $TaskName)
+    Write-Host 'Ver la ultima:      jobbot status   (muestra cuando corrio, como termino y que cuenta de Claude uso)'
+    Write-Host 'Detener todo:       jobbot stop     (o crea el archivo STOP)'
+    Write-Host 'Quitarla:           powershell -ExecutionPolicy Bypass -File scripts\unschedule.ps1'
 }

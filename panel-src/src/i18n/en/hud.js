@@ -1,0 +1,25 @@
+// English, the words of the frame: the HUD, the stops bar, the bottom bar and the toast. The names of the five stops are the `tab.*` keys of
+// common.js (the prologue joins them here). The Spanish twin is ../es/hud.js: same keys, same {variables}.
+export default {
+  "tab.prologo": "Last night",
+  "hud.brand": "Panel",
+  "hud.window.open": "Window open, closes {until}",
+  "hud.window.closed": "Closed, opens {when}",
+  "hud.window.closedNoNext": "Window closed",
+  "hud.window.unknown": "Window: no data",
+  "hud.run.ago": "Last run {ago}",
+  "hud.run.never": "No run yet",
+  "stops.aria": "Stops",
+  "stops.here": "You are here",
+  "stops.count.procesos.one": "{n} live process",
+  "stops.count.procesos.other": "{n} live processes",
+  "stops.count.cola.one": "{n} to approve",
+  "stops.count.cola.other": "{n} to approve",
+  "stops.count.aprender.one": "{n} review pending",
+  "stops.count.aprender.other": "{n} reviews pending",
+  "stops.engine.recent": "engine up to date",
+  "stops.engine.stale": "engine behind",
+  "stops.engine.never": "engine has never run",
+  "bar.help": "Shortcuts",
+  "toast.undo": "Undo",
+};

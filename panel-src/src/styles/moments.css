@@ -1,0 +1,189 @@
+/* The moments' own surfaces (spec §5). HOY is here; T18 and the later floors add their sections below, each one under its own
+   root class (.hoy, .procesos, .cola…) so a generic name such as `.row` or `.meta` never leaks from one moment into another. Text on
+   the sheet is --ink, --ink-dim and --ink-accent (Papel swaps them with the sheet, §2.2); no hex colour and no font size outside
+   the closed scale of tokens.css: sizes are var(--fs-N). Labels get their face from the global `.label`, values from `.mono`. Text that comes
+   from outside (a company, a role, a subject) wraps or is cut at the edge of its box and is isolated for bidi: it never pushes
+   the sheet wider. */
+
+/* ---------------------------------------------------------------- HOY (§5.1, board/relay2/hoy-1920.png) */
+.sheet[data-moment="hoy"] { padding-top: 28px; }
+/* flex: none keeps the section as tall as its content: the sheet measures what it holds and only then does the host scroll */
+.hoy { flex: none; display: flex; flex-direction: column; gap: clamp(8px, 1.2vh, 18px); color: var(--ink); }
+.hoy .co, .hoy .role, .hoy .why, .hoy .s-co, .hoy .s-line, .hoy .next-title, .hoy .next-sub, .hoy .meta { overflow-wrap: anywhere; unicode-bidi: isolate; }
+.hoy .eyebrow, .hoy .strip-title, .hoy .base, .hoy .fig-l, .hoy .rest-label, .hoy .rest-hint, .hoy .since-title, .hoy .foot-line, .hoy .snoozed-title, .hoy .after, .hoy .more { color: var(--ink-dim); }
+/* the public demo's line about itself: in the flow, the first thing of the sheet, in the grey of the labels, its links gold and underlined */
+.hoy .about { max-width: 78ch; color: var(--ink-dim); line-height: 1.4; overflow-wrap: anywhere; }
+.hoy .about a { color: var(--ink-accent); text-decoration: underline; text-underline-offset: 3px; }
+
+.hoy .headline { display: flex; flex-wrap: wrap; gap: 4px 32px; align-items: flex-end; justify-content: space-between; }
+/* the headline is one run of the display face in the ink colour: the serif is the person's voice (a whole sentence, never one word) and gold is what is his to do (spec §4.2) */
+/* --fs-6, not --fs-7 (2026-10-24): at 120 px the headline and the figures were all the squint test kept, and LO SIGUIENTE came fourth */
+.hoy .mega { font-size: var(--fs-6); line-height: 0.9; letter-spacing: -0.012em; color: var(--ink); outline: none; }
+.hoy .ask { padding-bottom: 12px; text-align: right; color: var(--ink-accent); }
+
+/* the night's receipts, under the work: four figures on the left, the strip of the 48 half hours on the right. They are context, so they are
+   --fs-5: at --fs-6 they outweighed the one thing to do */
+.hoy .receipts { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, 28%); gap: 8px 40px; align-items: end; padding-top: clamp(4px, 0.8vh, 10px); }   /* the rows above end on their own rule */
+.hoy .figs { display: flex; flex-wrap: wrap; gap: 10px clamp(18px, 1.8vw, 40px); }
+/* in the markup the label comes first (what a reader of the page hears first); on the screen the number does */
+.hoy .fig { display: flex; flex-direction: column-reverse; justify-content: flex-end; gap: 2px; }
+.hoy .fig-n { font-size: var(--fs-5); line-height: 1; letter-spacing: -0.01em; color: var(--ink); }
+.hoy .fig-n[data-gold="true"] { color: var(--ink-accent); }
+.hoy .fig-l { white-space: nowrap; }
+.hoy .strip-wrap { display: grid; gap: 4px; justify-items: end; text-align: right; }
+.hoy .strip-box { width: 100%; }
+.hoy .strip { display: block; width: 100%; height: 36px; color: var(--ink); }
+.hoy .strip .seen { fill: currentColor; opacity: 0.85; }
+.hoy .strip pattern line { stroke: var(--ink-dim); stroke-width: 0.8; opacity: 0.55; }
+
+/* LO SIGUIENTE: the one strong thing, with its three buttons */
+.hoy .next-slot { position: relative; }
+.hoy .next { display: grid; gap: 6px; padding: 2px 0 2px 22px; border-left: 2px solid var(--ink-accent); }
+.hoy .next-eyebrow { display: flex; flex-wrap: wrap; gap: 4px 6px; color: var(--ink-dim); }
+.hoy .next-eyebrow .gold { color: var(--ink-accent); font-weight: 600; }
+.hoy .next-eyebrow > * + *::before { content: "· "; }
+.hoy .next-title { font-family: var(--body); font-size: var(--fs-5); font-weight: 600; line-height: 1.12; letter-spacing: -0.014em; color: var(--ink); max-width: 52ch; }
+.hoy .next-title .co:not([hidden]) + .role::before { content: " · "; color: var(--ink-dim); font-weight: 400; }
+.hoy .next-title .co { font-weight: 600; }
+.hoy .next-title .role { font-weight: 400; }
+.hoy .next-sub { font-size: var(--fs-2); color: var(--ink-dim); }
+.hoy .next .acts { display: flex; flex-wrap: wrap; gap: 8px 28px; padding-top: 4px; justify-content: flex-start; }
+.hoy .after { position: absolute; right: 0; bottom: 4px; text-align: right; }
+
+/* the rows: one line each, the kind in mono, the key and its verb at the right */
+.hoy .rest { display: grid; gap: 6px; }
+.hoy .rest-head { display: flex; flex-wrap: wrap; gap: 4px 18px; align-items: baseline; }
+.hoy .rest-head .more { margin-left: auto; }
+.hoy .rows { display: block; max-height: calc(7 * 36px); overflow-y: auto; overscroll-behavior-y: contain; border-bottom: 1px solid var(--line); }
+.hoy .row { display: grid; grid-template-columns: calc(var(--fs-1) * 10.5) minmax(0, 1fr) auto minmax(128px, auto); align-items: center; gap: 4px 18px; min-height: 36px; padding: 1px 0; border-top: 1px solid var(--line); font-size: var(--fs-3); }
+.hoy .row .kind { color: var(--ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hoy .row .what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hoy .row .co { font-weight: 600; }
+.hoy .row .co:not([hidden]) + .role::before { content: " · "; color: var(--ink-dim); }
+.hoy .row .why { color: var(--ink-dim); }
+.hoy .row .why:not([hidden])::before { content: " · "; }
+.hoy .meta { color: var(--ink-dim); white-space: nowrap; }
+.hoy .row .meta { max-width: 40ch; overflow: hidden; text-overflow: ellipsis; }
+.hoy .acts { display: inline-flex; flex-wrap: wrap; gap: 8px 22px; justify-content: flex-end; }
+.hoy .row .acts { justify-self: end; flex-wrap: nowrap; }
+.hoy .row[data-cursor="true"], .hoy .next[data-cursor="true"] { background: linear-gradient(90deg, var(--line), transparent 78%); }
+/* a row that a click opens shows the hand, and its name underlines under the pointer (not while the pointer is on one of its buttons) */
+.hoy [data-opens="true"] { cursor: pointer; }
+.hoy .row[data-opens="true"]:hover:not(:has(button:hover)) :is(.co, .role), .hoy .next[data-opens="true"]:hover:not(:has(button:hover)) .next-title { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.hoy [data-pending] { opacity: 0.3; pointer-events: none; }
+.hoy [data-fresh] { box-shadow: inset 2px 0 0 var(--ink-accent); animation: hoy-in 150ms var(--ease) both; }
+.hoy .row.skeleton { min-height: 36px; background: var(--line); opacity: 0.4; }
+.hoy .more { padding: 2px 0; }
+.hoy .more:hover { color: var(--ink); }
+@keyframes hoy-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* since the last visit */
+.hoy .since { display: grid; gap: 6px; }
+.hoy .since-rows { display: block; }
+.hoy .srow { display: grid; grid-template-columns: 64px minmax(0, 190px) minmax(0, 210px) minmax(0, 1fr); gap: 4px 18px; align-items: baseline; min-height: 26px; padding: 2px 0; border-top: 1px solid var(--line); }
+.hoy .srow:last-child { border-bottom: 1px solid var(--line); }
+/* The gold strip of a new row is 2 px inside the row's left edge and the hour started at that edge: the strip sat over the first digit (19:58) and
+   A18 measured 1.43:1 there in Tinta and 1.99:1 in Papel. Every hour (not only the fresh ones, so the column stays straight) starts 8 px in; the
+   column is 64 px wide and the hour needs 35, and no other cell moves. */
+.hoy .srow .s-hour { padding-left: 8px; }
+.hoy .srow .s-co, .hoy .srow .s-type { color: var(--ink-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hoy .srow .s-line { min-width: 0; font-size: var(--fs-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* the empty line is one cell: in the four-column grid of a row it fell into the 64 px of the time and broke into one word per line */
+.hoy .srow.none { grid-template-columns: minmax(0, 1fr); color: var(--ink-dim); }
+
+/* the foot: the engine in one line, the snoozed in a fold */
+.hoy .foot { display: grid; gap: 8px; margin-top: auto; padding-top: 4px; }
+.hoy .snoozed-title { cursor: pointer; width: fit-content; }
+.hoy .snoozed-rows { display: block; padding-top: 6px; }
+.hoy .snoozed-row { display: grid; grid-template-columns: minmax(0, 190px) minmax(0, 1fr) auto auto; gap: 4px 18px; align-items: center; min-height: 34px; border-top: 1px solid var(--line); font-size: var(--fs-2); }
+.hoy .snoozed-row .act { color: var(--ink); }
+
+/* a laptop: the sheet keeps its width but the strip goes, so the same objects fit the same width. The four figures take about 690 px and
+   the strip wants 290 beside them, which a sheet of 960 does not have until the window is about 1800 wide: between 1500 and 1800 the
+   strip squeezed the figures into two rows (T24: "2 esperan tu aprobación" alone on the second one), so it goes from 1799 down. */
+@media (max-width: 1799px) {
+  .hoy .receipts { grid-template-columns: minmax(0, 1fr); }
+  .hoy .strip-wrap { display: none; }
+}
+
+/* A browser window is rarely as tall as the screen: HOY must fit the sheet without scrolling (the wheel belongs to the camera), so
+   as the window gets lower the rows and then the headline tighten, and under 880 px the part that is only background goes (T24 measured
+   1366x768, 1366x657, 1536x864, 1536x730 and 1280x720: HOY scrolled inside its sheet in every one of them before these steps). */
+@media (min-width: 760px) and (max-height: 1010px) {
+  .hoy .rows { max-height: calc(7 * 32px); }
+  .hoy .row { min-height: 32px; }
+  .hoy .row.skeleton { min-height: 32px; }
+  .hoy .srow { min-height: 23px; }
+  .hoy .receipts { padding-top: 10px; }
+  .hoy .strip { height: 28px; }
+}
+@media (min-width: 760px) and (max-height: 900px) {
+  .hoy .mega { font-size: var(--fs-5); line-height: 1; }
+  .hoy .ask { padding-bottom: 6px; }
+  /* 1440x900 kept HOY 4 px over its sheet (a scrollbar for nothing): a tighter receipts rule and since rows give back 8 */
+  .hoy .receipts { padding-top: 6px; }
+  .hoy .srow { padding: 1px 0; }
+}
+@media (min-width: 760px) and (max-height: 800px) {
+  .hoy .next-title { font-size: var(--fs-4); }
+}
+@media (min-width: 760px) and (max-height: 880px) {
+  .hoy .since { display: none; }
+}
+@media (min-width: 760px) and (max-height: 760px) {
+  .hoy .rows { max-height: calc(5 * 32px); }
+}
+/* the browser of a 1366x768 laptop leaves about 650 px: four rows and smaller figures keep the whole of HOY in view */
+@media (min-width: 760px) and (max-height: 700px) {
+  .hoy .rows { max-height: calc(4 * 32px); }
+  .hoy .fig-n { font-size: var(--fs-4); }
+}
+
+/* under 760 px (§3.11): the sheet is a block of the page, so the headline gets smaller and the rows fold in two lines */
+@media (max-width: 759px) {
+  .hoy .mega { font-size: var(--fs-5); line-height: 1; }
+  .hoy .ask { padding-bottom: 0; text-align: left; }
+  .hoy .receipts { grid-template-columns: minmax(0, 1fr); }
+  .hoy .strip-wrap { display: grid; justify-items: start; text-align: left; }
+  .hoy .figs { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 16px; }
+  .hoy .fig-l { white-space: normal; }
+  .hoy .next { padding-left: 14px; }
+  .hoy .next-eyebrow > * + *::before { content: none; }
+  .hoy .next-title { font-size: var(--fs-4); }
+  .hoy .after { position: static; padding-top: 6px; text-align: left; }
+  .hoy .rows { max-height: none; }
+  .hoy .row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "kind kind" "what acts" "meta acts"; padding: 8px 0; }
+  .hoy .row .kind { grid-area: kind; }
+  .hoy .row .what { grid-area: what; white-space: normal; }
+  .hoy .row .meta { grid-area: meta; white-space: normal; max-width: none; }
+  .hoy .row .acts { grid-area: acts; }
+  .hoy .row .act { color: var(--ink-accent); }
+  .hoy .srow { grid-template-columns: 56px minmax(0, 1fr); }
+  .hoy .srow .s-type, .hoy .srow .s-line { grid-column: 2; white-space: normal; }
+  .hoy .snoozed-row { grid-template-columns: minmax(0, 1fr) auto; }
+}
+
+/* ---------------------------------------------------------------- the prologue (§2.6): the copy on the left over the veil, never on a sheet */
+/* The veil is dark in both themes, so the prologue keeps the light tokens: Papel changes the sheet, and there is no sheet here (A18).
+   Only the eyebrow, at the top of the veil, is dim. The labels and the two lines below the figures sit lower, nearer the glow of the
+   horizon, and --text-dim measured 3.7 to 4.6:1 there on a 1280x720 window in daylight (A18 needs 4.5): they take the full ink. */
+.prologo { --ink: var(--text); --ink-dim: var(--text-dim); --ink-accent: var(--gold); display: flex; flex-direction: column; gap: clamp(14px, 2.4vh, 28px); max-width: 780px; padding-top: clamp(16px, 4vh, 56px); color: var(--ink); }
+.prologo .eyebrow { color: var(--ink-dim); }
+/* --fs-7 lives here and nowhere else (2026-10-24): the prologue is the one orchestrated moment of the panel; the working stops headline at --fs-6
+   and keep their figures at --fs-5, so what to do is what the eye lands on (docs/research/2026-10-24-anti-vibe/03-auditoria.md, the squint test). */
+.prologo .mega { font-size: var(--fs-7); line-height: 0.88; letter-spacing: -0.012em; text-transform: uppercase; outline: none; }
+.prologo .voice { font-size: var(--fs-6); line-height: 1; color: var(--ink-accent); }
+.prologo .figs { display: grid; grid-template-columns: repeat(2, minmax(0, max-content)); gap: 18px clamp(32px, 5vw, 80px); padding-top: clamp(8px, 2vh, 24px); }
+/* in the markup the label comes first (what a reader of the page hears first); on the screen the number does */
+.prologo .fig { display: flex; flex-direction: column-reverse; gap: 4px; }
+.prologo .fig-n { font-size: var(--fs-6); line-height: 1; letter-spacing: -0.01em; color: var(--ink); }
+.prologo .fig-n[data-gold="true"] { color: var(--ink-accent); }
+.prologo .fig-l { white-space: nowrap; }
+.prologo .go { align-self: flex-start; margin-top: clamp(6px, 2vh, 20px); padding: 10px 0; color: var(--ink); border-bottom: 1px solid var(--ink-accent); }
+.prologo .go:hover { color: var(--ink-accent); }
+
+@media (max-width: 759px) {
+  .prologo .mega { font-size: var(--fs-6); }
+  .prologo .voice { font-size: var(--fs-5); }
+  .prologo .figs { grid-template-columns: minmax(0, 1fr); }
+}

@@ -1,0 +1,18 @@
+/* The one action button (ui/act.js): a mono key and a verb, in HOY, COLA, APRENDER, SISTEMA, PROCESOS and the drawer. This is the only sheet that gives
+   it shape (size, weight, height, decoration); a stop or the drawer may place it or colour it, never redraw it. A button is never underlined at rest,
+   because that is what a link looks like: the verb underlines under the pointer, and the drawer's links (a) are the underlined ones. Armed, the
+   button is gold over any colour a stop gives it, and keeps its key and its verb (twoStep writes into .act-label). */
+.act { display: inline-flex; align-items: center; gap: 8px; min-height: 28px; padding: 0 2px; color: var(--ink-dim); font-size: var(--fs-2); font-weight: 600; text-decoration: none; white-space: nowrap; }
+.act .k { color: var(--ink-dim); font-weight: 400; }
+.act.primary { color: var(--ink); }
+.act.primary .k { color: var(--ink-accent); border-color: var(--ink-accent); }
+.act:hover .act-label { text-decoration: underline; text-underline-offset: 3px; }
+.act[disabled] { opacity: 0.5; cursor: default; }
+.act.armed, .act[data-armed] { color: var(--ink-accent) !important; }
+.act.armed .k, .act[data-armed] .k { color: var(--ink-accent) !important; border-color: var(--ink-accent) !important; }
+
+/* a phone (§3.11): as tall as a finger, and no keys */
+@media (max-width: 759px) {
+  .act { min-height: 44px; }
+  .act .k { display: none; }
+}

@@ -1,0 +1,16 @@
+/* The shortcut sheet: a dialog over a veil. Solid night, no glass (the sheet and the drawer are the two glass surfaces). */
+.help-back { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; background: var(--veil); }
+.help { --ink: var(--text); --ink-dim: var(--text-dim); --ink-accent: var(--gold); --line: rgba(233, 239, 247, 0.13); --line-strong: rgba(233, 239, 247, 0.3);
+  width: min(560px, 92vw); max-height: 86vh; overflow: auto; padding: 22px 26px 26px; background: var(--night-2); color: var(--text); border: 1px solid var(--line-strong); }
+.help-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+.help-head h3 { font-size: var(--fs-4); }
+.help-close { padding: 4px 12px; background: transparent; color: var(--text); border: 1px solid var(--line-strong); cursor: pointer; font-family: var(--body); font-size: var(--fs-1); }
+.help-ask { margin: 0 0 10px; font-family: var(--body); font-size: var(--fs-2); color: var(--text-dim); }
+.help-usage { margin: 0 0 18px; padding-left: 1.2em; font-family: var(--body); font-size: var(--fs-2); color: var(--text); }
+.help-usage li + li { margin-top: 6px; }
+.help-group + .help-group { margin-top: 18px; }
+.help-title { font-family: var(--body); font-size: var(--fs-1); font-weight: 400; letter-spacing: 0; color: var(--text-dim); margin-bottom: 8px; }
+.help dl { display: grid; grid-template-columns: 84px 1fr; gap: 8px 18px; margin: 0; align-items: baseline; }
+.help dt { margin: 0; }
+.help dd { margin: 0; font-family: var(--body); font-size: var(--fs-2); color: var(--text); }
+.help kbd.k { display: inline-block; min-width: 2.4em; padding: 1px 8px; text-align: center; font-family: var(--mono); font-size: var(--fs-1); color: var(--gold); border: 1px solid var(--line-strong); }

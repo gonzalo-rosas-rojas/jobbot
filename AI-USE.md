@@ -2,43 +2,53 @@
 
 ## How this code was written
 
-jobbot was written by Gonzalo Rosas Rojas working with Claude (Anthropic) in Claude Code. The author chose
-the goals, the architecture and the rules below, reviewed the changes, and decides what ships; Claude wrote
-most of the code and tests under that direction. Features were built test-first, and the layering rule in
-[docs/engineering/architecture.md](docs/engineering/architecture.md) is enforced by a test, so a change that
-breaks it fails the build rather than waiting for a reviewer to notice.
+jobbot was written by Jane Doe Garcia working with Claude (Anthropic) in Claude Code. The
+author set the goals, approved the specifications and plans, and decides what runs and what is
+published; Claude wrote most of the code, the tests and the documents under that direction, test
+first, often working through an approved plan without stopping, and each plan ends with an
+independent review. Two things keep that honest without relying on anyone's attention: the
+layering rule is a test (`tests/architecture.rs`), and the rules that protect the candidate are
+covered by property tests, a hostile-input corpus, fuzz targets and mutation testing
+([`docs/engineering/mutation-testing.md`](docs/engineering/mutation-testing.md)).
 
 ## How the program uses AI
 
-Claude is optional and narrow. It is called as a child process (`claude -p`) from `src/claude.rs`, and only to
-write two kinds of text: interview-preparation dossiers and freelance profile/proposal drafts. Everything that
-decides or acts is ordinary Rust code with tests: scoring, the exclusion rules, the application state machine,
-the answer bank, the CV tailoring (`src/cv.rs`), the run window and the daily caps.
+Claude is optional and narrow. It is called as a child process (`claude -p`, in
+`crates/jobbot-claude`) to write text only: interview dossiers, freelance profile and proposal
+drafts, and a connection check. Everything that decides or acts is ordinary Rust with tests:
+scoring, exclusions, the application state machine, the answer bank, the form planner, the CV
+tailoring, the execution window and the gate.
 
-Rules the code enforces, each with tests:
+Rules the code enforces:
 
-- **No invented experience.** The CV tailoring may only reorder skills already in `cv/cv-master.md` and add one
-  sentence, and it uses no model. Dossier stories are kept only when their evidence is a real line of the CV.
-- **Unknown answers stay unknown.** A question the answer bank cannot answer (an open "why us?", a legal
-  question, self-identification such as gender or ethnicity) is left blank and flagged for the user. In
-  `--live` mode the program does not click submit while a required answer is missing.
-- **Nothing is sent without a human in the loop at first.** The first applications are dry runs that save a
-  screenshot; the user approves them. Only then does the program submit on its own, within daily caps and a
-  per-company cool-down.
-- **Text from the outside world is data.** Job postings and e-mails are cleaned and length-limited, and
-  nothing in them is ever interpreted as an instruction.
-- **Limited exposure to the model.** Claude receives the posting and the CV with the contact line and any
-  excluded employer removed, runs in an empty working directory with no tools, and the environment variables
-  that choose the account or the payer are stripped.
-- **A spending limit.** `profile/claude.toml` sets a daily and a per-call budget; when the daily budget is
-  reached, no further call is made.
-- **A kill switch.** `jobbot stop` creates a `STOP` file. While it exists, every command that asks Claude for
-  text (dossier, freelance, claude-check, run-daily) refuses to start, run-daily looks again before each
-  dossier, and no flag overrides it; discover, prepare and submit stop too. Commands that only keep records
-  (approve, mark, prep and the like) keep working.
+- **No invented experience.** CV tailoring uses no model: it may only reorder skills the CV master
+  already lists and add one sentence. A dossier story is kept only when its evidence is a real line
+  of the CV.
+- **Unknown answers stay unknown.** A question the answer bank does not cover (an open "why us?", a
+  legal question, a self-identification question the user left empty) is left blank and flagged.
+  In `--live` mode the program does not click submit while a required answer is missing.
+- **A gate before every send.** `crates/jobbot-app/src/apply/gate.rs` checks, in order: the `STOP`
+  file, platforms that forbid bots, listing-only pages, the exclusion list, stale postings, the
+  daily cap (a lower one until the first applications are reviewed), the per-company cooldown, the
+  warm-up hold and manual approval during the review phase. Only the gate can make the token that
+  a live send requires, so sending without it does not compile.
+- **A person in the loop first.** The default is a dry run with a screenshot; `--assist` fills a
+  visible browser and leaves the click to the person; the first applications need approval.
+- **Never twice.** An intent is written before every irreversible act. A click whose outcome
+  nobody recorded (a run that stopped halfway) is counted as attempted and handed to the person;
+  the program never clicks it again.
+- **Strangers' text is data.** Postings and e-mails reach the model as JSON strings, cleaned and
+  cut; they are never read as instructions, and links are checked before the browser opens them.
+- **Limited exposure to the model.** Claude receives the posting and the CV without its contact
+  line and without excluded employers, runs with no tools in an empty folder outside the
+  repository, and without the environment variables that choose the account or the payer.
+- **A spending limit.** `profile/claude.toml` sets a daily and a per-call budget; at the daily
+  budget no further call is made.
+- **A kill switch.** `jobbot stop` creates the `STOP` file: every command that could send or call
+  Claude refuses to start while it exists, and no flag overrides it.
 
 ## Using it yourself
 
-The `profile/` and `cv/` files in this repository describe a fictional person. Replace them with your own
-before running anything against real postings, and read the answer bank (`profile/answers.toml`) line by line:
-those are the statements the program will make on your behalf.
+The `profile/` and `cv/` files in this repository describe a fictional person. Replace them with
+your own before running anything against real postings, and read `profile/answers.toml` line by
+line: those are the statements the program will make on your behalf.

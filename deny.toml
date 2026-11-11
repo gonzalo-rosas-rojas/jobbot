@@ -10,13 +10,15 @@ ignore = [
     # itself renders; it is not part of the shipped binary. Revisit when pdf-extract moves.
     { id = "RUSTSEC-2026-0192", reason = "dev-only (pdf-extract via lopdf), not in the binary; no safe upgrade exists" },
     # (The three zip 8 advisories ignored here before are gone: playwright-rs 0.20.1 builds with
-    # zip 9.)
+    # zip 9. Its build script still checks no hash of the driver it downloads, and jobbot runs that
+    # driver: scripts/verify-playwright-driver.ps1 checks it against the publishers' hashes after
+    # a version change.)
 ]
 
 [licenses]
 version = 2
 confidence-threshold = 0.9
-# jobbot itself is MIT-licensed (see LICENSE); it is not published to a registry.
+# jobbot itself has no license yet (the choice is the owner's); it is not published to a registry.
 private = { ignore = true }
 allow = [
     "MIT",

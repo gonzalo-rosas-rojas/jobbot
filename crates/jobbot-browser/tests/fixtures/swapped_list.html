@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Apply - a list that is swapped (test fixture)</title></head>
+<body>
+<!-- Nothing here is sent anywhere. A combobox whose list is replaced by another of the same length
+     a moment after the first key, as a search box does when the answer to an earlier request
+     arrives late: the position of an option read before the swap names a different option after
+     it. Choosing an option writes its text into the box. -->
+<h1>Apply for Senior AI Engineer</h1>
+<form id="app" onsubmit="return false">
+  <div><label for="school">School *</label>
+    <input id="school" type="text" role="combobox" aria-controls="school_list" aria-expanded="false" required></div>
+  <div><label for="resume">Resume/CV *</label> <input id="resume" type="file" required></div>
+</form>
+<ul id="school_list" role="listbox" style="display: none"></ul>
+<script>
+  const box = document.getElementById('school');
+  const list = document.getElementById('school_list');
+  const show = (names) => {
+    list.innerHTML = '';
+    names.forEach((name) => {
+      const item = document.createElement('li');
+      item.setAttribute('role', 'option');
+      item.textContent = name;
+      item.addEventListener('click', () => {
+        box.value = name;
+        list.style.display = 'none';
+      });
+      list.appendChild(item);
+    });
+  };
+  const before = ['Alpha University', 'Beta College', 'Gamma Institute'];
+  const after = ['Gamma Institute', 'Alpha University', 'Beta College'];
+  box.addEventListener('focus', () => { show(before); list.style.display = 'block'; });
+  box.addEventListener('click', () => { list.style.display = 'block'; });
+  let swapped = false;
+  box.addEventListener('input', () => {
+    list.style.display = 'block';
+    if (!swapped) {
+      swapped = true;
+      setTimeout(() => show(after), 80);
+    }
+  });
+</script>
+</body>
+</html>

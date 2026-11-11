@@ -1,35 +1,79 @@
 [workspace]
-members = [".", "crates/jobbot-domain"]
+members = [
+    ".",
+    "crates/jobbot-domain",
+    "crates/jobbot-app",
+    "crates/jobbot-browser",
+    "crates/jobbot-store",
+    "crates/jobbot-sources",
+    "crates/jobbot-claude",
+    "crates/jobbot-panel",
+    "crates/jobbot-testkit",
+    "xtask",
+]
 # Without this, a bare `cargo test` skips the domain's own tests.
-default-members = [".", "crates/jobbot-domain"]
+default-members = [
+    ".",
+    "crates/jobbot-domain",
+    "crates/jobbot-app",
+    "crates/jobbot-browser",
+    "crates/jobbot-store",
+    "crates/jobbot-sources",
+    "crates/jobbot-claude",
+    "crates/jobbot-panel",
+    "crates/jobbot-testkit",
+    "xtask",
+]
+# The cargo-fuzz targets are their own workspace: they need nightly and libFuzzer (Linux).
+exclude = ["fuzz"]
 resolver = "3"
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.95"
-license = "MIT"
-repository = "https://github.com/gonzalo-rosas-rojas/jobbot"
 # An application, not a library: nothing here is ever uploaded to a registry.
 publish = false
 
 # Versions of the dependencies two or more crates share live here, once.
 [workspace.dependencies]
+anyhow = "1.0.104"
+async-trait = "0.1.92"
 chrono = "0.4.45"
 chrono-tz = "0.10.4"
+getrandom = "0.4"
 html-escape = "0.2.15"
+pdf-extract = "0.12.1"
+# Pinned exactly: the form filler is tied to this driver's API and its bundled Chromium.
+playwright-rs = "=0.20.1"
+# Property tests (dev-dependency only): `std` alone, no forked runs or timeouts.
+proptest = { version = "1.12.0", default-features = false, features = ["std"] }
+pulldown-cmark = "0.13.4"
 regex = "1.13.1"
+reqwest = { version = "0.13.5", features = ["json"] }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
 scraper = "0.27.0"
 serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+# Fingerprints of the panel's repeated commands; already in the lockfile through the PDF reader.
+sha2 = "0.10.9"
+tempfile = "3.27.0"
 thiserror = "2.0.21"
+# Each crate turns on the features it uses.
+tokio = "1.53.3"
 toml = "1.1.6"
+tracing = "0.1.44"
+tracing-core = "0.1.36"
+# Only the plain text writer: no colours, no filter language. Output is opt-in (JOBBOT_TRACE).
+tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "std"] }
 # Unicode TR39 confusable skeletons: an excluded name spelled with look-alike letters still matches.
 unicode-security = "0.1.2"
 url = "2.5.8"
+wiremock = "0.6.5"
 
 [workspace.lints.rust]
-# `deny`, not `forbid`: one Windows-only test sets an environment variable (unsafe since edition
-# 2024) and allows it at that site with a SAFETY note. No production code uses unsafe.
+# `deny`, not `forbid`: one test sets an environment variable (unsafe since edition 2024) and
+# allows it at that site with a SAFETY note. No production code uses unsafe.
 unsafe_code = "deny"
 
 [workspace.lints.clippy]
@@ -39,42 +83,45 @@ unimplemented = "deny"
 
 [package]
 name = "jobbot"
-description = "A local job-search assistant: discovers postings, drops excluded companies, scores the rest, tailors the CV and fills application forms (dry run by default)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
-license.workspace = true
-repository.workspace = true
 default-run = "jobbot"
 
 [dependencies]
 jobbot-domain = { path = "crates/jobbot-domain" }
-anyhow = "1.0.104"
-async-trait = "0.1.92"
+jobbot-app = { path = "crates/jobbot-app" }
+jobbot-browser = { path = "crates/jobbot-browser" }
+jobbot-store = { path = "crates/jobbot-store" }
+jobbot-sources = { path = "crates/jobbot-sources" }
+jobbot-claude = { path = "crates/jobbot-claude" }
+jobbot-panel = { path = "crates/jobbot-panel" }
+anyhow.workspace = true
+async-trait.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 chrono-tz.workspace = true
 clap = { version = "4.6.7", features = ["derive"] }
-getrandom = "0.4.3"
-html-escape.workspace = true
-playwright-rs = "=0.20.1"
-pulldown-cmark = "0.13.4"
+playwright-rs.workspace = true
 regex.workspace = true
-reqwest = { version = "0.13.5", features = ["json"] }
-rusqlite = { version = "0.40.2", features = ["bundled"] }
+reqwest.workspace = true
+rusqlite.workspace = true
 serde.workspace = true
-serde_json = "1.0.151"
+serde_json.workspace = true
 thiserror.workspace = true
-tiny_http = "0.12.0"
-tokio = { version = "1.53.3", features = ["fs", "io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
 toml.workspace = true
-url.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
 
 [dev-dependencies]
-pdf-extract = "0.12.1"
-sha2 = "0.10.9"
-tempfile = "3.27.0"
-wiremock = "0.6.5"
+jobbot-testkit = { path = "crates/jobbot-testkit" }
+tempfile.workspace = true
+
+# `cargo bench --bench budgets`: the performance budgets on the synthetic set.
+[[bench]]
+name = "budgets"
+harness = false
 
 [lints]
 workspace = true

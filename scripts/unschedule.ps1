@@ -1,22 +1,23 @@
 <#
 .SYNOPSIS
-  Removes the scheduled task that scripts\schedule.ps1 created.
+  Quita la tarea programada que creo scripts\schedule.ps1.
 
 .DESCRIPTION
-  Deletes "\jobbot\run-daily" (or the one you name) from Task Scheduler and, if the "\jobbot\" folder is left
-  empty, deletes it too. It does not touch the repository, the database or the STOP file. If the task does not exist
-  it says so and exits without an error.
+  Elimina "\Personal\jobbot run-daily" (o la que indiques) del Programador de tareas y, si la carpeta "\Personal\" queda
+  vacia, la borra tambien. No toca el repositorio, la base de datos ni el archivo STOP. Si la tarea no existe, lo dice y
+  termina sin error.
 
-  A run that is already in progress is not interrupted by this: to stop it right away use "jobbot stop".
+  Una corrida que ya estuviera en marcha no se interrumpe sola: para frenarla de inmediato usa "jobbot stop".
 
 .PARAMETER TaskName
-  Task name. Default "run-daily".
+  Nombre de la tarea. Por defecto "jobbot run-daily". Una tarea registrada antes con el nombre anterior se quita con
+  -TaskName 'Index Refresh'.
 
 .PARAMETER TaskPath
-  Task folder in Task Scheduler. Default "\jobbot\".
+  Carpeta de la tarea en el Programador. Por defecto "\Personal\".
 
 .PARAMETER DryRun
-  Only prints what it would remove.
+  Solo imprime lo que quitaria.
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File scripts\unschedule.ps1 -DryRun
@@ -26,8 +27,8 @@
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
-    [string]$TaskName = 'run-daily',
-    [string]$TaskPath = '\jobbot\',
+    [string]$TaskName = 'jobbot run-daily',
+    [string]$TaskPath = '\Personal\',
     [switch]$DryRun
 )
 
@@ -37,19 +38,19 @@ if (-not $TaskPath.EndsWith('\')) { $TaskPath = $TaskPath + '\' }
 
 $task = Get-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -ErrorAction SilentlyContinue
 if (-not $task) {
-    Write-Host ('There is no task {0}{1}: nothing to remove.' -f $TaskPath, $TaskName)
+    Write-Host ('No hay ninguna tarea {0}{1}: nada que quitar.' -f $TaskPath, $TaskName)
     return
 }
 
-Write-Host ('Would remove the task {0}{1} (state: {2}).' -f $TaskPath, $TaskName, $task.State)
+Write-Host ('Se quitaria la tarea {0}{1} (estado: {2}).' -f $TaskPath, $TaskName, $task.State)
 if ($DryRun) {
-    Write-Host 'DryRun: nothing was removed.'
+    Write-Host 'DryRun: no se quito nada.'
     return
 }
 
 if ($PSCmdlet.ShouldProcess(('{0}{1}' -f $TaskPath, $TaskName), 'Unregister-ScheduledTask')) {
     Unregister-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -Confirm:$false
-    Write-Host ('Task removed: {0}{1}' -f $TaskPath, $TaskName)
+    Write-Host ('Tarea quitada: {0}{1}' -f $TaskPath, $TaskName)
 
     # The folder the registration created stays behind in Task Scheduler once empty; remove it too (best effort).
     if ($TaskPath -ne '\') {
@@ -60,10 +61,10 @@ if ($PSCmdlet.ShouldProcess(('{0}{1}' -f $TaskPath, $TaskName), 'Unregister-Sche
             if ($folder.GetTasks(1).Count -eq 0 -and $folder.GetFolders(0).Count -eq 0) {
                 $parent = $service.GetFolder('\')
                 $parent.DeleteFolder($TaskPath.Trim('\'), 0)
-                Write-Host ('Empty folder removed: {0}' -f $TaskPath)
+                Write-Host ('Carpeta vacia quitada: {0}' -f $TaskPath)
             }
         } catch {
-            Write-Host ('The folder {0} stays (could not remove it: {1}).' -f $TaskPath, $_.Exception.Message)
+            Write-Host ('La carpeta {0} se queda (no se pudo quitar: {1}).' -f $TaskPath, $_.Exception.Message)
         }
     }
 }

@@ -1,4 +1,4 @@
-//! Execution window: nothing automatic runs during the busy hours of `profile/schedule.toml`.
+//! Execution window: nothing automatic runs while Gonza is at work.
 //!
 //! Busy hours are the union of the blocks listed in `profile/schedule.toml`. Every block is
 //! written in the local time of its own zone, so daylight saving changes are handled by

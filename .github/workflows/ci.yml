@@ -4,12 +4,17 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+  # Mondays, early: a vulnerability published this week is found without anyone pushing, and the
+  # browser tests (too slow and too heavy for every push) get their regular run.
+  schedule:
+    - cron: "23 5 * * 1"
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 env:
@@ -19,7 +24,10 @@ env:
 jobs:
   check:
     name: check (${{ matrix.os }})
+    # The weekly run is for the supply chain and the browser tests only.
+    if: github.event_name != 'schedule'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     continue-on-error: ${{ matrix.experimental }}
     strategy:
       fail-fast: false
@@ -27,7 +35,8 @@ jobs:
         include:
           - os: windows-latest
             experimental: false
-          # Linux is informative until the suite is proven there: the project was built on Windows.
+          # Linux is informative until the suite is proven there: the project was built on Windows,
+          # so a red Linux job is reported but does not fail the workflow (continue-on-error).
           - os: ubuntu-latest
             experimental: true
     steps:
@@ -36,19 +45,73 @@ jobs:
           persist-credentials: false
       - name: Install the pinned toolchain
         run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo fmt --all -- --check
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - run: cargo test --locked --workspace --no-fail-fast
 
-  supply-chain:
-    name: supply chain
+  panel:
+    name: panel page
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: panel-src
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Node and npm on this runner
+        run: |
+          node --version
+          npm --version
+      # The lockfile pins every package by hash; `.npmrc` turns install scripts off.
+      - run: npm ci
+      # Builds the page and checks its layers and its budgets, scans the sources for bidirectional
+      # control characters, and runs every test that needs no browser. One of them rebuilds the page
+      # from the sources and fails if crates/jobbot-panel/src/page.html, the copy the binary
+      # embeds, is not that page (the fix is `node build.mjs --install`).
+      - run: npm run check
+
+  browser:
+    name: browser tests (windows-latest)
+    # Not on every push: these start a real Chromium and take a long time. By hand from the Actions
+    # tab, and once a week.
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: windows-latest
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Install the pinned toolchain
         run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Build
+        run: cargo build --locked
+      - name: Download Chromium
+        run: cargo run --locked -- install-browsers
+      # The tests marked #[ignore], one thread at a time (a Chromium per test). Two need what a CI
+      # runner does not have: a logged-in `claude`, and the Windows Task Scheduler's task.
+      - name: Chromium tests
+        run: >
+          cargo test --locked --workspace --no-fail-fast -- --ignored --test-threads=1
+          --skip real_claude_answers_through_the_runner
+          --skip the_real_scheduler_answers_within_the_deadline
+
+  supply-chain:
+    name: supply chain
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+      # Also keeps ~/.cargo/bin, so the two tools below are built once and not on every run.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo install --locked cargo-deny --version 0.20.2
       - run: cargo install --locked cargo-audit --version 0.22.2
       - run: cargo deny check

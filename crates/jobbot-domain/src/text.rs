@@ -64,8 +64,7 @@ pub fn fold_look_alikes(text: &str) -> String {
 }
 
 /// Lowercase ASCII words of a company name as a person reads it (`as_read`), without legal
-/// suffixes: `"Harbor Light Shipping & Logistics Center, LLC"` becomes
-/// `"harbor light shipping and logistics center"`.
+/// suffixes: `"Harbor Light Shipping & Logistics Center, LLC"` becomes `"harbor light shipping and logistics center"`.
 pub fn normalize(name: &str) -> String {
     let lowered = as_read(name).to_lowercase().replace('&', " and ");
     let spaced: String = lowered
@@ -212,25 +211,12 @@ mod tests {
 
     #[test]
     fn look_alike_letters_fold_to_latin_and_ascii_stays_as_it_is() {
-        assert_eq!(fold_look_alikes("Tidewater 1 lI"), "Tidewater 1 lI");
-        // Cyrillic "Т", "е" and "Ѕ": they read as Latin and fold to it.
+        assert_eq!(fold_look_alikes("Monitor 1 lI"), "Monitor 1 lI");
         assert_eq!(
-            fold_look_alikes("\u{0422}id\u{0435}water \u{0405}ystems"),
-            "Tidewater Systems"
+            fold_look_alikes("\u{0412}l\u{043E}cked \u{0392}\u{1D401}"),
+            "Blocked BB"
         );
         assert_eq!(fold_look_alikes("Soci\u{00E9}t\u{00E9}"), "Societe");
-    }
-
-    #[test]
-    fn normalize_reads_a_name_as_a_person_sees_it() {
-        for written in [
-            "Tide\u{200B}water Systems",
-            "Tide\u{00AD}water Systems",
-            "\u{202B}Tidewater\u{2060} Systems\u{202C}",
-            "\u{FF34}\u{FF49}\u{FF44}\u{FF45}\u{FF57}\u{FF41}\u{FF54}\u{FF45}\u{FF52}\u{3000}Systems",
-        ] {
-            assert_eq!(normalize(written), "tidewater systems", "{written:?}");
-        }
     }
 
     #[test]
@@ -239,6 +225,18 @@ mod tests {
             normalize("Harbor Light Shipping & Logistics Center, LLC"),
             "harbor light shipping and logistics center"
         );
+    }
+
+    #[test]
+    fn normalize_reads_a_name_as_a_person_sees_it() {
+        for written in [
+            "Blo\u{200B}cked Industries",
+            "Bloc\u{00AD}ked Industries",
+            "\u{202B}Blocked\u{2060} Industries\u{202C}",
+            "Ｂｌｏｃｋｅｄ\u{3000}Ｉｎｄｕｓｔｒｉｅｓ",
+        ] {
+            assert_eq!(normalize(written), "blocked industries", "{written:?}");
+        }
     }
 
     #[test]
@@ -293,10 +291,7 @@ mod tests {
             "careers.harborlight-shipping.com"
         );
         assert_eq!(host_of("https://user:pw@example.com:8080/a"), "example.com");
-        assert_eq!(
-            host_of("https://harborlight-shipping.com./x"),
-            "harborlight-shipping.com"
-        );
+        assert_eq!(host_of("https://harborlight-shipping.com./x"), "harborlight-shipping.com");
         assert_eq!(host_of("not a url"), "");
         assert_eq!(host_of(""), "");
         assert_eq!(host_of("mailto:jobs@example.com"), "");
@@ -305,8 +300,8 @@ mod tests {
     #[test]
     fn link_base_drops_what_does_not_identify_a_posting() {
         assert_eq!(
-            link_base(" https://Jobs.AshbyHQ.com/globex/ABC/application/?utm_source=x#form "),
-            "https://jobs.ashbyhq.com/globex/abc"
+            link_base(" https://Jobs.AshbyHQ.com/toku/ABC/application/?utm_source=x#form "),
+            "https://jobs.ashbyhq.com/toku/abc"
         );
         assert_eq!(
             link_base("https://example.com/jobs/1/"),
@@ -328,10 +323,7 @@ mod tests {
 
     #[test]
     fn contains_word_needs_boundaries() {
-        assert!(contains_word(
-            "the Tidewater Systems team",
-            "tidewater systems"
-        ));
+        assert!(contains_word("the Tidewater Systems team", "tidewater systems"));
         assert!(contains_word("freight forwarding.", "freight forwarding"));
         assert!(!contains_word("freight forwarder", "freight forwarding"));
         assert!(!contains_word("the best team", "est"));

@@ -3,8 +3,7 @@
 
 use serde::Deserialize;
 
-/// Companies, domains and categories the user must never apply to or write about
-/// (`profile/exclusions.toml`), for example a former employer and its group.
+/// Entities Gonza must never apply to (a contract).
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Exclusions {
@@ -88,21 +87,28 @@ pub struct Criteria {
     /// an application to one would also burn the 90-day company cooldown.
     #[serde(default = "default_max_posting_age_days")]
     pub max_posting_age_days: i64,
-    /// Places besides Chile where the user would take a job, on site or remote (the example
-    /// profile lists Australia). Lowercase words, read as whole words ("australia", "sydney").
-    /// Empty means Chile and the open regions only.
+    /// Places besides Chile where Gonza would take a job, on site or remote (since 2026-10-21:
+    /// Australia). Lowercase words, read as whole words ("australia", "sydney"). Empty
+    /// means Chile and the open regions only, as before.
     #[serde(default)]
     pub extra_open_places: Vec<String>,
-    /// `apply_threshold` for a posting in one of `extra_open_places`. `None` keeps the normal
-    /// threshold. Such a posting is also never held back for being under the pay floor: the floor
-    /// is a US-dollar figure, and pay in those places is usually stated in another currency.
+    /// `apply_threshold` for a posting in one of `extra_open_places` (2026-10-21: for those jobs
+    /// the aim is an offer, not a filter). `None` keeps the
+    /// normal threshold. Such a posting is also never held back for being under the pay floor.
     #[serde(default)]
     pub extra_open_apply_threshold: Option<f64>,
-    /// Words (whole words, lowercase) one of which a title must hold to earn the extra threshold,
-    /// so that sales, legal or marketing postings in those places do not earn it. A title without
-    /// one still goes through the normal threshold. Empty: every title.
+    /// Words (whole words, lowercase) one of which a title must hold to earn the extra threshold:
+    /// the first Australian run queued sales, legal and marketing jobs too, and Gonza wants an
+    /// IT job. A title without one still goes through the normal threshold. Empty: every title.
+    /// A word written with a leading `!` ("!lawyer") bars every title that holds it, whatever
+    /// technical word it also holds ("Senior Contract Solutions Lawyer", 2026-10-22).
     #[serde(default)]
     pub extra_open_title_words: Vec<String>,
+    /// The place the CV names for a posting open only through `extra_open_places` ("Australia"):
+    /// its contact line says "Open to relocating to Australia" instead of "Remote", and "Seeking
+    /// remote roles in ..." names that place. `None` sends the master as it is.
+    #[serde(default)]
+    pub extra_open_relocation: Option<String>,
     pub weights: Weights,
     /// Technologies Gonza has used. They only add to fit, never subtract.
     #[serde(default)]
@@ -141,6 +147,11 @@ pub enum RulesError {
     NotFinite { field: &'static str },
     #[error("{field} must not be negative")]
     NegativeWeight { field: &'static str },
+    #[error("{field} must be {range}")]
+    OutOfRange {
+        field: &'static str,
+        range: &'static str,
+    },
 }
 
 /// Parses the text of `exclusions.toml`. Domains are lowercased.
@@ -191,6 +202,31 @@ fn check_numbers(criteria: &Criteria) -> Result<(), RulesError> {
             return Err(RulesError::NegativeWeight { field });
         }
     }
+    // A floor of 0 lets every salary through, a threshold outside the score's range sends every
+    // posting or none, and a posting age of 0 days would have the prune withdraw them all.
+    if criteria.floor_monthly_usd <= 0.0 {
+        return Err(RulesError::OutOfRange {
+            field: "floor_monthly_usd",
+            range: "above 0",
+        });
+    }
+    let thresholds = [("apply_threshold", criteria.apply_threshold)]
+        .into_iter()
+        .chain(extra_threshold);
+    for (field, value) in thresholds {
+        if !(0.0..=100.0).contains(&value) {
+            return Err(RulesError::OutOfRange {
+                field,
+                range: "from 0 to 100",
+            });
+        }
+    }
+    if criteria.max_posting_age_days < 1 {
+        return Err(RulesError::OutOfRange {
+            field: "max_posting_age_days",
+            range: "at least 1",
+        });
+    }
     Ok(())
 }
 
@@ -240,6 +276,19 @@ other = 10
         assert!(c.extra_open_places.is_empty());
         assert_eq!(c.extra_open_apply_threshold, None);
         assert!(c.extra_open_title_words.is_empty());
+        assert_eq!(c.extra_open_relocation, None);
+    }
+
+    #[test]
+    fn the_relocation_place_is_read_from_the_file() {
+        let text = format!("extra_open_relocation = \"Australia\"\n{MINIMAL}");
+        assert_eq!(
+            parse_criteria(&text)
+                .unwrap()
+                .extra_open_relocation
+                .as_deref(),
+            Some("Australia")
+        );
     }
 
     #[test]
@@ -286,6 +335,51 @@ other = 10
             assert!(
                 matches!(err, RulesError::NotFinite { field: f } if f == field),
                 "{field}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_number_outside_what_it_can_mean_is_refused() {
+        // A floor of 0 lets every salary through; a threshold outside the score's 0 to 100 sends
+        // every posting or none; a posting age of 0 days would have the prune withdraw them all.
+        for (from, to, field) in [
+            (
+                "floor_monthly_usd = 1",
+                "floor_monthly_usd = 0",
+                "floor_monthly_usd",
+            ),
+            (
+                "apply_threshold = 1",
+                "apply_threshold = 101",
+                "apply_threshold",
+            ),
+            (
+                "apply_threshold = 1",
+                "apply_threshold = -1",
+                "apply_threshold",
+            ),
+            (
+                "apply_threshold = 1",
+                "apply_threshold = 1\nextra_open_apply_threshold = 120",
+                "extra_open_apply_threshold",
+            ),
+            (
+                "apply_threshold = 1",
+                "apply_threshold = 1\nmax_posting_age_days = 0",
+                "max_posting_age_days",
+            ),
+        ] {
+            let err = parse_criteria(&MINIMAL.replace(from, to)).unwrap_err();
+            assert!(
+                matches!(err, RulesError::OutOfRange { field: f, .. } if f == field),
+                "{to}: {err}"
+            );
+        }
+        for edge in ["apply_threshold = 0", "apply_threshold = 100"] {
+            assert!(
+                parse_criteria(&MINIMAL.replace("apply_threshold = 1", edge)).is_ok(),
+                "{edge}"
             );
         }
     }
