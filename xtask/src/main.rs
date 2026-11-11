@@ -2,9 +2,10 @@
 //! [--message TEXT] [--public-home URL]...`: see `xtask::export`. The terms file defaults to
 //! `export-forbidden.txt` in `JOBBOT_HOME`, or else in `%LOCALAPPDATA%\jobbot`
 //! (`$XDG_DATA_HOME/jobbot`, `~/.local/share/jobbot` elsewhere); the copy defaults to a new folder
-//! in the temp directory. Before its commit the copy runs `cargo test --workspace --locked
+//! in the temp directory. Before its commit the copy is formatted again (`cargo fmt --all`: a
+//! replacement changes the length of a line) and runs `cargo test --workspace --locked
 //! --offline` (built in `CARGO_TARGET_DIR`, or `jobbot-public-target` in the temp directory);
-//! `--no-verify` skips it. `--public-home` names an address the copy is published at (the
+//! `--no-verify` skips the tests. `--public-home` names an address the copy is published at (the
 //! repository's page, its site): the private list usually forbids the owner's name, and that
 //! address carries it; a term inside the address, exactly as given, is then not a finding, and the
 //! same term anywhere else still is.
@@ -116,6 +117,7 @@ fn parse(args: &[String]) -> Result<Export, String> {
         message,
         account: account_from(|key| env::var(key).ok()),
         public_homes,
+        format: Some(copy_format()),
         verify: verify.then(copy_tests),
     })
 }
@@ -137,6 +139,16 @@ fn public_home(value: &str) -> Result<String, String> {
             "--public-home must be the https address the copy is published at, ending in `/` \
              (https://github.com/NAME/ or https://NAME.github.io/), got {value:?}"
         ))
+    }
+}
+
+/// The copy is formatted after the replacements, so that it passes the formatting check of its
+/// own CI whatever the replaced names measure.
+fn copy_format() -> Verify {
+    Verify {
+        program: "cargo".into(),
+        args: ["fmt", "--all"].map(String::from).to_vec(),
+        env: Vec::new(),
     }
 }
 
@@ -287,7 +299,14 @@ mod tests {
         );
         let mut skipped = author.to_vec();
         skipped.push("--no-verify");
-        assert!(parse(&args(&skipped)).unwrap().verify.is_none());
+        let skipped = parse(&args(&skipped)).unwrap();
+        assert!(skipped.verify.is_none());
+        // Formatting is not a check that can be skipped: without it the copy fails its own CI.
+        let format = skipped.format.expect("formatted always");
+        assert_eq!(
+            (format.program.as_str(), format.args),
+            ("cargo", vec!["fmt".to_string(), "--all".to_string()])
+        );
     }
 
     #[test]

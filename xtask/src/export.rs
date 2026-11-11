@@ -117,6 +117,10 @@ pub struct Export {
     /// private list inside one of them, exactly as given, is not a finding. Named on the command
     /// line by whoever runs the export, never read from a file.
     pub public_homes: Vec<String>,
+    /// A command run in the copy after the scan and before the check (the CLI runs `cargo fmt
+    /// --all`): a replacement changes the length of a line, so the copy is formatted again and
+    /// passes its own formatting check. `None` skips it.
+    pub format: Option<Verify>,
     /// A command run in the copy after the scan and before the commit (the CLI runs the copy's
     /// tests): the replacements rewrite code, so the copy must build and pass on its own. `None`
     /// skips it.
@@ -289,23 +293,8 @@ fn copy_check_commit(
     if !findings.is_empty() {
         return Err(ExportError::Findings(findings));
     }
-    if let Some(verify) = &export.verify {
-        let status = Command::new(&verify.program)
-            .args(&verify.args)
-            .envs(verify.env.iter().map(|(name, value)| (name, value)))
-            .current_dir(&export.out)
-            .status()?;
-        if !status.success() {
-            let command = std::iter::once(&verify.program)
-                .chain(&verify.args)
-                .map(String::as_str)
-                .collect::<Vec<_>>()
-                .join(" ");
-            return Err(ExportError::Verify {
-                command,
-                status: status.to_string(),
-            });
-        }
+    for step in [&export.format, &export.verify].into_iter().flatten() {
+        run_in_copy(step, &export.out)?;
     }
     git(&export.out, &["init", "-q", "-b", "main"])?;
     git(&export.out, &["add", "-A"])?;
@@ -325,6 +314,27 @@ fn copy_check_commit(
         ],
     )?;
     Ok(git(&export.out, &["rev-parse", "HEAD"])?.trim().to_string())
+}
+
+/// Runs one step in the copy's folder; a step that fails stops the export.
+fn run_in_copy(step: &Verify, copy: &Path) -> Result<(), ExportError> {
+    let status = Command::new(&step.program)
+        .args(&step.args)
+        .envs(step.env.iter().map(|(name, value)| (name, value)))
+        .current_dir(copy)
+        .status()?;
+    if status.success() {
+        return Ok(());
+    }
+    let command = std::iter::once(&step.program)
+        .chain(&step.args)
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join(" ");
+    Err(ExportError::Verify {
+        command,
+        status: status.to_string(),
+    })
 }
 
 fn git(dir: &Path, args: &[&str]) -> Result<String, ExportError> {
@@ -459,6 +469,7 @@ mod tests {
             message: "Initial public release".into(),
             account: None,
             public_homes: Vec::new(),
+            format: None,
             verify: None,
         }
     }
@@ -608,6 +619,36 @@ mod tests {
         let scratch = tempfile::tempdir().unwrap();
         let mut export = export_of(repo.path(), scratch.path(), "secret name\n");
         export.verify = git_check(&["rev-parse", "--verify", "--quiet", "no-such-ref"]);
+        assert!(matches!(
+            export_public(&export),
+            Err(ExportError::Verify { .. })
+        ));
+        assert!(!export.out.exists());
+    }
+
+    #[test]
+    fn the_copy_is_formatted_before_it_is_checked_and_a_failed_format_stops_the_export() {
+        let repo = repository(&FILES);
+        let scratch = tempfile::tempdir().unwrap();
+        let mut export = export_of(
+            repo.path(),
+            scratch.path(),
+            "secret name
+",
+        );
+        // The check passes only inside a repository, and the copy is not one yet: it passes
+        // because the format step, run first and in the copy, made it one.
+        let inside = ["rev-parse", "--is-inside-work-tree"];
+        export.verify = git_check(&inside);
+        assert!(matches!(
+            export_public(&export),
+            Err(ExportError::Verify { .. })
+        ));
+        export.format = git_check(&["init", "-q"]);
+        export_public(&export).unwrap();
+        export.out = scratch.path().join("public-2");
+        export.format = git_check(&["rev-parse", "--verify", "--quiet", "no-such-ref"]);
+        export.verify = None;
         assert!(matches!(
             export_public(&export),
             Err(ExportError::Verify { .. })

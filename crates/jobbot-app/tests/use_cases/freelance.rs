@@ -110,10 +110,7 @@ fn a_rate_below_the_minimum_is_raised_and_flagged_and_a_wild_one_is_capped() {
 fn a_draft_that_touches_the_exclusion_list_is_rejected() {
     for (field, text) in [
         ("headline", "I automate Harbor Light dashboards"),
-        (
-            "bio",
-            "I specialise in remote fleet tracking platforms.",
-        ),
+        ("bio", "I specialise in remote fleet tracking platforms."),
         ("bio", "Freight forwarding desk workflows are my thing."),
     ] {
         let mut json = profile_json();

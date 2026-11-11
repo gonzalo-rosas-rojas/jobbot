@@ -291,7 +291,10 @@ mod tests {
             "careers.harborlight-shipping.com"
         );
         assert_eq!(host_of("https://user:pw@example.com:8080/a"), "example.com");
-        assert_eq!(host_of("https://harborlight-shipping.com./x"), "harborlight-shipping.com");
+        assert_eq!(
+            host_of("https://harborlight-shipping.com./x"),
+            "harborlight-shipping.com"
+        );
         assert_eq!(host_of("not a url"), "");
         assert_eq!(host_of(""), "");
         assert_eq!(host_of("mailto:jobs@example.com"), "");
@@ -323,7 +326,10 @@ mod tests {
 
     #[test]
     fn contains_word_needs_boundaries() {
-        assert!(contains_word("the Tidewater Systems team", "tidewater systems"));
+        assert!(contains_word(
+            "the Tidewater Systems team",
+            "tidewater systems"
+        ));
         assert!(contains_word("freight forwarding.", "freight forwarding"));
         assert!(!contains_word("freight forwarder", "freight forwarding"));
         assert!(!contains_word("the best team", "est"));

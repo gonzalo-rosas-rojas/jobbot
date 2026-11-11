@@ -121,12 +121,16 @@ mod tests {
         });
         let result = check_exclusion(&job, &RULES);
         assert!(result.excluded);
-        assert_eq!(result.reason.as_deref(), Some("domain:harborlight-shipping.com"));
+        assert_eq!(
+            result.reason.as_deref(),
+            Some("domain:harborlight-shipping.com")
+        );
     }
 
     #[test]
     fn domain_match_requires_a_label_boundary() {
-        let job = make_job_with(|j| j.apply_url = "https://notharborlight-shipping.com/apply".into());
+        let job =
+            make_job_with(|j| j.apply_url = "https://notharborlight-shipping.com/apply".into());
         assert!(!check_exclusion(&job, &RULES).excluded);
     }
 
