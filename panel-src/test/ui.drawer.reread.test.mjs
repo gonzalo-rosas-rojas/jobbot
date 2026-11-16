@@ -25,7 +25,7 @@ function rig({ keys = ["A", "B", "C"] } = {}) {
       },
       said: (r, fallback) => fallback,
     },
-    router: { write: (stop, key, opts) => { log.writes.push([stop, key, !!(opts && opts.push)]); return true; }, back() {} },
+    router: { pushStop: (stop, key) => { log.writes.push([stop, key, true]); return true; }, replaceStop: (stop, key) => { log.writes.push([stop, key, false]); return false; }, back() {} },
     stop: () => "procesos",
     sound: { play() {} },
     getCtx: () => ({ announce() {}, reduced: () => true }),
@@ -98,7 +98,7 @@ test("J2-8: the focus goes back, on close, to the element that had it when open(
   release();
   await opening;
   assert.equal(drawer.isOpen(), true);
-  drawer.close();
+  drawer.closeAndRestore();
   assert.equal(dom.document.activeElement, opener, "back to the one that opened it, not to the one that happened to have the focus after the read");
   assert.ok(el);
 });
@@ -109,6 +109,6 @@ test("J2-8: with no element focused when it opens, the focus goes back to the or
   dom.document.body.append(row);
   dom.document.body.focus?.();
   await drawer.open("B", row);
-  drawer.close();
+  drawer.closeAndRestore();
   assert.equal(dom.document.activeElement, row);
 });

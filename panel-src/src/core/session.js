@@ -13,7 +13,8 @@
 
 import { t } from "../i18n/index.js";
 import { model as buildModel } from "./model.js";
-import { diffSnapshots, sinceLastVisit } from "./diff.js";
+import { diffSnapshots, sinceLastVisit, emptyNews } from "./diff.js";
+import { createTransport, actionOf } from "./transport.js";
 
 export const POLL_MS = 30000;
 // Nothing changed, but the clock did: the countdowns, "3 h ago" and the days without news are worked out from the
@@ -31,7 +32,12 @@ export function parseLaunch(search, framed) {
   return { token: params.get("t") || "", embedded: !!framed || params.has("embed") };
 }
 
-const idle = () => ({ fresh: new Set(), lines: [], big: false });
+// What kind of failure a reply that was not accepted is: the request gave up, never reached the server, or the server answered badly.
+function failureKind(r) {
+  if (r.timedOut) return "timeout";
+  if (r.status === 0) return "network";
+  return "server";
+}
 
 export function createSession(options = {}) {
   const {
@@ -55,7 +61,7 @@ export function createSession(options = {}) {
   let snapshot = null;
   let model = null;
   let error = null;
-  let news = idle();
+  let news = emptyNews();
   let fresh = new Set();
   let lastKey = "";
   let inflight = null;
@@ -75,85 +81,7 @@ export function createSession(options = {}) {
     }
   }
 
-  /** One request, with its time limit. Always resolves to { ok, status, data }; a network failure is status 0 with a message, and a request that
-   *  took longer than `requestTimeoutMs` is aborted and is status 0, `timedOut`, with its own message. */
-  async function attempt(path, body, key) {
-    const controller = typeof AbortController === "function" ? new AbortController() : null;
-    let timer = null;
-    const expired = new Promise((resolve) => {
-      timer = timers.setTimeout(() => {
-        if (controller) controller.abort();
-        resolve({ ok: false, status: 0, timedOut: true, data: { message: t("err.timeout") } });
-      }, requestTimeoutMs);
-    });
-    const work = request(path, body, controller, key);
-    work.catch(() => {});                              // an answer that comes after the limit is nobody's
-    try { return await Promise.race([work, expired]); } finally { timers.clearTimeout(timer); }
-  }
-
-  const actionOf = (path, body) => path + "\n" + JSON.stringify(body);
-
-  // The POSTs on their way, by action (path and body): asking the same action again before it comes back joins it. `act` already gathers the same
-  // action before it reaches `api`, so this layer only counts for whoever calls `api` directly with a POST.
-  const pending = new Map();
-
-  /** The request of an action. Not async on purpose: the same action asked again while its POST is out gets the same promise, not a second request.
-   *  A POST is one action with one `Idempotency-Key`: if it got no answer at all (status 0) it is sent once more with the same key and bytes, so the
-   *  server answers the first run instead of doing it twice. A GET carries no key and is not repeated. */
-  function api(path, body) {
-    if (body === undefined || demo) return attempt(path, body);
-    const action = actionOf(path, body);
-    const joined = pending.get(action);
-    if (joined) return joined;
-    const key = globalThis.crypto.randomUUID();
-    const sent = (async () => {
-      try {
-        const first = await attempt(path, body, key);
-        return first.status === 0 ? await attempt(path, body, key) : first;
-      } finally {
-        pending.delete(action);
-      }
-    })();
-    pending.set(action, sent);
-    return sent;
-  }
-
-  async function request(path, body, controller, key) {
-    if (demo) {
-      try { return await demo.api(path, body); } catch (e) { return { ok: false, status: 0, data: { message: t("err.network") } }; }
-    }
-    const init = { headers: { "X-Panel-Token": token } };
-    if (controller) init.signal = controller.signal;
-    if (body !== undefined) {
-      init.method = "POST";
-      init.headers["Content-Type"] = "application/json";
-      init.body = JSON.stringify(body);
-      if (key) init.headers["Idempotency-Key"] = key;
-    }
-    let res;
-    try {
-      res = await fetchImpl(path, init);
-    } catch (e) {
-      return { ok: false, status: 0, data: { message: t("err.network") } };
-    }
-    let data = null;
-    try { data = await res.json(); } catch (e) { /* not JSON */ }
-    return { ok: res.ok, status: res.status, data };
-  }
-
-  /** A file (the dry-run screenshot): its bytes, or null when it is not there. */
-  async function blob(path) {
-    // the demo draws its captures itself and never asks the network
-    if (demo && typeof demo.blob === "function") {
-      try { return (await demo.blob(path)) || null; } catch (e) { return null; }
-    }
-    try {
-      const res = await fetchImpl(path, { headers: { "X-Panel-Token": token } });
-      return res.ok ? await res.blob() : null;
-    } catch (e) {
-      return null;
-    }
-  }
+  const { api, blob } = createTransport({ fetchImpl, demo, token, timers, requestTimeoutMs });
 
   const said = (r, fallback) => (r.data && r.data.message) || fallback;
 
@@ -165,33 +93,33 @@ export function createSession(options = {}) {
     return false;
   }
 
-  function accepted() {
+  // The server answered: the failures are over, and a person who saw the error is told it recovered.
+  function markAccepted() {
     failures = 0;
     if (error) {
       error = null;
       emit("recovered");
     }
-    return true;
   }
 
   async function runOnce(force) {
     lastTryAt = now();
     const r = await api("/api/snapshot");
     if (r.status === 401 || r.status === 403) return fail("token", r, t("err.token"));
-    if (!r.ok || !r.data) return fail(r.timedOut ? "timeout" : r.status === 0 ? "network" : "server", r, said(r, t("err.snapshot")));
+    if (!r.ok || !r.data) return fail(failureKind(r), r, said(r, t("err.snapshot")));
     const data = r.data;
     // An answer older than the picture on screen (a slow one that crossed a newer one) is dropped.
-    if (snapshot && Date.parse(data.generated_at) < Date.parse(snapshot.generated_at)) return accepted();
+    if (snapshot && Date.parse(data.generated_at) < Date.parse(snapshot.generated_at)) { markAccepted(); return true; }
     const key = JSON.stringify(Object.assign({}, data, { generated_at: "" }));
     const aged = snapshot != null && Date.parse(data.generated_at) - Date.parse(snapshot.generated_at) >= redrawMs;
-    if (!force && key === lastKey && !aged) return accepted();
+    if (!force && key === lastKey && !aged) { markAccepted(); return true; }
     // Never redraw under a half-typed answer; the next poll tries again.
-    if (!force && isTyping()) return accepted();
-    let next;
-    let upNext;
+    if (!force && isTyping()) { markAccepted(); return true; }
+    let nextModel;
+    let nextNews;
     try {
-      next = buildModel(data);
-      upNext = snapshot ? diffSnapshots(snapshot, data) : sinceLastVisit(data);
+      nextModel = buildModel(data);
+      nextNews = snapshot ? diffSnapshots(snapshot, data) : sinceLastVisit(data);
     } catch (e) {
       console.error(e);
       return fail("data", r, t("err.snapshot"));
@@ -200,8 +128,8 @@ export function createSession(options = {}) {
     error = null;
     lastKey = key;
     snapshot = data;
-    model = next;
-    news = upNext;
+    model = nextModel;
+    news = nextNews;
     fresh = news.fresh;
     emit("snapshot");
     // every picture restarts the clearing: a quick second picture keeps its marks for the whole of `freshMs`
@@ -215,8 +143,7 @@ export function createSession(options = {}) {
    * one makes it run once more afterwards, so a change made after the first request left is never missed. Not forced,
    * it does nothing when nothing changed and waits while the person is typing in a field.
    */
-  function refresh(opt) {
-    const force = typeof opt === "object" && opt !== null ? !!opt.force : !!opt;
+  function refresh({ force = false } = {}) {
     if (inflight) {
       if (force) queuedForce = true;
       return inflight;

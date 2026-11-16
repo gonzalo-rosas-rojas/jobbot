@@ -6,7 +6,6 @@
 //! `4dayweek.io` as `listing_only`, like `remotive.com`. A page holds at most 100 jobs and
 //! `has_more` says whether another follows.
 
-use std::collections::HashSet;
 use std::time::Duration;
 
 use crate::http::Http;
@@ -17,7 +16,8 @@ use serde_json::Value;
 
 use super::Source;
 use super::base::{
-    REQUEST_PAUSE, failure, get_json, id_string, join_places, parse_iso, skipped_error, str_field,
+    Crawl, REQUEST_PAUSE, failure, get_json, id_string, join_places, parse_iso, skipped_error,
+    str_field, with_labeled_lines,
 };
 use super::pay::{monthly_usd_range, number};
 use jobbot_domain::models::{FetchResult, Job};
@@ -88,24 +88,17 @@ impl FourDayWeekSource {
         self
     }
 
-    /// Follows the pages of one query. Jobs go straight into `result`, so when a later page fails
-    /// the earlier pages are kept and only the error is returned. `seen` drops a job that two
-    /// queries both return; `requests` counts every request of the run, to pause between them.
-    async fn fetch_query(
-        &self,
-        query: &str,
-        seen: &mut HashSet<String>,
-        requests: &mut u32,
-        result: &mut FetchResult,
-    ) -> anyhow::Result<()> {
+    /// Follows the pages of one query. Jobs go straight into the crawl's result, so when a later
+    /// page fails the earlier pages are kept and only the error is returned.
+    async fn fetch_query(&self, query: &str, crawl: &mut Crawl) -> anyhow::Result<()> {
         let url = format!("{}/api/v2/jobs", self.base_url);
         let limit = self.config.per_page.to_string();
         let posted_after = self.config.max_age_days.to_string();
         for page in 1..=self.config.max_pages {
-            if *requests > 0 {
+            if crawl.requests > 0 {
                 tokio::time::sleep(self.pause).await;
             }
-            *requests += 1;
+            crawl.requests += 1;
             let page_text = page.to_string();
             let mut params = vec![
                 ("q", query),
@@ -125,15 +118,16 @@ impl FourDayWeekSource {
             for item in items {
                 match parse_job(item) {
                     Some(job) => {
-                        if seen.insert(job.external_id.clone()) {
-                            result.jobs.push(job);
+                        if crawl.seen.insert(job.external_id.clone()) {
+                            crawl.result.jobs.push(job);
                         }
                     }
                     None => skipped += 1,
                 }
             }
             if skipped > 0 {
-                result
+                crawl
+                    .result
                     .errors
                     .push(skipped_error("fourdayweek", query, skipped));
             }
@@ -152,18 +146,16 @@ impl Source for FourDayWeekSource {
     }
 
     async fn fetch(&self) -> FetchResult {
-        let mut result = FetchResult::default();
-        let mut seen = HashSet::new();
-        let mut requests = 0;
+        let mut crawl = Crawl::default();
         for query in &self.config.queries {
-            if let Err(error) = self
-                .fetch_query(query, &mut seen, &mut requests, &mut result)
-                .await
-            {
-                result.errors.push(failure("fourdayweek", query, &error));
+            if let Err(error) = self.fetch_query(query, &mut crawl).await {
+                crawl
+                    .result
+                    .errors
+                    .push(failure("fourdayweek", query, &error));
             }
         }
-        result
+        crawl.result
     }
 }
 
@@ -213,17 +205,15 @@ fn parse_job(item: &Value) -> Option<Job> {
             skills.push(skill);
         }
     }
-    let mut description = str_field(item, "description").trim().to_string();
-    for (label, value) in [
-        ("Level", str_field(item, "level").to_string()),
-        ("Schedule", str_field(item, "schedule_type").to_string()),
-        ("Contract", str_field(item, "contract_type").to_string()),
-        ("Skills", skills.join(", ")),
-    ] {
-        if !value.is_empty() {
-            description = format!("{description}\n{label}: {value}");
-        }
-    }
+    let description = with_labeled_lines(
+        str_field(item, "description").trim().to_string(),
+        &[
+            ("Level", str_field(item, "level")),
+            ("Schedule", str_field(item, "schedule_type")),
+            ("Contract", str_field(item, "contract_type")),
+            ("Skills", &skills.join(", ")),
+        ],
+    );
     let cents = |key: &str| number(&item[key]).map(|amount| amount / 100.0);
     let (salary_min, salary_max) = monthly_usd_range(
         cents("salary_min"),
@@ -350,18 +340,14 @@ mod tests {
         assert_eq!(hourly.salary_min_monthly_usd, Some(4_800.0));
         assert_eq!(hourly.salary_max_monthly_usd, Some(16_000.0));
         // CAD is left alone, and no pay is no pay.
+        let cad = job_at(2);
         assert_eq!(
-            (
-                job_at(2).salary_min_monthly_usd,
-                job_at(2).salary_max_monthly_usd
-            ),
+            (cad.salary_min_monthly_usd, cad.salary_max_monthly_usd),
             (None, None)
         );
+        let unpaid = job_at(3);
         assert_eq!(
-            (
-                job_at(3).salary_min_monthly_usd,
-                job_at(3).salary_max_monthly_usd
-            ),
+            (unpaid.salary_min_monthly_usd, unpaid.salary_max_monthly_usd),
             (None, None)
         );
     }
@@ -479,7 +465,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_refusal_rests_the_host_and_the_queries_left_say_why() {
+    async fn a_refusal_pauses_the_host_for_the_queries_after_it() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/api/v2/jobs"))
@@ -507,16 +493,9 @@ mod tests {
             "{}",
             result.errors[0]
         );
-        assert!(
-            result.errors[1]
-                .to_string()
-                .starts_with("fourdayweek:fine: ")
-                && result.errors[1]
-                    .to_string()
-                    .contains("asked us to slow down"),
-            "{}",
-            result.errors[1]
-        );
+        let rested = result.errors[1].to_string();
+        assert!(rested.starts_with("fourdayweek:fine: "), "{rested}");
+        assert!(rested.contains("asked us to slow down"), "{rested}");
         let asked = server.received_requests().await.unwrap();
         assert!(
             asked

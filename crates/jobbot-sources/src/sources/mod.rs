@@ -35,7 +35,7 @@ pub use jobbot_app::ports::Source;
 pub use ashby::AshbySource;
 pub use atlassian::AtlassianSource;
 pub use fourdayweek::{FourDayWeekConfig, FourDayWeekSource};
-pub use getonboard::GetOnBoardSource;
+pub use getonboard::{GetOnBoardConfig, GetOnBoardSource};
 pub use greenhouse::GreenhouseSource;
 pub use himalayas::{HimalayasConfig, HimalayasSource};
 pub use hn::{HackerNewsConfig, HackerNewsSource};
@@ -101,25 +101,6 @@ pub struct SourcesConfig {
     /// sources that cannot read every posting read the relevant titles first.
     #[serde(skip)]
     pub relevant_title_words: Vec<String>,
-}
-
-/// The `[getonboard]` table of `profile/sources.toml`.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct GetOnBoardConfig {
-    pub categories: Vec<String>,
-    pub max_pages: u32,
-    pub per_page: u32,
-}
-
-impl Default for GetOnBoardConfig {
-    fn default() -> Self {
-        Self {
-            categories: vec!["programming".to_string()],
-            max_pages: 3,
-            per_page: 50,
-        }
-    }
 }
 
 pub fn load_sources_config(path: &Path) -> anyhow::Result<SourcesConfig> {
@@ -536,9 +517,10 @@ mod tests {
         let cfg = load_sources_config(&path).unwrap();
 
         assert_eq!(cfg.lever, ["palantir"]);
-        assert!(
-            cfg.remoteok && !cfg.remotive && cfg.greenhouse.is_empty() && cfg.getonboard.is_none()
-        );
+        assert!(cfg.remoteok);
+        assert!(!cfg.remotive);
+        assert!(cfg.greenhouse.is_empty());
+        assert_eq!(cfg.getonboard, None);
     }
 
     #[test]

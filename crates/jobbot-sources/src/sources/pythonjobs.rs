@@ -10,7 +10,7 @@ use crate::http::Http;
 use async_trait::async_trait;
 
 use super::Source;
-use super::base::{failure, get_text, skipped_error};
+use super::base::{get_text, parse_all, record};
 use super::rss::{self, Item};
 use jobbot_domain::models::{FetchResult, Job};
 use jobbot_domain::text::html_to_text;
@@ -43,15 +43,7 @@ impl PythonJobsSource {
     async fn fetch_feed(&self) -> anyhow::Result<(Vec<Job>, usize)> {
         let url = format!("{}/jobs/feed/rss/", self.base_url);
         let body = get_text(&self.http, &url, &[]).await?;
-        let mut jobs = Vec::new();
-        let mut skipped = 0;
-        for item in rss::items(&body)? {
-            match parse_item(&item) {
-                Some(job) => jobs.push(job),
-                None => skipped += 1,
-            }
-        }
-        Ok((jobs, skipped))
+        Ok(parse_all(&rss::items(&body)?, parse_item))
     }
 }
 
@@ -63,17 +55,7 @@ impl Source for PythonJobsSource {
 
     async fn fetch(&self) -> FetchResult {
         let mut result = FetchResult::default();
-        match self.fetch_feed().await {
-            Ok((jobs, skipped)) => {
-                result.jobs = jobs;
-                if skipped > 0 {
-                    result
-                        .errors
-                        .push(skipped_error("pythonjobs", "rss", skipped));
-                }
-            }
-            Err(error) => result.errors.push(failure("pythonjobs", "rss", &error)),
-        }
+        record(&mut result, "pythonjobs", "rss", self.fetch_feed().await);
         result
     }
 }
@@ -188,10 +170,8 @@ mod tests {
         assert_eq!(job.apply_url, job.url);
         assert!(job.posted_at.is_none(), "the feed has no dates");
         assert!(
-            job.description.contains("production-grade")
-                || job
-                    .description
-                    .contains("hands-on individual-contributor role"),
+            job.description
+                .contains("hands-on individual-contributor role"),
             "{}",
             job.description
         );

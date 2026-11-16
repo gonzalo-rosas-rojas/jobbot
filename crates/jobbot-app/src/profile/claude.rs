@@ -140,6 +140,9 @@ fn found_in(place: impl std::fmt::Display) -> impl FnOnce(ConfigError) -> Config
     }
 }
 
+/// The shortest `timeout_secs` the configuration accepts.
+const MIN_TIMEOUT_SECS: u64 = 10;
+
 pub fn parse_claude_config(text: &str) -> Result<ClaudeConfig, ConfigError> {
     let config: ClaudeConfig = toml::from_str(text)?;
     rule(
@@ -151,8 +154,8 @@ pub fn parse_claude_config(text: &str) -> Result<ClaudeConfig, ConfigError> {
         "per_call_budget_usd must be above 0",
     )?;
     rule(
-        config.timeout_secs >= 10,
-        "timeout_secs must be at least 10",
+        config.timeout_secs >= MIN_TIMEOUT_SECS,
+        "timeout_secs must be at least 10", // a test holds this in step with MIN_TIMEOUT_SECS
     )?;
     rule(!config.model.trim().is_empty(), "model must not be empty")?;
     rule(
@@ -180,8 +183,17 @@ pub fn load_claude_config(path: &Path) -> Result<ClaudeConfig, ConfigError> {
     };
     let text = read(path)?;
     let local_path = path.with_file_name("claude.local.toml");
-    if !local_path.is_file() {
-        return parse_claude_config(&text).map_err(found_in(path.display()));
+    // `is_file()` would also say "no" when the query itself fails or the path is a folder, and the
+    // local layer (which holds the account to compare) would be dropped without a word.
+    match local_path.try_exists() {
+        Ok(false) => return parse_claude_config(&text).map_err(found_in(path.display())),
+        Ok(true) => {}
+        Err(source) => {
+            return Err(ConfigError::Read {
+                path: local_path,
+                source,
+            });
+        }
     }
     let local = read(&local_path)?;
     parse_claude_config(&local).map_err(found_in(local_path.display()))?;
@@ -282,6 +294,21 @@ mod tests {
         }
     }
 
+    #[test]
+    fn the_shortest_timeout_is_ten_seconds_and_the_refusal_says_so() {
+        // The limit lives in a constant and in the text of the message: this holds the two together.
+        let err = parse_claude_config("timeout_secs = 9")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("at least 10"), "{err}");
+        assert_eq!(
+            parse_claude_config("timeout_secs = 10")
+                .unwrap()
+                .timeout_secs,
+            10
+        );
+    }
+
     /// `claude.toml` with `shipped`, and `claude.local.toml` with `local` when given, in a new folder.
     fn profile_with(shipped: &str, local: Option<&str>) -> (tempfile::TempDir, std::path::PathBuf) {
         let dir = tempfile::tempdir().unwrap();
@@ -340,6 +367,17 @@ mod tests {
         );
 
         let (_dir, path) = profile_with("", Some("this is = not [valid"));
+        let err = chain(&load_claude_config(&path).unwrap_err());
+        assert!(err.contains("claude.local.toml"), "{err}");
+    }
+
+    #[test]
+    fn a_local_file_that_cannot_be_read_is_an_error_and_not_a_missing_file() {
+        // A folder in the place of the file: the local layer exists but cannot be read, so the
+        // account it would fix is unknown. Ignoring it would drop the anchor and the preflight
+        // would stop comparing the account.
+        let (dir, path) = profile_with("model = \"m\"\n", None);
+        std::fs::create_dir(dir.path().join("claude.local.toml")).unwrap();
         let err = chain(&load_claude_config(&path).unwrap_err());
         assert!(err.contains("claude.local.toml"), "{err}");
     }

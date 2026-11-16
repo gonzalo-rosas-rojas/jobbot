@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { openRouteOnSnapshot, routeOfHash } from "../src/core/store.js";
+import { openRouteOnSnapshot, routeOfHash } from "../src/core/route.js";
 
 // A session that only tells what the page needs: who listens, and the events it sends.
 function fakeSession() {

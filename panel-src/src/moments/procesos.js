@@ -26,9 +26,11 @@ import { actionLabel } from "../core/format.js";
 import { createActions } from "./hoy/actions.js";
 import { createForms } from "./hoy/forms.js";
 import { createPlace } from "./procesos/place.js";
-import { procesosView, rowViewOf, filterId, FILTERS, ORDERS } from "./procesos/view.js";
+import { procesosView, rowViewOf, rowIdOf, filterId, FILTERS, ORDERS, QUERY_MAX } from "./procesos/view.js";
 import { createProcesos } from "./procesos/render.js";
 import { drawerContent } from "./procesos/drawer-content.js";
+import { openInNewTab } from "./shared/util.js";
+import { findCard } from "./shared/cards.js";
 
 // The order of the piles is frozen for the whole session of the page (a new page load forgets it), and so is what he chose to look at.
 const place = createPlace();
@@ -43,18 +45,47 @@ export function resetSession() {
 
 let S = null;
 
-/** A card of the snapshot by its key, wherever it is (a column of the board, the proposals, the stuck ones), or null. */
-function findCard(model, key) {
-  if (!model) return null;
-  const snap = model.snap;
-  for (const col of snap.board || []) for (const c of col.cards) if (c.key === key) return c;
-  for (const c of [...((snap.awaiting_approval || {}).cards || []), ...((snap.needs_gonza || {}).cards || [])]) if (c.key === key) return c;
-  return null;
+/** What the page asks of the moment: the choices it keeps, the state of a verb, retry and the keyboard's way into the list. */
+function makeUi(me) {
+  const { ctx } = me;
+  function set(patch) {
+    const next = { ...patch };
+    if ("filter" in next) next.filter = filterId(next.filter);
+    if ("order" in next && !ORDERS.includes(next.order)) delete next.order;
+    if ("mode" in next && next.mode !== "table") next.mode = "field";
+    if ("query" in next) next.query = String(next.query || "").slice(0, QUERY_MAX);
+    Object.assign(memory, next);
+    me.redraw();
+  }
+  /** `set` for a patch that changes the filter (a chip, a key, "clear"): it also says aloud which filter is on now. */
+  function setFilter(patch) {
+    set(patch);
+    const f = me.view && ctx.announce ? me.view.filters.find((x) => x.active) : null;
+    if (f) ctx.announce(`${f.label} · ${f.n}`);
+  }
+  return {
+    get: () => memory,
+    set,
+    setFilter,
+    stateOf: (id) => ({ armed: me.actions.armedOf(id), pending: me.actions.isPending(id) }),
+    retry: () => { if (me.retry) me.retry(); else me.redraw(); },
+    setRetry: (fn) => { me.retry = fn; },
+    toList: () => { if (ctx.cursor && ctx.cursor.key == null) ctx.cursor.move(1); },
+  };
+}
+
+/** Esc takes back a verb pressed once, before anything else hears the Esc. */
+function escapeOf(me) {
+  return (e) => {
+    if (e.key !== "Escape" || !me.armed) return;
+    e.stopPropagation();
+    me.actions.disarm();
+  };
 }
 
 function mount(host, ctx) {
   if (S) unmount();
-  const openUrl = ctx.openUrl || ((url) => window.open(url, "_blank", "noopener,noreferrer"));
+  const openUrl = ctx.openUrl || openInNewTab;
   const me = { ctx, host, model: null, armed: null, first: true, retry: null };
 
   me.actions = createActions({
@@ -70,43 +101,21 @@ function mount(host, ctx) {
     onChange: (id) => { if (S === me) { me.syncArmed(id); me.ui.repaint(id); } },
   });
 
-  const ui = {
-    get: () => memory,
-    set(patch) {
-      const next = { ...patch };
-      if ("filter" in next) next.filter = filterId(next.filter);
-      if ("order" in next && !ORDERS.includes(next.order)) delete next.order;
-      if ("mode" in next && next.mode !== "table") next.mode = "field";
-      if ("query" in next) next.query = String(next.query || "").slice(0, 60);
-      Object.assign(memory, next);
-      me.redraw();
-      if ("filter" in next && me.view && ctx.announce) {
-        const f = me.view.filters.find((x) => x.active);
-        if (f) ctx.announce(`${f.label} · ${f.n}`);
-      }
-    },
-    stateOf: (id) => ({ armed: me.actions.armedOf(id), pending: me.actions.isPending(id) }),
-    retry: () => { if (me.retry) me.retry(); else me.redraw(); },
-    setRetry: (fn) => { me.retry = fn; },
-    toList: () => { if (ctx.cursor && ctx.cursor.key == null) ctx.cursor.move(1); },
-  };
+  const ui = makeUi(me);
   me.set = ui.set;
+  me.setFilter = ui.setFilter;
   me.ui = createProcesos({ ui, run: (id, view) => me.actions.run(id, view), reduced: ctx.reduced });
   host.append(me.ui.el);
   me.forms = ctx.menu ? createForms({ menu: ctx.menu, session: ctx.session, sound: ctx.sound, announce: ctx.announce, now: ctx.now, cardOf: (key) => findCard(me.model, key), rowEl: (id) => me.ui.el.querySelector(`[data-row="${CSS.escape(id)}"]`) }) : null;
 
-  // what a pressed-once verb says in the foot, and Esc taking it back before anything else hears the Esc
+  // what a pressed-once verb says in the foot
   me.syncArmed = (id) => {
     const verb = me.actions.armedOf(id);
     if (verb) me.armed = { id, verb };
     else if (me.armed && me.armed.id === id) me.armed = null;
     me.ui.armed(me.armed ? t("procesos.armed", { action: actionLabel(me.armed.verb) }) : null);
   };
-  me.onEsc = (e) => {
-    if (e.key !== "Escape" || !me.armed) return;
-    e.stopPropagation();
-    me.actions.disarm();
-  };
+  me.onEsc = escapeOf(me);
   document.addEventListener("keydown", me.onEsc);
 
   me.redraw = () => {
@@ -139,7 +148,7 @@ function onKey(actionId, row, event) {
     const n = Number(event && event.key);
     if (!(n >= 1 && n <= FILTERS.length)) return false;
     stop();
-    S.set({ filter: FILTERS[n - 1].id });
+    S.setFilter({ filter: FILTERS[n - 1].id });
     return true;
   }
   if (actionId === "find") { stop(); S.ui.focusFind(); return true; }
@@ -147,7 +156,7 @@ function onKey(actionId, row, event) {
   if (actionId === "newtask") { // a key of the stop, not of a row
     if (!S.forms) return false;
     stop();
-    S.forms.newTask(row || S.ui.el.querySelector(".head"));
+    openNewTask(row);
     return true;
   }
   const view = row && row.dataset && row.dataset.row ? S.ui.rowView(row.dataset.row) : null;
@@ -162,16 +171,21 @@ function arrive(opts) {
   if (S) S.redraw();
 }
 
+/** The form of a new task, opened over `from` (the row the key was pressed on) or else over the head of the page. */
+function openNewTask(from) {
+  if (S.forms) S.forms.newTask(from || S.ui.el.querySelector(".head"));
+}
+
 /** The content of the drawer for an application: PROCESOS' own page of it, whose buttons run the same verbs as the keys of the list. */
 function drawer(detail, card, ctx) {
   return drawerContent(detail, card, ctx, {
-    run: async (id, opts) => {
+    run: async (verb, opts) => {
       if (!S) return undefined;
-      if (id === "newtask") { if (S.forms) S.forms.newTask(S.ui.el.querySelector(".head")); return undefined; }
+      if (verb === "newtask") { openNewTask(null); return undefined; }
       // the row the list has drawn, else the one the model gives: the drawer draws its buttons from the model, whatever the filter or the search hides
-      const view = S.ui.rowView("card:" + card.key) || rowViewOf(S.model, card.key, (ctx || S.ctx).now());
+      const view = S.ui.rowView(rowIdOf(card.key)) || rowViewOf(S.model, card.key, (ctx || S.ctx).now());
       if (!view) return undefined;
-      const result = await S.actions.run(id, view, opts);
+      const result = await S.actions.run(verb, view, opts);
       // the drawer is not redrawn by a refresh of the snapshot: what a verb changed (the trail, the next step) is read again
       if (result === "fired" && ctx && ctx.drawer && typeof ctx.drawer.reload === "function") ctx.drawer.reload();
       return result;

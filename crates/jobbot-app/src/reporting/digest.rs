@@ -8,7 +8,7 @@ use anyhow::Result;
 use chrono::{DateTime, TimeDelta, Utc};
 use chrono_tz::America::Santiago;
 use jobbot_domain::outbound::plain_line;
-use jobbot_domain::state::State;
+use jobbot_domain::state::{ANSWERED_STATES, State};
 
 use crate::ports::store::{ApplicationRow, Store};
 
@@ -42,7 +42,7 @@ pub fn build_digest(tracker: &dyn Store, now: DateTime<Utc>, top_n: usize) -> Re
         .list_by_state(State::NeedsGonza)?
         .iter()
         .map(|r| {
-            let reason = r.waiting_reason().unwrap_or("sin motivo");
+            let reason = r.waiting_reason_or_default();
             line(r, &format!(": {reason} · `{}`", r.job_key))
         })
         .collect();
@@ -119,25 +119,23 @@ pub fn build_digest(tracker: &dyn Store, now: DateTime<Utc>, top_n: usize) -> Re
 
     let week = now - TimeDelta::days(7);
     let sent = tracker.submitted_since(week)?;
-    let responses = tracker.count_events(
-        &[
-            State::Replied,
-            State::TechnicalTest,
-            State::Interview,
-            State::Offer,
-            State::Rejected,
-        ],
-        week,
-    )?;
-    let interviews = tracker.count_events(&[State::Interview], week)?;
+    // Applications, not events: one that was replied to and then invited counts once. The
+    // responses are whatever was answered this week, sent whenever; the rate is only over the
+    // ones sent this week, so it cannot pass 100 %.
+    let responses = tracker.jobs_reaching(&ANSWERED_STATES, week)?;
+    let interviews = tracker.jobs_reaching(&[State::Interview], week)?;
+    let answered = tracker.submitted_since_reaching(week, &ANSWERED_STATES)?;
     let rate = if sent > 0 {
-        format!("{:.0}%", 100.0 * responses as f64 / sent as f64)
+        format!("{:.0}%", 100.0 * answered as f64 / sent as f64)
     } else {
         "n/a".to_string()
     };
     lines.push("## Métricas de la semana".to_string());
     lines.push(format!(
-        "- Enviadas: {sent} · Respuestas: {responses} ({rate}) · Entrevistas: {interviews}"
+        "- Enviadas: {sent} · Respuestas: {responses} · Entrevistas: {interviews}"
+    ));
+    lines.push(format!(
+        "- De las enviadas esta semana ya respondieron: {answered} ({rate})"
     ));
     // What the headless Claude runs cost: the digest is where Gonza sees it.
     lines.push(String::new());

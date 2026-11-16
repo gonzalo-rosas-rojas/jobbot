@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createActions, requestOf, DEFAULT_SNOOZE } from "../src/moments/hoy/actions.js";
+import { createActions, requestOf, unsnoozeRowOf, DEFAULT_SNOOZE } from "../src/moments/hoy/actions.js";
 import { ARM_MIN_MS, ARM_MAX_MS } from "../src/core/dom.js";
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));
@@ -49,6 +49,14 @@ function rig(options = {}) {
 const act = (id, permanent = false) => ({ id, key: id[0], label: id, primary: false, visible: true, permanent });
 const card = { id: "card:fx:12", data: { card: "fx:12" }, open: "fx:12", link: "https://example.com/12", actions: [act("approve", true), act("open"), act("snooze"), act("link"), act("resolve"), act("confirm", true)] };
 const task = { id: "task:101", data: { task: "101" }, open: "fx:2", link: null, actions: [act("done", true), act("open")] };
+
+test("the row HOY builds to take a snoozed card back is a row that unsnooze accepts", () => {
+  const row = unsnoozeRowOf("fx:12");
+  assert.deepEqual(requestOf("unsnooze", row), { path: "/api/unsnooze", body: { key: "fx:12" } });
+  assert.ok(row.actions.some((a) => a.id === "unsnooze" && !a.permanent), "it is one press, no second press to arm");
+  assert.equal(row.open, null);
+  assert.equal(row.link, null);
+});
 
 test("each verb makes the request the server expects, and a row only takes what it is", () => {
   assert.deepEqual(requestOf("done", task), { path: "/api/task/done", body: { id: 101 } }, "a task id is a number");

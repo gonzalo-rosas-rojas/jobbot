@@ -13,7 +13,7 @@ break both promises.
 Three layers, none optional.
 
 1. **CSP with a nonce per load**: `default-src 'none'; script-src 'nonce-X'; style-src 'nonce-X'; connect-src 'self'; img-src 'self' blob:; font-src 'self'; base-uri 'none';
-   form-action 'none'; frame-ancestors 'none'; require-trusted-types-for 'script'`. Rust sends it (`../crates/jobbot-panel/src/http.rs`), `tools/serve.mjs` sends the same for development.
+   form-action 'none'; frame-ancestors 'none'; require-trusted-types-for 'script'`. Rust sends it (`../crates/jobbot-panel/src/http/page.rs`), `tools/serve.mjs` sends the same for development.
 2. **Trusted Types with no policy**: a string handed to `innerHTML`, `eval` or a script `src` throws. Our DOM is built only by `h()` and `sv()` in `src/core/dom.js`: every child
    that is not a node is a text node, dangerous tags and URL schemes are refused, `on*` takes functions only, `style` takes an object.
 3. **`guard.mjs`**: the built page and the bundle are refused if they contain any of 30 strings (`innerHTML`, `eval(`, `new Function`, `import(`, `new Worker(`, `WebSocket`,

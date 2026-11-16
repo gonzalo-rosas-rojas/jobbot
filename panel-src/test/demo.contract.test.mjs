@@ -47,7 +47,7 @@ test("heavy has 74 live processes, 8 stuck forms, 3 captures to approve and 10 t
   assert.equal(s.funnel.by_source.greenhouse.n + s.funnel.by_source.ashby.n + s.funnel.by_source.lever.n, s.board.flatMap((c) => c.cards).length);
 });
 
-// The contract (snapshot.rs, Activity): `moves` is cut at 60, `moves_total` says how many there are, and `moves_by_state` is NOT cut: its counts add up to `moves_total`.
+// The contract (snapshot/activity.rs, Activity): `moves` is cut at 60, `moves_total` says how many there are, and `moves_by_state` is NOT cut: its counts add up to `moves_total`.
 test("moves_by_state adds up to moves_total, and the cut list never has more than moves_total", async () => {
   for (const search of ["", "?scenario=heavy", "?scenario=urgent"]) {
     const s = await snapshotOf({ search });

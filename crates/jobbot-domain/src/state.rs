@@ -33,6 +33,16 @@ pub const SUBMITTED_STATES: [State; 8] = [
     State::Ghosted,
 ];
 
+/// The states that mean an application got an answer (a rejection is one). The weekly digest and
+/// the panel's metrics and funnel count these, so they never disagree about what "answered" is.
+pub const ANSWERED_STATES: [State; 5] = [
+    State::Replied,
+    State::TechnicalTest,
+    State::Interview,
+    State::Offer,
+    State::Rejected,
+];
+
 impl State {
     pub const ALL: [State; 12] = [
         State::Scored,
@@ -116,7 +126,37 @@ mod tests {
             assert_eq!(state.to_string(), state.as_str());
         }
         assert_eq!(State::parse("nope"), None);
-        assert_eq!(State::ALL.len(), 12);
+    }
+
+    /// Position of each state in `State::ALL`. The match has no `_` arm, so a new state does not
+    /// compile until it is listed here, and the test below then checks `ALL` against it.
+    fn position_in_all(state: State) -> usize {
+        match state {
+            State::Scored => 0,
+            State::Prepared => 1,
+            State::NeedsGonza => 2,
+            State::Submitted => 3,
+            State::Replied => 4,
+            State::TechnicalTest => 5,
+            State::Interview => 6,
+            State::Offer => 7,
+            State::Accepted => 8,
+            State::Rejected => 9,
+            State::Withdrawn => 10,
+            State::Ghosted => 11,
+        }
+    }
+
+    #[test]
+    fn all_lists_every_state_once_in_order() {
+        for (index, state) in State::ALL.into_iter().enumerate() {
+            assert_eq!(position_in_all(state), index, "{state}");
+        }
+        assert_eq!(
+            State::ALL.len(),
+            position_in_all(State::Ghosted) + 1,
+            "ALL has a state the position table lacks, or misses one"
+        );
     }
 
     #[test]

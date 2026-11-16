@@ -18,19 +18,21 @@
 
 import { BUSES, cueOf } from "./cues.js";
 import { horaOf, WINDOW_START, WINDOW_END } from "../scene/clock.js";
+import { isHidden } from "./page.js";
+import { HOUR_MS, SECOND_MS } from "../core/time.js";
 
 export const LEVELS = Object.freeze({ low: 0.12, mid: 0.25, high: 0.4 });
 export const LEVEL_IDS = Object.freeze(["low", "mid", "high"]);
 const WORK_FROM = WINDOW_END;                  // the bot's window is 18:00 to 09:00; the rest of the day is the working day
 const WORK_TO = WINDOW_START;
-export const OWN_MS = 90 * 1000;                      // how long a change he made explains the changes the next snapshot shows
+export const OWN_MS = 90 * SECOND_MS;                      // how long a change he made explains the changes the next snapshot shows
 const HISTORY = 24;
-const HOUR = 3600000;
-const TOMORROW_AT = 6;                                 // "hasta mañana" ends at the next 06:00, at least two hours away
-const two = (n) => String(n).padStart(2, "0");
+const TOMORROW_AT = 6;                                 // "hasta mañana" ends at the next 06:00, at least MIN_HOURS_TO_TOMORROW away
+const MIN_HOURS_TO_TOMORROW = 2;
+const pad2 = (n) => String(n).padStart(2, "0");
 
 export const isWorkHour = (hora) => hora >= WORK_FROM && hora < WORK_TO;
-const workLabel = () => ({ from: `${two(WORK_FROM)}:00`, to: `${two(WORK_TO)}:00` });
+const workLabel = () => ({ from: `${pad2(WORK_FROM)}:00`, to: `${pad2(WORK_TO)}:00` });
 
 /** The level (low, mid, high) nearest to a volume of the engine. */
 export function levelOf(volume) {
@@ -47,7 +49,7 @@ export function levelOf(volume) {
  *   play(name, opts) -> whether a sound started, preview(name | id, opts) -> the same without the gates, history(), ownRecently(ms), onChange(fn), onPlay(fn)
  * `now()` is the clock of the page (ms), `hora(ms)` the decimal hour of the working day's zone, `reduced()` whether motion is asked to be calm.
  */
-export function createPlayer({ engine, prefs, now = Date.now, hora = (ms) => horaOf(ms), reduced = () => false, hidden = () => typeof document !== "undefined" && document.hidden === true }) {
+export function createPlayer({ engine, prefs, now = Date.now, hora = (ms) => horaOf(ms), reduced = () => false, hidden = isHidden }) {
   const changeListeners = new Set();
   const playListeners = new Set();
   const history = [];
@@ -61,8 +63,6 @@ export function createPlayer({ engine, prefs, now = Date.now, hora = (ms) => hor
   };
   const emit = () => tell(changeListeners);
   prefs.onChange(() => emit());
-
-  const muted = (t) => prefs.get("muteUntil") > t;
 
   /** Why a cue may not sound now, or null when it may. */
   function why(cue, t) {
@@ -100,6 +100,7 @@ export function createPlayer({ engine, prefs, now = Date.now, hora = (ms) => hor
       remember(cue, t, false);
       return true;
     } catch (e) {
+      console.error(e);
       return false;
     }
   }
@@ -115,6 +116,7 @@ export function createPlayer({ engine, prefs, now = Date.now, hora = (ms) => hor
       remember(cue, now(), true);
       return true;
     } catch (e) {
+      console.error(e);
       return false;
     }
   }
@@ -182,8 +184,8 @@ export function createPlayer({ engine, prefs, now = Date.now, hora = (ms) => hor
     muteUntilTomorrow() {
       const t = now();
       let ahead = (TOMORROW_AT - hora(t) + 24) % 24;
-      if (ahead < 2) ahead += 24;
-      const until = t + Math.round(ahead * HOUR);
+      if (ahead < MIN_HOURS_TO_TOMORROW) ahead += 24;
+      const until = t + Math.round(ahead * HOUR_MS);
       prefs.set("muteUntil", until);
       return until;
     },

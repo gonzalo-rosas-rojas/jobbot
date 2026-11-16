@@ -14,7 +14,9 @@ use async_trait::async_trait;
 use serde::Deserialize;
 
 use super::Source;
-use super::base::{REQUEST_PAUSE, failure, get_text, join_places, parse_rfc2822, skipped_error};
+use super::base::{
+    REQUEST_PAUSE, failure, get_text, join_places, parse_rfc2822, skipped_error, with_labeled_lines,
+};
 use super::rss::{self, Item};
 use jobbot_domain::models::{FetchResult, Job};
 use jobbot_domain::text::html_to_text;
@@ -147,16 +149,14 @@ fn parse_item(item: &Item) -> Option<Job> {
         country.trim_start_matches(|c: char| !c.is_alphanumeric()),
         state.as_str(),
     ]);
-    let mut description = html_to_text(&item.text("description"));
-    for (label, value) in [
-        ("Type", item.text("type")),
-        ("Category", item.text("category")),
-        ("Skills", item.text("skills")),
-    ] {
-        if !value.is_empty() {
-            description = format!("{description}\n{label}: {value}");
-        }
-    }
+    let description = with_labeled_lines(
+        html_to_text(&item.text("description")),
+        &[
+            ("Type", &item.text("type")),
+            ("Category", &item.text("category")),
+            ("Skills", &item.text("skills")),
+        ],
+    );
     Some(Job {
         source: "weworkremotely".to_string(),
         external_id: external_id.to_string(),

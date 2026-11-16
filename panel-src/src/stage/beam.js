@@ -5,12 +5,17 @@
 // the real one, so the light does not change when you travel between stops.
 
 import { shortestDelta } from "../scene/poses.js";
+import { cssa } from "./shared.js";
 
 export const FREE_MIN = 120;                               // narrower than this right of the sheet there is no room for a beam
 const DOCKED = 120, DOCK_FULL = 320;                    // the dial box of a docked dial (92 to 120 px) and the one from which the sun's beam is the full one
 export const BODY_HOURS = { sun: 9, window: 26 / 60, horizon: 18 };
 const KINDS = ["sun", "window", "horizon"];
-const cssa = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${Math.max(0, a).toFixed(3)})`;
+/** How far a window must stand from the sheet's edge and from the right edge of the window to be the source of a light, in px. */
+export const WINDOW_MARGIN = { fromSheet: 60, fromEdge: 40 };
+const WINDOW_TARGET_SHARE = 0.55;   // the window that sources the light is the one nearest to this share of the free width right of the sheet
+const SUN_EDGE_MARGIN_PX = 24;      // a sun nearer than this to the sheet's edge throws no light
+const HORIZON_START_SHARE = 0.08;   // the horizon's light starts this share of the free width right of the sheet
 
 /** The body whose hour is nearest to `hora` on the 24 h ring; a tie goes to the earlier one of sun, window, horizon. */
 export function bodyKind(hora) {
@@ -37,28 +42,6 @@ export function clipPolygon(polygon, minX) {
   return out;
 }
 
-const project = (points, ax, ay) => {
-  let min = Infinity, max = -Infinity;
-  for (const [x, y] of points) { const v = x * ax + y * ay; if (v < min) min = v; if (v > max) max = v; }
-  return { min, max };
-};
-
-/** True when a convex polygon and a rectangle overlap with positive area (sharing an edge is not a hit). */
-export function polygonHitsRect(polygon, rect) {
-  if (polygon.length < 3) return false;
-  const corners = [[rect.left, rect.top], [rect.right, rect.top], [rect.right, rect.bottom], [rect.left, rect.bottom]];
-  const axes = [[1, 0], [0, 1]];
-  for (let i = 0; i < polygon.length; i++) {
-    const [x1, y1] = polygon[i], [x2, y2] = polygon[(i + 1) % polygon.length];
-    if (x1 !== x2 || y1 !== y2) axes.push([-(y2 - y1), x2 - x1]);
-  }
-  for (const [ax, ay] of axes) {
-    const p = project(polygon, ax, ay), r = project(corners, ax, ay);
-    if (p.max <= r.min + 1e-9 || r.max <= p.min + 1e-9) return false;
-  }
-  return true;
-}
-
 /** The area the light covers, as a convex quad: a little wider than the core at the source, 90 % of the beam's width at the far end. */
 export function coneOf(beam) {
   const ux = Math.cos(beam.ang), uy = Math.sin(beam.ang), nx = -uy, ny = ux;
@@ -69,10 +52,10 @@ export function coneOf(beam) {
 
 // Of the lit windows right of the sheet, the one nearest to 55 % of the free width (none: no light at all).
 function windowFor(windows, clipX, w) {
-  const target = clipX + (w - clipX) * 0.55;
+  const target = clipX + (w - clipX) * WINDOW_TARGET_SHARE;
   let best = null;
   for (const win of windows) {
-    if (win.x < clipX + 60 || win.x > w - 40) continue;
+    if (win.x < clipX + WINDOW_MARGIN.fromSheet || win.x > w - WINDOW_MARGIN.fromEdge) continue;
     if (!best || Math.abs(win.x - target) < Math.abs(best.x - target)) best = win;
   }
   return best;
@@ -88,28 +71,46 @@ export function beamFor({ hora, w, h, sheet, hub, windows = [] }) {
   const clipX = sheet.right;
   if (w - clipX < FREE_MIN) return null;
   const kind = bodyKind(hora);
-  let beam;
-  if (kind === "sun") {
-    if (!hub || hub.x < clipX + 24 || hub.x > w || hub.y < 0 || hub.y > h) return null;
-    // Where it reaches the sheet's edge: most of the way from the hub's own height to 52 % of the window's, so a sun that sits low (the
-    // sunk dial of HOY) throws a light that lies nearly flat across the sky instead of a streak that climbs towards the sheet.
-    const ty = hub.y + (h * 0.52 - hub.y) * 0.3;
-    // A docked dial is a badge of about 100 px and the same light over a 1100 px beam turned into a white comet (the sum of the glow and
-    // the rays reaches 0.9 over the darker sky of the day): the beam gets thinner and warmer as the dial shrinks, and is the full one
-    // from `DOCK_FULL` px of dial box up (T24; k = 1 gives the old beam back).
-    const k = Math.min(1, Math.max(0, ((hub.size || Infinity) - DOCKED) / (DOCK_FULL - DOCKED)));
-    const warm = (lo, hi) => lo.map((v, i) => Math.round(v + (hi[i] - v) * k));
-    beam = { x: hub.x, y: hub.y, ang: Math.atan2(ty - hub.y, clipX - hub.x), len: Math.hypot(hub.x - sheet.left, hub.y - ty) * 1.02, wid: h * 0.42, color: warm([255, 156, 80], [255, 186, 120]), a: 0.5 * (0.55 + 0.45 * k), core: Math.max(14, Math.min(h * 0.03, (hub.size || Infinity) * 0.055)), coreColor: [255, 240, 205] };
-  } else if (kind === "window") {
-    const win = windowFor(windows, clipX, w);
-    if (!win) return null;
-    const ty = h * 0.45;
-    beam = { x: win.x, y: win.y, ang: Math.atan2(ty - win.y, clipX - win.x), len: Math.hypot(win.x - clipX, win.y - ty) * 1.15, wid: h * 0.3, color: [255, 205, 130], a: 0.42, core: Math.max(6, h * 0.008), coreColor: [255, 236, 190] };
-  } else {
-    const x0 = clipX + (w - clipX) * 0.08;
-    beam = { x: x0, y: h * 0.96, ang: -0.1, len: (w - x0) * 1.05, wid: h * 0.34, color: [255, 150, 70], a: 0.46, core: h * 0.05, coreColor: [255, 196, 120] };
-  }
-  return { beam, polygon: clipPolygon(coneOf(beam), clipX), kind };
+  const beam = kind === "sun" ? sunBeam(hub, sheet, w, h) : kind === "window" ? windowBeam(windows, clipX, w, h) : horizonBeam(clipX, w, h);
+  return beam && { beam, polygon: clipPolygon(coneOf(beam), clipX), kind };
+}
+
+// The sun is born at the hub of the dial; no light when the hub is outside the free part of the window.
+function sunBeam(hub, sheet, w, h) {
+  const clipX = sheet.right;
+  if (!hub || hub.x < clipX + SUN_EDGE_MARGIN_PX || hub.x > w || hub.y < 0 || hub.y > h) return null;
+  // Where it reaches the sheet's edge: most of the way from the hub's own height to 52 % of the window's, so a sun that sits low (the
+  // sunk dial of HOY) throws a light that lies nearly flat across the sky instead of a streak that climbs towards the sheet.
+  const ty = hub.y + (h * 0.52 - hub.y) * 0.3;
+  // A docked dial is a badge of about 100 px and the same light over a 1100 px beam turned into a white comet (the sum of the glow and
+  // the rays reaches 0.9 over the darker sky of the day): the beam gets thinner and warmer as the dial shrinks, and is the full one
+  // from `DOCK_FULL` px of dial box up (T24; k = 1 gives the old beam back).
+  const k = Math.min(1, Math.max(0, ((hub.size || Infinity) - DOCKED) / (DOCK_FULL - DOCKED)));
+  const warm = (lo, hi) => lo.map((v, n) => Math.round(v + (hi[n] - v) * k));
+  return {
+    x: hub.x, y: hub.y,
+    ang: Math.atan2(ty - hub.y, clipX - hub.x),
+    len: Math.hypot(hub.x - sheet.left, hub.y - ty) * 1.02,
+    wid: h * 0.42,
+    color: warm([255, 156, 80], [255, 186, 120]),
+    a: 0.5 * (0.55 + 0.45 * k),
+    core: Math.max(14, Math.min(h * 0.03, (hub.size || Infinity) * 0.055)),
+    coreColor: [255, 240, 205],
+  };
+}
+
+// A lit window right of the sheet, or null when none is a fit source.
+function windowBeam(windows, clipX, w, h) {
+  const win = windowFor(windows, clipX, w);
+  if (!win) return null;
+  const ty = h * 0.45;
+  return { x: win.x, y: win.y, ang: Math.atan2(ty - win.y, clipX - win.x), len: Math.hypot(win.x - clipX, win.y - ty) * 1.15, wid: h * 0.3, color: [255, 205, 130], a: 0.42, core: Math.max(6, h * 0.008), coreColor: [255, 236, 190] };
+}
+
+// The low light of the horizon, right of the sheet.
+function horizonBeam(clipX, w, h) {
+  const x0 = clipX + (w - clipX) * HORIZON_START_SHARE;
+  return { x: x0, y: h * 0.96, ang: -0.1, len: (w - x0) * 1.05, wid: h * 0.34, color: [255, 150, 70], a: 0.46, core: h * 0.05, coreColor: [255, 196, 120] };
 }
 
 /** How far from the sheet's edge the light takes to come to full strength, at most; less when the source is closer than twice that. */
@@ -184,13 +185,13 @@ function clipOutside(g, holes, ratio = 1) {
 }
 
 /**
- * Paints one light on a 2D context. Nothing is painted left of `clipLeft` (the sheet's right edge; 0 for no clip), and the light
+ * Paints one light on a 2D context; the options are { clipLeft, layer, holes }. Nothing is painted left of `clipLeft` (the sheet's right edge; 0 for no clip), and the light
  * comes in over the first `fadeWidth` px right of it instead of being cut off at full strength: that strip is painted on a layer
  * of its own, multiplied by a ramp from 0 to 1 and added to the canvas. Where `layer` gives nothing (no canvas to make) the
  * beam is cut at the edge as before. `holes` are rectangles it is not painted in at all (the drawer is a second glass: the light
  * must not show through it any more than through the sheet).
  */
-export function drawBeam(g, b, clipLeft = 0, layer = scratchLayer, holes = []) {
+export function drawBeam(g, b, { clipLeft = 0, layer = scratchLayer, holes = [] } = {}) {
   const fade = fadeWidth(b, clipLeft);
   const matrix = typeof g.getTransform === "function" ? g.getTransform() : null;
   const ratio = matrix && matrix.a > 0 ? matrix.a : 1;

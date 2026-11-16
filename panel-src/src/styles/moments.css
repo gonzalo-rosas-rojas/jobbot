@@ -13,6 +13,9 @@
 .hoy .eyebrow, .hoy .strip-title, .hoy .base, .hoy .fig-l, .hoy .rest-label, .hoy .rest-hint, .hoy .since-title, .hoy .foot-line, .hoy .snoozed-title, .hoy .after, .hoy .more { color: var(--ink-dim); }
 /* the public demo's line about itself: in the flow, the first thing of the sheet, in the grey of the labels, its links gold and underlined */
 .hoy .about { max-width: 78ch; color: var(--ink-dim); line-height: 1.4; overflow-wrap: anywhere; }
+/* the mailbox has not been read: a real warning (the alert colour), a line above the eyebrow that stays until an import clears it */
+.hoy .mail-warn { max-width: 78ch; color: var(--alert); line-height: 1.4; overflow-wrap: anywhere; }
+.hoy .mail-warn[hidden] { display: none; }
 .hoy .about a { color: var(--ink-accent); text-decoration: underline; text-underline-offset: 3px; }
 
 .hoy .headline { display: flex; flex-wrap: wrap; gap: 4px 32px; align-items: flex-end; justify-content: space-between; }

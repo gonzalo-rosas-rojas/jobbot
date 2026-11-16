@@ -59,7 +59,8 @@ export function createToast({ say = () => {}, ms = TOAST_MS, set = (fn, n) => se
     el,
     show,
     polite(message, ok = true) {
-      if (isError && el.classList.contains("show")) pending = { text: message, ok };
+      // `isError` is true only while an error is on screen (show sets it, hide clears it)
+      if (isError) pending = { text: message, ok };
       else show(message, ok);
     },
     hide,

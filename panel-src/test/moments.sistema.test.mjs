@@ -39,7 +39,7 @@ test("the three values of engine tell the three truths: ran 56 min ago, missed a
   assert.deepEqual([never.head.lead, never.head.tail], ["Sin corridas", "todavía."]);
   assert.equal(never.chip.text, "Motor sin corridas todavía");
   assert.equal(never.run.last, null, "no date is invented for a run that never happened");
-  assert.equal(ENGINE_STALE_HOURS, 36, "the server's own limit (crates/jobbot-panel/src/snapshot.rs ENGINE_STALE_HOURS)");
+  assert.equal(ENGINE_STALE_HOURS, 36, "the server's own limit (crates/jobbot-panel/src/snapshot/controls.rs ENGINE_STALE_HOURS)");
 });
 
 test("the headline is worded from last_run_at alone: a run that is not a moment, or in the future, never reads as '-3 h'", () => {
@@ -374,14 +374,14 @@ test("the errors of the night: the run's own error first, then what stopped for 
 test("STOP: the state, the one verb and the key from the table; an intent that has not come back yet is shown at once", () => {
   fresh();
   const on = view(scenario("night")).stop;
-  assert.deepEqual([on.on, on.action, on.label, on.key], [false, "stop", "Parar el motor", KEYS.find((k) => k.id === "engine").display]);
+  assert.deepEqual([on.on, on.label, on.key], [false, "Parar el motor", KEYS.find((k) => k.id === "engine").display]);
   assert.equal(on.text, "apagado");
   const stopped = view(scenario("stop")).stop;
-  assert.deepEqual([stopped.on, stopped.action, stopped.label], [true, "resume", "Quitar STOP"]);
+  assert.deepEqual([stopped.on, stopped.label], [true, "Quitar STOP"]);
   assert.equal(stopped.text, "puesto: no corre nada automático hasta que lo quites");
   assert.equal(view(scenario("stop")).chip.stop, true);
   const optimistic = view(scenario("night"), { intent: true });
-  assert.deepEqual([optimistic.stop.on, optimistic.stop.action], [true, "resume"], "the page answers in under 100 ms, before the snapshot does");
+  assert.deepEqual([optimistic.stop.on, optimistic.stop.label], [true, "Quitar STOP"], "the page answers in under 100 ms, before the snapshot does");
   assert.equal(view(scenario("stop"), { intent: false }).stop.on, false);
   assert.equal(view(scenario("night"), { intent: null }).stop.on, false);
   assert.ok(KEYS.some((k) => k.id === "engine" && k.stops.includes("sistema")), "the table has it for this stop (A19)");

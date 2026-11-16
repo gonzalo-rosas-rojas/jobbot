@@ -18,16 +18,27 @@ import { h, ARM_MIN_MS, heldKey } from "../../core/dom.js";
 import { t, fmtDate } from "../../i18n/index.js";
 import { PERMANENT_MARKS } from "../../core/model.js";
 import { markPhrase, markQuestion, stateLabel } from "../../core/format.js";
-import { memo, draftOf, keepDraft } from "./memo.js";
+import { memo, draftOf, setDraft } from "./memo.js";
 import { perform } from "./act.js";
 import { actButton } from "../act.js";
 
-const mine = (slot, key) => (slot && slot.key === key ? slot : null);
+/** The remembered slot (`memo.noted`, `memo.asking`) when it belongs to the application `key`, else null. */
+const ownSlot = (slot, key) => (slot && slot.key === key ? slot : null);
+
+const NOTE_MAX = 200; // the most characters the note field takes: the panel's own choice (the server cleans a note to 500)
+
+/** The first thing to do in "Registrar una respuesta": an answer to pick, or the way back after one went through; null when the section is not drawn. */
+export const firstMarkTarget = () => document.querySelector("#d-mark [data-mark], #mark-again, #mark-undo");
 
 /** The last change of `card` the server still takes back ({ from, to, at, until }), or null. */
 const undoOf = (card) => (card.undo && card.undo.from && card.undo.to === card.state ? card.undo : null);
 
 const nameOf = (card) => card.company || t("detail.mark.it");
+
+/** Remembers the server's refusal of a mark or an undo, in its own words, to write it under the buttons. */
+function refuse(ctx, key, r) {
+  memo.refusal = { key, text: ctx.session.said(r, t("err.action")) };
+}
 
 function undoButton(ctx, card) {
   const key = card.key;
@@ -36,7 +47,7 @@ function undoButton(ctx, card) {
     onclick: (e) => perform(ctx, e.currentTarget, "/api/mark/undo", { key }, {
       cue: "undo",
       onOk: () => { memo.noted = null; memo.asking = null; memo.refusal = null; },
-      onFail: (r) => { memo.refusal = { key, text: ctx.session.said(r, t("err.action")) }; },
+      onFail: (r) => refuse(ctx, key, r),
     }),
   });
 }
@@ -63,10 +74,38 @@ function receiptView(ctx, card, noted, undo) {
   ];
 }
 
+/** The note field; typing keeps the draft for `key` and takes the old refusal away. */
+function noteField(key, refusal) {
+  return h("input", {
+    id: "mark-note", class: "input", type: "text", maxlength: String(NOTE_MAX), autocomplete: "off", value: draftOf(key), placeholder: t("drawer.mark.placeholder"),
+    oninput: (e) => {
+      setDraft(key, e.target.value);
+      memo.refusal = null;
+      refusal.hidden = true;
+    },
+  });
+}
+
+/** The line that says the last change can still be taken back, with its button. */
+function lastChangeView(ctx, card, undo) {
+  return h("div", { class: "d-last" },
+    h("p", { class: "muted small" }, t("detail.mark.last", { from: stateLabel(undo.from), to: stateLabel(undo.to), hora: fmtDate(undo.until, "time") })),
+    undoButton(ctx, card));
+}
+
+/** The question for the answer he picked and what it will change: the two paragraphs under the choices. */
+function questionView(card, mark, from) {
+  const change = t(PERMANENT_MARKS.includes(mark) ? "detail.mark.change.closes" : "detail.mark.change", { company: nameOf(card), from: stateLabel(from), to: stateLabel(mark) });
+  return [
+    h("p", { id: "mark-question", class: "d-question" }, markQuestion(mark, from)),
+    h("p", { class: "d-change" }, change),
+  ];
+}
+
 export function markView(ctx, card) {
   const key = card.key;
   const marks = card.marks || [];
-  const noted = mine(memo.noted, key);
+  const noted = ownSlot(memo.noted, key);
   const undo = undoOf(card);
   if (!noted && !undo && marks.length === 0) return null;
   const refused = memo.refusal && memo.refusal.key === key ? memo.refusal.text : "";
@@ -78,34 +117,27 @@ export function markView(ctx, card) {
   }
 
   const from = card.state;
-  const note = h("input", {
-    id: "mark-note", class: "input", type: "text", maxlength: "200", autocomplete: "off", value: draftOf(key), placeholder: t("drawer.mark.placeholder"),
-    oninput: (e) => {
-      keepDraft(key, e.target.value);
-      memo.refusal = null;
-      refusal.hidden = true;
-    },
-  });
+  const note = noteField(key, refusal);
   const ask = h("div", { id: "mark-ask", class: "d-ask", role: "group", "aria-labelledby": "mark-question", hidden: true });
 
   const run = (button, mark) => perform(ctx, button, "/api/mark", { key, state: mark, note: note.value.trim() || null }, {
     cue: mark === "withdrawn" ? "withdraw" : "register",
-    onOk: () => { keepDraft(key, ""); memo.refusal = null; memo.asking = null; memo.noted = { key, from, to: mark }; },
-    onFail: (r) => { memo.refusal = { key, text: ctx.session.said(r, t("err.action")) }; memo.asking = null; },
+    onOk: () => { setDraft(key, ""); memo.refusal = null; memo.asking = null; memo.noted = { key, from, to: mark }; },
+    onFail: (r) => { refuse(ctx, key, r); memo.asking = null; },
   }).then(() => {
     const done = document.getElementById("mark-done");
-    if (done && mine(memo.noted, key)) done.focus(); // and into view: the section shrank under him (its scroll-margin clears the sticky actions row)
+    if (done && ownSlot(memo.noted, key)) done.focus(); // and into view: the section shrank under him (its scroll-margin clears the sticky actions row)
   });
 
-  /** Draws the question for the answer he picked, or takes it away; returns its "Sí" button. */
+  /** Draws the question for the answer he picked, or takes it away. */
   function paintAsk() {
-    const asking = mine(memo.asking, key);
+    const asking = ownSlot(memo.asking, key);
     const mark = asking && marks.includes(asking.state) ? asking.state : null;
     for (const b of section.querySelectorAll("[data-mark]")) b.setAttribute("aria-pressed", String(b.dataset.mark === mark));
     if (!mark) {
       ask.hidden = true;
       ask.replaceChildren();
-      return null;
+      return;
     }
     const shownAt = Date.now();
     const yes = actButton({
@@ -124,13 +156,8 @@ export function markView(ctx, card) {
         if (picked) picked.focus();
       },
     });
-    const change = t(PERMANENT_MARKS.includes(mark) ? "detail.mark.change.closes" : "detail.mark.change", { company: nameOf(card), from: stateLabel(from), to: stateLabel(mark) });
-    ask.replaceChildren(
-      h("p", { id: "mark-question", class: "d-question" }, markQuestion(mark, from)),
-      h("p", { class: "d-change" }, change),
-      h("div", { class: "cluster" }, yes, no));
+    ask.replaceChildren(...questionView(card, mark, from), h("div", { class: "cluster" }, yes, no));
     ask.hidden = false;
-    return yes;
   }
 
   const choices = marks.map((mark) => actButton({
@@ -141,15 +168,14 @@ export function markView(ctx, card) {
       memo.refusal = null;
       refusal.hidden = true;
       if (ctx.sound) ctx.sound.play("arm");
-      const yes = paintAsk();
+      paintAsk();
+      const yes = ask.querySelector("#mark-yes");
       if (yes) yes.focus({ preventScroll: true });
     },
   }));
 
   const parts = [
-    undo ? h("div", { class: "d-last" },
-      h("p", { class: "muted small" }, t("detail.mark.last", { from: stateLabel(undo.from), to: stateLabel(undo.to), hora: fmtDate(undo.until, "time") })),
-      undoButton(ctx, card)) : null,
+    undo ? lastChangeView(ctx, card, undo) : null,
     marks.length ? h("p", { class: "muted small" }, t("detail.mark.hint")) : null,
     marks.length ? h("div", { class: "field" }, h("label", { for: "mark-note" }, t("detail.mark.note")), note) : null,
     marks.length ? h("div", { class: "d-marks", role: "group", "aria-labelledby": "d-mark-h" }, choices) : null,

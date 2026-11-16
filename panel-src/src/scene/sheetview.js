@@ -6,6 +6,8 @@
 
 import { sheetIndex, sheetOpacity } from "./poses.js";
 
+const ONE_FLOOR = 1.0001;   // a floor, with a hair of slack for the rounding of px to floors: a trip this short is read from the position
+
 /**
  * { index, opacity } of the sheet. `job` is the tween in flight (engine.S.jump) or null; `pos` the camera in floors; `floorHeight` in px.
  * A glide to the nearest stop, a trip of one floor or less, and calm motion read the sheet from the position as ever.
@@ -13,11 +15,11 @@ import { sheetIndex, sheetOpacity } from "./poses.js";
 export function sheetView({ pos, job, floorHeight, reduced = false }) {
   const plain = { index: sheetIndex(pos), opacity: sheetOpacity(pos, reduced) };
   if (reduced || !job || job.snap) return plain;
-  const a = job.from / floorHeight, b = job.to / floorHeight;
-  if (Math.abs(b - a) <= 1.0001) return plain;
-  const from = sheetIndex(a), to = sheetIndex(b);
-  const away = Math.abs(pos - from), near = Math.abs(pos - to);
+  const fromFloor = job.from / floorHeight, toFloor = job.to / floorHeight;
+  if (Math.abs(toFloor - fromFloor) <= ONE_FLOOR) return plain;
+  const fromStop = sheetIndex(fromFloor), toStop = sheetIndex(toFloor);
+  const distFrom = Math.abs(pos - fromStop), distTo = Math.abs(pos - toStop);
   // Only the two ends exist: the nearer one is shown, as solid as a stop of one floor is at that distance, and nothing in the middle.
-  const d = Math.min(away, near);
-  return { index: away <= near ? from : to, opacity: d >= 0.5 ? 0 : sheetOpacity(d) };
+  const distance = Math.min(distFrom, distTo);
+  return { index: distFrom <= distTo ? fromStop : toStop, opacity: distance >= 0.5 ? 0 : sheetOpacity(distance) };
 }

@@ -10,7 +10,7 @@ use crate::http::Http;
 use async_trait::async_trait;
 
 use super::Source;
-use super::base::{failure, get_text, parse_iso, skipped_error};
+use super::base::{get_text, parse_all, parse_iso, record, with_labeled_lines};
 use super::rss::{self, Item};
 use jobbot_domain::models::{FetchResult, Job};
 use jobbot_domain::text::html_to_text;
@@ -39,15 +39,7 @@ impl RemoteYeahSource {
     async fn fetch_feed(&self) -> anyhow::Result<(Vec<Job>, usize)> {
         let url = format!("{}/rss.xml", self.base_url);
         let body = get_text(&self.http, &url, &[]).await?;
-        let mut jobs = Vec::new();
-        let mut skipped = 0;
-        for item in rss::items(&body)? {
-            match parse_item(&item) {
-                Some(job) => jobs.push(job),
-                None => skipped += 1,
-            }
-        }
-        Ok((jobs, skipped))
+        Ok(parse_all(&rss::items(&body)?, parse_item))
     }
 }
 
@@ -59,28 +51,23 @@ impl Source for RemoteYeahSource {
 
     async fn fetch(&self) -> FetchResult {
         let mut result = FetchResult::default();
-        match self.fetch_feed().await {
-            Ok((jobs, skipped)) => {
-                result.jobs = jobs;
-                if skipped > 0 {
-                    result
-                        .errors
-                        .push(skipped_error("remoteyeah", "rss", skipped));
-                }
-            }
-            Err(error) => result.errors.push(failure("remoteyeah", "rss", &error)),
-        }
+        record(&mut result, "remoteyeah", "rss", self.fetch_feed().await);
         result
     }
 }
+
+/// The word the feed puts before every role.
+const REMOTE_PREFIX: &str = "remote ";
 
 /// `"Remote Staff Software Engineer at Cision"` is the role `Staff Software Engineer`: the feed
 /// wraps every title in `Remote ... at {company}`, which would only hide the same role posted by
 /// another source.
 fn clean_title(raw: &str, company: &str) -> String {
     let title = raw.trim();
-    let title = match title.get(..7) {
-        Some(prefix) if prefix.eq_ignore_ascii_case("remote ") => title[7..].trim_start(),
+    let title = match title.get(..REMOTE_PREFIX.len()) {
+        Some(prefix) if prefix.eq_ignore_ascii_case(REMOTE_PREFIX) => {
+            title[REMOTE_PREFIX.len()..].trim_start()
+        }
         _ => title,
     };
     let suffix = format!(" at {company}");
@@ -102,11 +89,10 @@ fn parse_item(item: &Item) -> Option<Job> {
     if external_id.is_empty() || title.is_empty() || url.is_empty() {
         return None;
     }
-    let mut description = html_to_text(&item.text("description"));
-    let category = item.text("category");
-    if !category.is_empty() {
-        description = format!("{description}\nCategory: {category}");
-    }
+    let description = with_labeled_lines(
+        html_to_text(&item.text("description")),
+        &[("Category", &item.text("category"))],
+    );
     Some(Job {
         source: "remoteyeah".to_string(),
         external_id,

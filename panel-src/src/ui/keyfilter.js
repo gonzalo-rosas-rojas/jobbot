@@ -26,9 +26,11 @@ const REPEATABLE = new Set(["j", "k", "ArrowUp", "ArrowDown"]);
 /** True when the key event must be ignored by the shortcut layer. `locked()` says a dialog or menu owns the keyboard. */
 export function ignoreKey(event, { typing = quietFor, locked = () => false } = {}) {
   const key = String(event.key);
-  if (event.isComposing || (event.repeat && !(REPEATABLE.has(key) && !event.ctrlKey && !event.metaKey && !event.altKey))) return true;
+  const chord = event.ctrlKey || event.metaKey || event.altKey;
+  const repeatOk = REPEATABLE.has(key) && !chord;
+  if (event.isComposing || (event.repeat && !repeatOk)) return true;
   if ((event.ctrlKey || event.metaKey) && !event.altKey && key.toLowerCase() === "k") return false;
   if (key === "Escape") return false;
-  if (event.ctrlKey || event.metaKey || event.altKey) return true;
+  if (chord) return true;
   return typing(event.target) || locked();
 }

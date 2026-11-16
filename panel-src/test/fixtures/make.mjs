@@ -15,7 +15,7 @@ const MARKS = {
   technical_test: ["interview", "rejected", "withdrawn"], interview: ["offer", "rejected", "withdrawn"],
   offer: ["accepted", "rejected", "withdrawn"], ghosted: ["replied", "rejected", "withdrawn"],
 };
-// The four kinds of help the server tells apart, with the sentence it writes for each (crates/jobbot-panel/src/snapshot.rs, reason_kind).
+// The four kinds of help the server tells apart, with the sentence it writes for each (crates/jobbot-panel/src/snapshot/cards.rs, reason_kind).
 const STUCK = [
   { kind: "handoff", reason: "handoff: the page asks for a new account", short: "Envía tú el formulario: la hoja de respuestas está lista" },
   { kind: "missing_answers", reason: "faltan respuestas: expected salary", short: "El formulario pide respuestas que no tengo" },
@@ -35,6 +35,7 @@ function patchCard(s, c, rank) {
   orSet(c, "has_handoff", c.reason_kind === "handoff");
   orSet(c, "age_days", rank + 2);
   orSet(c, "prune_in_days", ["scored", "prepared", "needs_gonza"].includes(c.state) ? 20 - rank : null);
+  orSet(c, "undo", null);                                          // the mark he can still take back (schema v4): none in a drawn card
 }
 
 export function patch(s, { empty }) {
@@ -114,7 +115,10 @@ export function heavy(rich) {
   return s;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Only when it is run by name. A bare `node --test` takes every module under test/ for a test file and runs this one too, which rewrote the
+// fixtures under whoever was only running the tests; the runner marks its children with NODE_TEST_CONTEXT.
+const runByName = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href && !process.env.NODE_TEST_CONTEXT;
+if (runByName) {
   const empty = patch(read("snapshot.empty.json"), { empty: true });
   const rich = patch(read("snapshot.rich.json"), { empty: false });
   write("snapshot.empty.json", empty);

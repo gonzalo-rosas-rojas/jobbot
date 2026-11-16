@@ -6,11 +6,13 @@ use async_trait::async_trait;
 use serde_json::Value;
 
 use super::Source;
-use super::base::{failure, from_epoch, get_json, id_string, skipped_error, str_field};
+use super::base::{
+    LEVER_API_URL, from_epoch, get_json, id_string, or_if_empty, parse_all, record, str_field,
+};
 use jobbot_domain::models::{FetchResult, Job};
 use jobbot_domain::scoring::parse_salary_monthly_usd;
 
-const DEFAULT_BASE_URL: &str = "https://api.lever.co";
+const SOURCE_NAME: &str = "lever";
 
 pub struct LeverSource {
     companies: Vec<String>,
@@ -27,7 +29,7 @@ impl LeverSource {
         Self {
             companies: companies.into_iter().map(Into::into).collect(),
             http: http.into(),
-            base_url: DEFAULT_BASE_URL.to_string(),
+            base_url: LEVER_API_URL.to_string(),
         }
     }
 
@@ -41,36 +43,27 @@ impl LeverSource {
         let url = format!("{}/v0/postings/{company}", self.base_url);
         let body = get_json(&self.http, &url, &[("mode", "json")]).await?;
         let postings = body.as_array().context("response is not a JSON array")?;
-        let mut jobs = Vec::new();
-        let mut skipped = 0;
-        for posting in postings {
-            match parse_posting(company, posting) {
-                Some(job) => jobs.push(job),
-                None => skipped += 1,
-            }
-        }
-        Ok((jobs, skipped))
+        Ok(parse_all(postings, |posting| {
+            parse_posting(company, posting)
+        }))
     }
 }
 
 #[async_trait]
 impl Source for LeverSource {
     fn name(&self) -> &str {
-        "lever"
+        SOURCE_NAME
     }
 
     async fn fetch(&self) -> FetchResult {
         let mut result = FetchResult::default();
         for company in &self.companies {
-            match self.fetch_company(company).await {
-                Ok((jobs, skipped)) => {
-                    result.jobs.extend(jobs);
-                    if skipped > 0 {
-                        result.errors.push(skipped_error("lever", company, skipped));
-                    }
-                }
-                Err(error) => result.errors.push(failure("lever", company, &error)),
-            }
+            record(
+                &mut result,
+                SOURCE_NAME,
+                company,
+                self.fetch_company(company).await,
+            );
         }
         result
     }
@@ -84,10 +77,7 @@ fn parse_posting(company: &str, posting: &Value) -> Option<Job> {
     if title.is_empty() || url.is_empty() {
         return None;
     }
-    let apply_url = match str_field(posting, "applyUrl") {
-        "" => url,
-        apply_url => apply_url,
-    };
+    let apply_url = or_if_empty(str_field(posting, "applyUrl"), url);
     let location = posting["categories"]["location"].as_str().unwrap_or("");
     let remote = str_field(posting, "workplaceType").eq_ignore_ascii_case("remote")
         || location.to_lowercase().contains("remote");
@@ -105,7 +95,7 @@ fn parse_posting(company: &str, posting: &Value) -> Option<Job> {
         .filter(|millis| *millis > 0.0)
         .and_then(|millis| from_epoch((millis / 1000.0) as i64));
     Some(Job {
-        source: "lever".to_string(),
+        source: SOURCE_NAME.to_string(),
         external_id,
         company: company.to_string(),
         title: title.to_string(),
@@ -141,6 +131,10 @@ mod tests {
         }])
     }
 
+    fn source_for(company: &str, base_url: String) -> LeverSource {
+        LeverSource::new([company], reqwest::Client::new()).with_base_url(base_url)
+    }
+
     #[tokio::test]
     async fn lever_parses_posting() {
         let server = MockServer::start().await;
@@ -151,8 +145,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let source = LeverSource::new(["acme"], reqwest::Client::new()).with_base_url(server.uri());
-        let result = source.fetch().await;
+        let result = source_for("acme", server.uri()).fetch().await;
 
         assert!(result.errors.is_empty(), "{:?}", result.errors);
         let job = &result.jobs[0];
@@ -180,8 +173,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let source = LeverSource::new(["gone"], reqwest::Client::new()).with_base_url(server.uri());
-        let result = source.fetch().await;
+        let result = source_for("gone", server.uri()).fetch().await;
 
         assert!(result.jobs.is_empty());
         assert_eq!(result.errors.len(), 1);
@@ -203,8 +195,7 @@ mod tests {
             let _ = listener.incoming().take(1).count();
         });
 
-        let source = LeverSource::new(["acme"], reqwest::Client::new()).with_base_url(uri);
-        let result = source.fetch().await;
+        let result = source_for("acme", uri).fetch().await;
 
         assert!(result.jobs.is_empty());
         assert_eq!(result.errors.len(), 1);

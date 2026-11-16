@@ -31,6 +31,12 @@ export default {
   "hoy.num.20": "twenty",
   "hoy.awaiting.one": "{n} is waiting for your approval",
   "hoy.awaiting.other": "{n} are waiting for your approval",
+  // the warning of a mailbox nobody reads: two sentences, joined (the first by days or "never", the second by how many wait)
+  "hoy.mail.stale.one": "The mailbox has not been read for {n} day.",
+  "hoy.mail.stale.other": "The mailbox has not been read for {n} days.",
+  "hoy.mail.never": "The mailbox has never been read.",
+  "hoy.mail.waiting.one": "{n} application is waiting for an answer, and whatever the company replied is not here.",
+  "hoy.mail.waiting.other": "{n} applications are waiting for an answer, and whatever the companies replied is not here.",
   "hoy.calm.title": "Nothing pending.",
   "hoy.calm.run": "The last run was {ago} and left nothing for you.",
   "hoy.calm.never": "No runs yet.",
@@ -93,11 +99,11 @@ export default {
   "hoy.foot.never": "no runs yet",
   "hoy.foot.stopOn": "STOP on",
   "hoy.snoozed.title": "Postponed ({n})",
-  // the buttons of the rows and of the snoozed fold (moments/hoy/rows.js and render.js, T17)
+  // the buttons of the rows and of the snoozed fold (moments/hoy/rows.js and render.js)
   "hoy.snoozed.back": "Put back",
   "hoy.act.aria": "{action}: {what}",
 
-  // ---- the little menus and the question after a link (moments/hoy/forms.js and prompt.js, T19)
+  // ---- the little menus and the question after a link (moments/hoy/forms.js and prompt.js)
   "hoy.snooze.title": "Postpone until when",
   "hoy.snooze.1d": "Tomorrow",
   "hoy.snooze.3d": "In three days",

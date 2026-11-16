@@ -115,8 +115,19 @@ impl<'a> ClaudeGate<'a> {
                     ClaudeError::Timeout(_) | ClaudeError::Unreadable(_) => self.per_call_cap_usd,
                     other => other.cost_usd(),
                 };
-                self.tracker
-                    .record_claude_call(&req.stage, now, cost, 0, 0, false)?;
+                // Claude's error is the one to report: a ledger that cannot be written only
+                // costs the record, as for a paid answer.
+                if let Err(write_err) = self
+                    .tracker
+                    .record_claude_call(&req.stage, now, cost, 0, 0, false)
+                {
+                    tracing::warn!(
+                        stage = %req.stage,
+                        cost_usd = cost,
+                        error = %write_err,
+                        "could not record a failed Claude call in the ledger"
+                    );
+                }
                 Err(err.into())
             }
         }

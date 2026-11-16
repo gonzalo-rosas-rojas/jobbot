@@ -29,7 +29,7 @@ export default {
   "loading.slow": "Your database is big; still loading.",
   "loading.retry": "Try again",
 
-  // ---- the frame of the single page (T21): the two crossings of the day
+  // ---- the frame of the single page: the two crossings of the day
   "shell.cross.9": "It is 09:00: the bot has handed over the night.",
   "shell.cross.18": "It is 18:00: the bot's window opens.",
 };

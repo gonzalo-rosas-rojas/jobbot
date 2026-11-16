@@ -76,19 +76,35 @@ fn is_foreign_currency(text: &str, start: usize, end: usize) -> bool {
         .any(|word| contains_word_lc(&tail, word))
 }
 
+/// A range whose top is below this is an hourly rate (when `HOURLY` follows it), not a salary.
+const HOURLY_CEILING: f64 = 300.0;
+
+/// Working hours in a month, to turn an hourly rate into a monthly one.
+const HOURS_PER_MONTH: f64 = 160.0;
+
+/// A range whose top is at least this is a yearly salary.
+const ANNUAL_FLOOR: f64 = 20_000.0;
+
+/// A range whose top is at least this (and below `ANNUAL_FLOOR`) is a monthly salary; below it
+/// (and not hourly) it is not pay.
+const MONTHLY_FLOOR: f64 = 1000.0;
+
+/// How many characters after a range are read for "per hour" and the like.
+const RATE_TAIL_CHARS: usize = 24;
+
 /// Reads the first pay range in `text` as `(min, max)` US dollars per month: hourly
-/// rates times 160, annual amounts divided by 12, monthly amounts as they are. A range
+/// rates times `HOURS_PER_MONTH`, annual amounts divided by 12, monthly amounts as they are. A range
 /// that is not clearly pay (`$5 - $10 million`, or a number too long for any pay) is ignored,
 /// and so is one in another currency (`A$150k`, `$120,000 + super`, `CLP $1,500,000`): only
 /// US dollars are converted, no exchange rate is ever guessed.
 pub fn parse_salary_monthly_usd(text: &str) -> (Option<f64>, Option<f64>) {
     for caps in RANGE.captures_iter(text) {
-        let (Some(low_text), Some(high_text)) = (caps.get(1), caps.get(3)) else {
+        let (Some(whole), Some(low_text), Some(high_text)) =
+            (caps.get(0), caps.get(1), caps.get(3))
+        else {
             continue;
         };
-        if let Some(whole) = caps.get(0)
-            && is_foreign_currency(text, whole.start(), whole.end())
-        {
+        if is_foreign_currency(text, whole.start(), whole.end()) {
             continue;
         }
         let parse = |s: &str| {
@@ -104,7 +120,7 @@ pub fn parse_salary_monthly_usd(text: &str) -> (Option<f64>, Option<f64>) {
         let mut low_k = caps.get(2).is_some();
         let high_k = caps.get(4).is_some();
         // "$120 - $160k": the k applies to both ends.
-        if high_k && !low_k && low < 1000.0 {
+        if high_k && !low_k && low < MONTHLY_FLOOR {
             low_k = true;
         }
         if low_k {
@@ -116,18 +132,17 @@ pub fn parse_salary_monthly_usd(text: &str) -> (Option<f64>, Option<f64>) {
         if low > high {
             std::mem::swap(&mut low, &mut high);
         }
-        let end = caps.get(0).map_or(0, |whole| whole.end());
-        let tail: String = text[end..].chars().take(24).collect();
-        if high < 300.0 {
+        let tail: String = text[whole.end()..].chars().take(RATE_TAIL_CHARS).collect();
+        if high < HOURLY_CEILING {
             if HOURLY.is_match(&tail) {
-                return (Some(low * 160.0), Some(high * 160.0));
+                return (Some(low * HOURS_PER_MONTH), Some(high * HOURS_PER_MONTH));
             }
             continue;
         }
-        if high >= 20_000.0 {
+        if high >= ANNUAL_FLOOR {
             return (Some(low / 12.0), Some(high / 12.0));
         }
-        if high >= 1000.0 {
+        if high >= MONTHLY_FLOOR {
             return (Some(low), Some(high));
         }
     }
@@ -164,8 +179,20 @@ fn unit(x: f64) -> f64 {
     x.clamp(0.0, 1.0)
 }
 
-/// Points available inside the fit score: title 12, domain 8, seniority 6, skills 4.
-const FIT_POINTS: f64 = 30.0;
+/// The most each part of the fit score can give.
+const TITLE_MAX: f64 = 12.0;
+const DOMAIN_MAX: f64 = 8.0;
+const SKILL_MAX: f64 = 4.0;
+const SENIORITY_MAX: f64 = 6.0;
+
+/// What a title outside the first tier gives (the first tier gives `TITLE_MAX`).
+const TITLE_TIER2_POINTS: f64 = 8.0;
+const TITLE_TIER3_POINTS: f64 = 6.0;
+/// A title that only says "engineer" or "developer".
+const TITLE_GENERIC_POINTS: f64 = 4.0;
+
+/// Points available inside the fit score: the sum of the parts' maxima.
+const FIT_POINTS: f64 = TITLE_MAX + DOMAIN_MAX + SKILL_MAX + SENIORITY_MAX;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScoreResult {
@@ -181,25 +208,25 @@ pub struct ScoreResult {
 /// language he does not use loses nothing: no point is ever taken for a missing skill.
 fn fit_fraction(title_lc: &str, text_lc: &str, c: &Criteria) -> f64 {
     let title_points = if any_hit(title_lc, &c.titles.tier1) {
-        12.0
+        TITLE_MAX
     } else if any_hit(title_lc, &c.titles.tier2) {
-        8.0
+        TITLE_TIER2_POINTS
     } else if any_hit(title_lc, &c.titles.tier3) {
-        6.0
+        TITLE_TIER3_POINTS
     } else if contains_term_lc(title_lc, "engineer") || contains_term_lc(title_lc, "developer") {
-        4.0
+        TITLE_GENERIC_POINTS
     } else {
         0.0
     };
-    let domain_points = (2.0 * hits(text_lc, &c.signals.domain) as f64).min(8.0);
-    let skill_points = (hits(text_lc, &c.skills) as f64).min(4.0);
+    let domain_points = (2.0 * hits(text_lc, &c.signals.domain) as f64).min(DOMAIN_MAX);
+    let skill_points = (hits(text_lc, &c.skills) as f64).min(SKILL_MAX);
 
     let relevance = title_points + domain_points + skill_points;
     // Seniority never makes an unrelated role look relevant, and a junior title earns none.
     let seniority_points = if relevance == 0.0 || any_hit(title_lc, &c.signals.seniority_neg) {
         0.0
     } else if any_hit(title_lc, &c.signals.seniority_pos) {
-        6.0
+        SENIORITY_MAX
     } else if any_hit(text_lc, &c.signals.seniority_pos) {
         3.0
     } else {
@@ -208,10 +235,13 @@ fn fit_fraction(title_lc: &str, text_lc: &str, c: &Criteria) -> f64 {
     (relevance + seniority_points) / FIT_POINTS
 }
 
+/// The compensation score of a posting that publishes no pay.
+const UNKNOWN_PAY_FRACTION: f64 = 0.4;
+
 fn compensation_fraction(reference: Option<f64>, below_floor: bool, c: &Criteria) -> f64 {
     let low_target = c.target_monthly_usd.0;
     match reference {
-        None => 0.4,
+        None => UNKNOWN_PAY_FRACTION,
         Some(_) if below_floor => 0.0,
         Some(pay) if pay >= low_target => 1.0,
         Some(pay) => 0.33 + 0.67 * (pay - c.floor_monthly_usd) / (low_target - c.floor_monthly_usd),
@@ -403,9 +433,17 @@ mod tests {
     }
 
     #[test]
-    fn range_at_the_end_of_multibyte_text_does_not_panic() {
+    fn a_range_followed_by_multibyte_text_does_not_panic() {
+        // No unit after the range: nothing to read, and the multibyte tail is walked over safely.
         let text = format!("Sueldo: $18 - $22 {}", "ñandú ".repeat(10));
         assert_eq!(parse_salary_monthly_usd(&text), (None, None));
+        // With its unit the same range is read: 160 paid hours a month (the rule of the hourly
+        // rates above, 18 x 160 and 22 x 160) even with multibyte text after it.
+        let text = format!("Sueldo: $18 - $22/hr {}", "ñandú ".repeat(10));
+        assert_eq!(
+            parse_salary_monthly_usd(&text),
+            (Some(18.0 * 160.0), Some(22.0 * 160.0))
+        );
     }
 
     static CRITERIA: LazyLock<Criteria> = LazyLock::new(shipped::criteria);
@@ -520,7 +558,7 @@ mod tests {
         );
         assert!(familiar > baseline, "skills Gonza has still add a little");
         assert!(
-            baseline >= 0.6 * 30.0,
+            baseline >= 0.6 * CRITERIA.weights.fit,
             "a senior full-stack role is a good fit in any language"
         );
     }

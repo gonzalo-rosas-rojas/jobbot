@@ -42,6 +42,7 @@ pub fn parse_budgets(text: &str) -> Result<Budgets, toml::de::Error> {
 
 /// The nearest-rank percentile `p` (0 to 1) of durations sorted from fastest to slowest.
 pub fn percentile(sorted: &[Duration], p: f64) -> Duration {
+    assert!(!sorted.is_empty(), "a percentile needs at least one sample");
     let rank = (p * sorted.len() as f64).ceil() as usize;
     sorted[rank.saturating_sub(1).min(sorted.len() - 1)]
 }
@@ -82,7 +83,7 @@ pub fn measure_with<T>(
 
 /// The lowest p50 and the lowest p95 of `rounds` runs of one benchmark. The machine only ever adds
 /// time (another process, a clock that has not sped up yet), so the lowest is the steadiest
-/// figure from one run to the next.
+/// figure from one run to the next. It always runs at least once: `rounds` of 0 or 1 is one run.
 pub fn best_of(rounds: usize, mut run: impl FnMut() -> Timing) -> Timing {
     let mut best = run();
     for _ in 1..rounds {
@@ -203,6 +204,12 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "a percentile needs at least one sample")]
+    fn a_percentile_of_no_samples_says_so_instead_of_underflowing() {
+        percentile(&[], 0.5);
+    }
+
+    #[test]
     fn measure_with_leaves_the_setup_out_of_the_timing() {
         let timing = measure_with("setup", 0, 5, || std::thread::sleep(ms(20)), |()| {});
         assert!(timing.p95 < ms(20), "{:?}", timing.p95);
@@ -220,10 +227,7 @@ mod tests {
         let found = breaches(&budgets, &[timing("a", 12, 21), timing("b", 1, 1)]);
         assert_eq!(found.len(), 2, "{found:?}");
         assert!(found[0].starts_with("a: p50 12.000 ms"), "{found:?}");
-        assert!(
-            found[1].starts_with("a: p95 21.000 ms") && found[1].contains("20"),
-            "{found:?}"
-        );
+        assert_eq!(found[1], "a: p95 21.000 ms is over its ceiling of 20 ms");
     }
 
     #[test]

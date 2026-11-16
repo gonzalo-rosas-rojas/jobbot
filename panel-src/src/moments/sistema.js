@@ -10,7 +10,7 @@
 //   onKey     the one row/stop key SISTEMA has, `engine` (`p`): stops the engine, or asks twice to quit STOP; returns true when it was SISTEMA's
 // What it takes from `ctx`: session.act, sound.play, announce, open(jobKey, rowId), now() and, optionally, toast(text, ok, { undo }) (the
 // toast of the shell; with it a STOP leaves a "Deshacer"; without it the sentence is read through `announce`), settings.get("batchMin")
-// (the batch threshold, the day something stores it; "sin dato" until then).
+// (the batch threshold; null when the page has no such setting, and the stop then says "sin dato").
 
 import { t, lang } from "../i18n/index.js";
 import { sistemaView, SOURCES_SHOWN, ERRORS_SHOWN } from "./sistema/view.js";
@@ -26,12 +26,13 @@ const batchOf = (ctx) => (ctx.settings && typeof ctx.settings.get === "function"
 // errors down to two, then the keys of the foot (they are also in the palette), then both lists to the floor. The count in the title of the
 // errors stays the whole one.
 const FLOOR = { sources: 2, errors: 1 };
-function shrunk(now) {
-  if (now.sources > 3) return { ...now, sources: now.sources - 1 };
-  if (now.errors > 2) return { ...now, errors: now.errors - 1 };
-  if (now.foot) return { ...now, foot: false };
-  if (now.sources > FLOOR.sources) return { ...now, sources: now.sources - 1 };
-  if (now.errors > FLOOR.errors) return { ...now, errors: now.errors - 1 };
+const STEP_TO = { sources: 3, errors: 2 };       // the first cuts go down to these; only then does the foot go, and then the lists to FLOOR
+function shrunk(shown) {
+  if (shown.sources > STEP_TO.sources) return { ...shown, sources: shown.sources - 1 };
+  if (shown.errors > STEP_TO.errors) return { ...shown, errors: shown.errors - 1 };
+  if (shown.foot) return { ...shown, foot: false };
+  if (shown.sources > FLOOR.sources) return { ...shown, sources: shown.sources - 1 };
+  if (shown.errors > FLOOR.errors) return { ...shown, errors: shown.errors - 1 };
   return null;
 }
 const overflows = (host) => host.scrollHeight > host.clientHeight + 1;
@@ -41,8 +42,17 @@ const overflows = (host) => host.scrollHeight > host.clientHeight + 1;
  * of the account, STOP, an error of the run) and the epoch, which moves when the window or the fonts change. While it is the same, a refresh
  * starts from the listing that fitted last time and writes nothing: the lists are not built up and cut down again at every poll.
  */
-const fitKey = (me, full) => [lang(), full.sources.rows.length, full.sources.moreLabel, full.errors.total, full.account.anchor ? full.account.anchor.state : "", full.account.state,
-  full.stop.on, full.run.result.tone, me.epoch].join("|");
+const fitKey = (me, full) => [
+  lang(),
+  full.sources.rows.length,
+  full.sources.moreLabel,
+  full.errors.total,
+  full.account.anchor ? full.account.anchor.state : "",    // the warning of an account nothing pins down is taller
+  full.account.state,
+  full.stop.on,
+  full.run.result.tone,                                    // an error of the run adds a row to the errors
+  me.epoch,                                                // moves with a resize or with the fonts
+].join("|");
 
 /** Works the view out again and draws it: from `update` (a new model), from the actions (the intent or the arming changed) and from a resize. */
 function paint(me) {
@@ -64,9 +74,9 @@ function paint(me) {
   me.fit = { key, show };
 }
 
-function mount(host, ctx) {
-  if (S) unmount();
-  const me = { ctx, host, model: null, view: null, fit: null, epoch: 0 };
+/** The actions of the stop and the page they repaint, both made for `me`. */
+function wire(me) {
+  const { ctx } = me;
   me.actions = createActions({
     session: ctx.session,
     sound: ctx.sound,
@@ -76,10 +86,13 @@ function mount(host, ctx) {
     onChange: () => { if (S === me) paint(me); },
   });
   me.ui = createSistema({
-    run: () => me.actions.run(me.view && me.view.stop),
+    run: (action) => { if (action === "engine") me.actions.run(me.view && me.view.stop); },
     open: (key, rowId) => ctx.open(key, rowId),
   });
-  host.append(me.ui.el);
+}
+
+/** Asks the lists to fit again when the window or the fonts change. `unmount` removes what this adds. */
+function watchLayout(me) {
   // a resize changes how much room there is; the fonts arriving change how much the text takes: both fit the lists again
   me.refit = () => {
     if (me.frame || typeof requestAnimationFrame !== "function") return;
@@ -93,6 +106,14 @@ function mount(host, ctx) {
     if (document.fonts.ready && document.fonts.status !== "loaded") document.fonts.ready.then(me.refit);
     if (typeof document.fonts.addEventListener === "function") document.fonts.addEventListener("loadingdone", me.refit);
   }
+}
+
+function mount(host, ctx) {
+  if (S) unmount();
+  const me = { ctx, host, model: null, view: null, fit: null, epoch: 0 };
+  wire(me);
+  host.append(me.ui.el);
+  watchLayout(me);
   S = me;
 }
 
@@ -119,7 +140,6 @@ function unmount() {
   if (typeof document !== "undefined" && document.fonts && typeof document.fonts.removeEventListener === "function") document.fonts.removeEventListener("loadingdone", me.refit);
   if (me.frame && typeof cancelAnimationFrame === "function") cancelAnimationFrame(me.frame);
   me.actions.destroy();
-  me.ui.destroy();
   me.ui.el.remove();                                  // only its own section: the shell may have mounted the next moment in the same host
 }
 

@@ -16,14 +16,16 @@
 //   - `engine()` is the engine's switch, the one of SISTEMA (../shared/engine.js): stopping goes at once with a "Deshacer", resuming takes two presses.
 
 import { ARM_MIN_MS, heldKey } from "../../core/dom.js";
-import { createArmer } from "../shared/armer.js";
-import { createEngineSwitch, engineRequest } from "../shared/engine.js";
+import { createArmer, REAL_TIMERS } from "../shared/armer.js";
+import { createSender } from "../shared/send.js";
+import { createEngineSwitch, ENGINE_REF } from "../shared/engine.js";
+import { cardRowId } from "./view.js";
 
 export const DEFAULT_SNOOZE = "1d";
 // How long a drawn lote waits for its yes. Longer than the 5 s of an armed verb (ADR 0006): the lote asks him to read a list of names first
 // and the ADR gives it no limit of its own. After this it closes by itself, because it cannot be undone and nobody should confirm a question forgotten on screen.
 export const BATCH_MAX_MS = 30000;
-export const MAX_BATCH = 200;                       // the server takes at most this many keys in one request (crates/jobbot-panel/src/http.rs)
+export const MAX_BATCH = 200;                       // the server takes at most this many keys in one request (crates/jobbot-panel/src/http/commands.rs)
 // The sound of each verb when the server says yes (the cues of src/sound/cues.js). The two presses have their own: "arm" and "confirm".
 const CUE = { approve: "approve", batch: "approve", confirm: "sent", resolve: "undo", snooze: "snooze", unsnooze: "undo" };
 
@@ -56,51 +58,23 @@ export function enterIsLots(target, { inConfirm = () => false, bare = [] } = {})
 /** The lote is one request: `{ keys }` (at most MAX_BATCH), or null when there is nothing to approve. */
 export const batchRequest = (keys) => (keys.length ? { path: "/api/approve", body: { keys: keys.slice(0, MAX_BATCH) } } : null);
 
-export { engineRequest };
-
 /**
  * createColaActions({ session, sound, announce, t, open, go, openUrl, ask, toast, onChange, now, timers, held }) ->
  *   { run(actionId, row), engine(stopped), batch: { open(picks), confirm(), cancel(), close(), sync(cards), isOpen(), picks() },
  *     isArmed(rowId, actionId), armedOf(rowId), isPending(rowId), engineArmed(), disarm(), destroy() }
  * `onChange(id)` hears every row whose pending or armed state changed, and "batch" and "engine": the render paints that part again.
  */
-export function createColaActions({ session, sound, announce, t, open, go, openUrl, ask = null, toast = null, onChange = () => {}, now = Date.now, timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (id) => clearTimeout(id) }, held = heldKey }) {
+export function createColaActions({ session, sound, announce, t, open, go, openUrl, ask = null, toast = null, onChange = () => {}, now = Date.now, timers = REAL_TIMERS, held = heldKey }) {
   const pending = new Set();
+  /** Marks (or frees) the rows of a lote one by one, telling the render after each. */
+  const setPending = (keys, on) => { for (const key of keys) { pending[on ? "add" : "delete"](cardRowId(key)); onChange(cardRowId(key)); } };
   const armer = createArmer({ announce, sound, t, onChange, now, timers, held });   // rowId "engine" is the engine's switch
-  const engineSwitch = createEngineSwitch({ armer, session, sound, announce, t, toast, onChange: () => onChange("engine") });
+  const engineSwitch = createEngineSwitch({ armer, session, sound, announce, t, toast, onChange: () => onChange(ENGINE_REF) });
   let drawn = null;          // { picks, at, timer }: the lote waiting for its confirmation
 
-  const say = (r) => (session.said ? session.said(r, "") : "");
-
-  async function send(actionId, row, extra) {
-    const request = requestOf(actionId, row, extra);
-    if (!request) return "ignored";
-    pending.add(row.id);
-    onChange(row.id);
-    try {
-      await session.act(request.path, request.body, {
-        onOk: (r) => {
-          // a skip has a way back; the toast of the server's own words is replaced by the same words with "Deshacer"
-          if (actionId === "snooze" && toast) {
-            toast(say(r) || t("cola.undo.snooze"), true, { undo: () => session.act("/api/unsnooze", { key: row.data.card }, { beforeRefresh: (u) => sound.play(u.ok ? CUE.unsnooze : "error") }) });
-          }
-        },
-        beforeRefresh: (r) => {
-          if (r.ok) {
-            sound.play(CUE[actionId] || "press");
-          } else {
-            pending.delete(row.id); // the server said no (a 409 carries its reason, the toast already has it): the row is his again
-            onChange(row.id);
-            sound.play("error");
-          }
-        },
-      });
-    } finally {
-      pending.delete(row.id); // the snapshot after the 200 has already redrawn without the row, or with it: either way it is not waiting
-      onChange(row.id);
-    }
-    return "fired";
-  }
+  // a skip has a way back: the toast of the server's own words is replaced by the same words with "Deshacer" (shared/send.js)
+  const undoOf = (actionId, row) => (actionId === "snooze" ? { ...requestOf("unsnooze", row), words: "cola.undo.snooze" } : null);
+  const send = createSender({ session, sound, pending, onChange, requestOf, cue: CUE, undoOf, toast, t });
 
   async function run(actionId, row) {
     if (!row || !row.actions.some((a) => a.id === actionId)) return "ignored";
@@ -175,12 +149,12 @@ export function createColaActions({ session, sound, announce, t, open, go, openU
     async confirm() {
       if (!drawn) return "ignored";
       if (held() || now() - drawn.at < ARM_MIN_MS) return "ignored";
-      const keys = drawn.picks.map((p) => p.key).filter((k) => !pending.has("card:" + k));
+      const keys = drawn.picks.map((p) => p.key).filter((k) => !pending.has(cardRowId(k)));
       const request = batchRequest(keys);
       drop();
       if (!request) return "ignored";
       sound.play("confirm");
-      for (const key of request.body.keys) { pending.add("card:" + key); onChange("card:" + key); }
+      setPending(request.body.keys, true);
       try {
         await session.act(request.path, request.body, {
           beforeRefresh: (r) => {
@@ -189,7 +163,7 @@ export function createColaActions({ session, sound, announce, t, open, go, openU
           },
         });
       } finally {
-        for (const key of request.body.keys) { pending.delete("card:" + key); onChange("card:" + key); }
+        setPending(request.body.keys, false);
       }
       return "fired";
     },
@@ -206,8 +180,8 @@ export function createColaActions({ session, sound, announce, t, open, go, openU
     isArmed: armer.isArmed,
     /** The verb that is armed on this row, or null: the row is drawn with it ("¿Seguro?" on that one button). */
     armedOf: armer.armedOf,
-    isPending: (rowId) => (rowId === "engine" ? engineSwitch.state().pending : pending.has(rowId)),
-    engineArmed: () => armer.isArmed("engine"),
+    isPending: (rowId) => (rowId === ENGINE_REF ? engineSwitch.state().pending : pending.has(rowId)),
+    engineArmed: () => armer.isArmed(ENGINE_REF),
     disarm: armer.disarm,
     destroy() { armer.disarm(); drop(); pending.clear(); engineSwitch.reset(); },
   };

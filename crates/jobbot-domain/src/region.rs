@@ -21,6 +21,12 @@ use regex::{Regex, RegexSet};
 
 use crate::models::Job;
 
+/// The words by which a title or a place names Latin America (also in `OPEN_TERMS`).
+const LATAM_TERMS: &[&str] = &["latam", "latin america"];
+
+/// The words that place an on-site job in Chile (also in `OPEN_TERMS`).
+const CHILE_TERMS: &[&str] = &["chile", "santiago"];
+
 /// Words that open a job to Chile: all of Latin America or no limit at all, and the Latin American
 /// countries and big cities (one of them in a list of places is enough, as in Remotive's
 /// "USA, Canada, Argentina, Mexico, Peru").
@@ -398,19 +404,21 @@ fn any_word(terms: &[&str]) -> String {
     format!(r"\b(?:{})\b", escaped.join("|"))
 }
 
-/// Every place name that closes a job: the US, Canada and the rest of the world.
-static RESTRICTED: LazyLock<Regex> = LazyLock::new(|| {
-    let all: Vec<&str> = [US_TERMS, CANADA_TERMS, ABROAD_TERMS].concat();
-    Regex::new(&any_word(&all)).expect("RESTRICTED is a valid regex")
-});
+/// The pattern of every place name that closes a job: the US, Canada and the rest of the world.
+/// Both `RESTRICTED` and `ANYWHERE_IN_RESTRICTED` are built from it.
+static RESTRICTED_PLACES: LazyLock<String> =
+    LazyLock::new(|| any_word(&[US_TERMS, CANADA_TERMS, ABROAD_TERMS].concat()));
+
+/// Every place name that closes a job.
+static RESTRICTED: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(&RESTRICTED_PLACES).expect("RESTRICTED is a valid regex"));
 
 static OPEN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(&any_word(OPEN_TERMS)).expect("OPEN is a valid regex"));
 
 /// "Anywhere in the US" is not anywhere: read it as the US.
 static ANYWHERE_IN_RESTRICTED: LazyLock<Regex> = LazyLock::new(|| {
-    let all: Vec<&str> = [US_TERMS, CANADA_TERMS, ABROAD_TERMS].concat();
-    let places = any_word(&all);
+    let places = &*RESTRICTED_PLACES;
     Regex::new(&format!(
         r"\b(?:anywhere|everywhere)\s+(?:in|within|across)\s+(?:the\s+)?{places}"
     ))
@@ -422,9 +430,8 @@ static STATE_CODE: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// A title that says the job is for Latin America.
-static LATAM_TITLE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b(?:latam|latin america)\b").expect("LATAM_TITLE is a valid regex")
-});
+static LATAM_TITLE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(&any_word(LATAM_TERMS)).expect("LATAM_TITLE is a valid regex"));
 
 /// The countries and regions a description may confine a job to.
 const CONFINING_PLACES: &str = r"(?:us|usa|united states(?: of america)?|canada|europe|the eu|eu|uk|united kingdom|emea|apac|india|australia)";
@@ -528,7 +535,8 @@ static NEGATION: LazyLock<Regex> = LazyLock::new(|| {
         .expect("NEGATION is a valid regex")
 });
 
-/// Whether a posting based in an extra place demands work rights it does not help to get.
+/// Whether a posting based in an extra place demands work rights it does not help to get. Unlike
+/// `description_confinement`, it also splits sentences at `;`.
 fn demands_work_rights(description: &str) -> bool {
     let folded = fold(description);
     let sentences: Vec<&str> = folded.split(['.', '!', '?', '\n', ';']).collect();
@@ -684,8 +692,10 @@ pub fn title_matches_extra_words(title: &str, words: &[String]) -> bool {
 pub fn region_ok_with(job: &Job, extra_places_open: &[String]) -> bool {
     let extra = extra_places(extra_places_open);
     if !job.remote {
+        // Lowercase only, and anywhere in the text ("Chilean office" is Chile too); the extra
+        // places below are whole words on the folded text.
         let location = job.location.to_lowercase();
-        if location.contains("chile") || location.contains("santiago") {
+        if CHILE_TERMS.iter().any(|term| location.contains(term)) {
             return true;
         }
         let in_extra_place = extra
@@ -710,28 +720,42 @@ pub fn region_ok_with(job: &Job, extra_places_open: &[String]) -> bool {
         return false;
     }
     if !in_extra_place {
-        in_extra_place = match description_confinement(&job.description, extra.as_ref()) {
+        match description_confinement(&job.description, extra.as_ref()) {
             Confinement::Closed => return false,
-            Confinement::ExtraPlace => true,
-            Confinement::None => false,
-        };
+            Confinement::ExtraPlace => in_extra_place = true,
+            Confinement::None => {}
+        }
     }
     !(in_extra_place && demands_work_rights(&job.description))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{region_ok, region_ok_with};
+    use super::region_ok_with;
     use crate::fixtures::make_job_with;
 
     /// Whether a job with this title, location, remote flag and description passes the filter.
     fn passes(title: &str, location: &str, remote: bool, description: &str) -> bool {
-        region_ok(&make_job_with(|job| {
-            job.title = title.into();
-            job.location = location.into();
-            job.remote = remote;
-            job.description = description.into();
-        }))
+        passes_with(&[], title, location, remote, description)
+    }
+
+    /// `passes` with these extra places of `criteria.toml` also open.
+    fn passes_with(
+        extra_places: &[String],
+        title: &str,
+        location: &str,
+        remote: bool,
+        description: &str,
+    ) -> bool {
+        region_ok_with(
+            &make_job_with(|job| {
+                job.title = title.into();
+                job.location = location.into();
+                job.remote = remote;
+                job.description = description.into();
+            }),
+            extra_places,
+        )
     }
 
     /// Remote job with this location and no description.
@@ -887,8 +911,8 @@ mod tests {
 
     #[test]
     fn a_word_that_merely_contains_a_country_code_is_no_country() {
-        // `us` is inside "Mauritius", "Houstonian"-like words and `in` inside "Berlin" must not
-        // be read as a state code either; unknown places are decided by the description.
+        // `us` inside "Mauritius" is no country; unknown places ("Springfield", "Narnia") never
+        // decide, so the description does.
         assert_open(&[
             "Remote - Mauritius",
             "Remote; Springfield",
@@ -994,7 +1018,7 @@ mod tests {
 
     #[test]
     fn the_first_real_runs_top_scores_split_into_open_and_closed() {
-        // (company, title, location as stored, stored remote flag, description sentence, from Chile?)
+        // (company, title, location as stored, description sentence, from Chile?)
         // Hand-classified on 2026-10-04 from the top 60 of the database: 52 could not be done from
         // Chile, 4 could, 4 say nothing about it. Those said "remote" for every one of them.
         let rows = [
@@ -1126,15 +1150,7 @@ mod tests {
 
     /// `passes` with the Australian extra places open.
     fn passes_in_australia(title: &str, location: &str, remote: bool, description: &str) -> bool {
-        region_ok_with(
-            &make_job_with(|job| {
-                job.title = title.into();
-                job.location = location.into();
-                job.remote = remote;
-                job.description = description.into();
-            }),
-            &australia(),
-        )
+        passes_with(&australia(), title, location, remote, description)
     }
 
     #[test]
@@ -1311,5 +1327,29 @@ mod tests {
         assert!(!passes("Engineer", "Bogotá, Colombia", false, ""));
         assert!(!passes("Engineer", "San Francisco", false, ""));
         assert!(!passes("Engineer", "", false, ""));
+    }
+
+    #[test]
+    fn a_job_that_is_not_remote_is_found_in_chile_by_its_words_anywhere_in_the_place_in_any_case() {
+        for location in [
+            "Remote - Chile",
+            "Chilean office",
+            "SANTIAGO",
+            "Valparaíso, Chile",
+            "Santiago de Chile",
+            "Providencia, Santiago, CL",
+        ] {
+            assert!(passes("Engineer", location, false, ""), "{location:?}");
+        }
+    }
+
+    #[test]
+    fn anywhere_in_a_closed_place_is_closed_for_every_closed_list() {
+        // The same lists (US, Canada, the rest of the world) close a place and "anywhere in" it.
+        assert_closed(&[
+            "Anywhere in Canada",
+            "Anywhere in Germany",
+            "Remote - Anywhere in the UK",
+        ]);
     }
 }

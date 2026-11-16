@@ -3,13 +3,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { useStorage, keep, local, createView, restoreView, saveView, routeOfHash, hashOf, nextTheme, loadTheme, saveTheme, THEMES } from "../src/core/store.js";
+import { useStorage, keep, local, nextTheme, loadTheme, saveTheme, THEMES } from "../src/core/store.js";
+import { createView, restoreView, saveView, routeOfHash, hashOf } from "../src/core/route.js";
 import { setLang, setTimeZone, t } from "../src/i18n/index.js";
 import { model, candidates, turnCount, layerOf, pathOf, ownerOf, countOf, LAYERS } from "../src/core/model.js";
 import { diffSnapshots, sinceLastVisit, rememberVisit, lastVisit, mailId } from "../src/core/diff.js";
 import { createSession, parseLaunch } from "../src/core/session.js";
 import * as format from "../src/core/format.js";
-import { hourOf, dayOf, hourNumber, clockHours, serverDay, placeMoves, axisHours, sumFrom } from "../src/core/time.js";
+import { hourOf, dayOf, clockHours, serverDay, axisHours, sumFrom } from "../src/core/time.js";
 
 const load = (name) => JSON.parse(readFileSync(new URL(`./fixtures/${name}`, import.meta.url), "utf8"));
 const rich = () => load("snapshot.rich.json");
@@ -752,35 +753,23 @@ test("format: the run window and the spend, as the header says them", () => {
 test("time: hours and days follow the pinned zone; the server's clock is always Santiago's", () => {
   reset();
   const at = "2026-10-07T02:30:00Z";
-  assert.deepEqual([hourOf(at), dayOf(at), hourNumber(at), clockHours(Date.parse(at))], ["02:30", "2026-10-07", 2, 2.5]);
+  assert.deepEqual([hourOf(at), dayOf(at), clockHours(Date.parse(at))], ["02:30", "2026-10-07", 2.5]);
   setTimeZone("America/Santiago");
-  assert.deepEqual([hourOf(at), dayOf(at), hourNumber(at), clockHours(Date.parse(at))], ["23:30", "2026-10-06", 23, 23.5]);
+  assert.deepEqual([hourOf(at), dayOf(at), clockHours(Date.parse(at))], ["23:30", "2026-10-06", 23.5]);
   setTimeZone("UTC");
   assert.equal(serverDay(Date.parse("2026-10-07T02:30:00Z")), "2026-10-06", "Santiago is still on the 6th");
   assert.equal(serverDay(NOW), "2026-10-07");
   assert.equal(hourOf("nonsense"), "nonsense");
   assert.equal(dayOf("nonsense"), "nonsense");
-  assert.equal(hourNumber("nonsense"), 0);
-  assert.equal(hourNumber("2026-10-07T00:10:00Z"), 0, "midnight is 0, not 24");
+  assert.equal(Math.floor(clockHours(Date.parse("2026-10-07T00:10:00Z"))), 0, "midnight is 0, not 24");
 });
 
-test("time: the strip of the last day, moves in rows and hour marks", () => {
+test("time: the strip of the last day and its hour marks", () => {
   reset();
   const s = rich();
   const a = s.activity;
   const from = Date.parse(a.from);
   const span = Date.parse(a.to) - from;
-  const placed = placeMoves(a.moves, from, span, 960);
-  assert.equal(placed.length, a.moves.length);
-  assert.deepEqual(placed.map((p) => p.move.key), ["fx:20", "fx:19", "fx:15", "fx:13", "fx:12", "fx:9", "fx:11", "fx:7"], "oldest first");
-  assert.ok(placed.every((p) => p.x >= 0 && p.x <= 960 && p.row >= 0 && p.row <= 4));
-  assert.ok(placed.every((p, i) => i === 0 || p.x >= placed[i - 1].x), "left to right");
-  const close = placeMoves([
-    { at: "2026-10-07T10:00:00Z" }, { at: "2026-10-07T10:01:00Z" }, { at: "2026-10-07T10:02:00Z" }, { at: "2026-10-07T20:00:00Z" },
-  ], Date.parse("2026-10-06T15:30:00Z"), span, 960);
-  assert.deepEqual(close.map((p) => p.row), [0, 1, 2, 0], "a move that would touch the last one goes to the next row");
-  const clamped = placeMoves([{ at: "2026-10-01T00:00:00Z" }, { at: "2026-12-01T00:00:00Z" }], from, span, 960);
-  assert.deepEqual(clamped.map((p) => p.x), [0, 960]);
   const nowPercent = ((NOW - from) / span) * 100;
   const marks = axisHours(a.slots, nowPercent);
   assert.ok(marks.every((m) => m.hour % 3 === 0 && Math.abs(m.percent - nowPercent) >= 11 && m.percent >= 2));

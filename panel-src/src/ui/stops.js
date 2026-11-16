@@ -15,7 +15,9 @@ import { STOP_IDS } from "../scene/poses.js";
 import { KEYS } from "./keys.js";
 
 const TABS = STOP_IDS.slice(1);                                  // the five: the prologue is not a tab
-const KEY_OF = { ...Object.fromEntries(TABS.map((id, i) => [id, KEYS.find((k) => k.id === "go").keys[i]])), prologo: KEYS.find((k) => k.id === "prologue").keys[0] };
+const GO_KEYS = KEYS.find((k) => k.id === "go").keys;           // the key 1 is the first tab, 2 the second...
+const PROLOGUE_KEY = KEYS.find((k) => k.id === "prologue").keys[0];
+const KEY_OF = { ...Object.fromEntries(TABS.map((id, i) => [id, GO_KEYS[i]])), prologo: PROLOGUE_KEY };
 const COUNTED = ["procesos", "cola", "aprender"];
 
 /** The words a count is read as ("74 procesos vivos", "motor atrasado"); "" when there is nothing to say. */
@@ -24,6 +26,14 @@ export function countWords(id, counts) {
   if (id === "sistema") return c.sistema ? t("stops.engine." + c.sistema) : "";
   return COUNTED.includes(id) && c[id] > 0 ? tn("stops.count." + id, c[id]) : "";
 }
+
+// where each key of the tablist takes the focus: (index of the tab it is on, number of tabs) -> index
+const TAB_MOVES = new Map([
+  ["ArrowRight", (at, n) => (at + 1) % n],
+  ["ArrowLeft", (at, n) => (at + n - 1) % n],
+  ["Home", () => 0],
+  ["End", (at, n) => n - 1],
+]);
 
 export function createStops({ onSelect }) {
   const counts = {};
@@ -55,9 +65,9 @@ export function createStops({ onSelect }) {
   list.addEventListener("keydown", (e) => {
     const at = order.findIndex((id) => tabs.get(id) === document.activeElement);
     if (at < 0) return;
-    const next = e.key === "ArrowRight" ? (at + 1) % order.length : e.key === "ArrowLeft" ? (at + order.length - 1) % order.length
-      : e.key === "Home" ? 0 : e.key === "End" ? order.length - 1 : -1;
-    if (next < 0) return;
+    const move = TAB_MOVES.get(e.key);
+    if (!move) return;
+    const next = move(at, order.length);
     e.preventDefault();
     onSelect(order[next]);
     tabs.get(order[next]).focus();

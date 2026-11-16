@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { routeOfHash, hashOf, restoreView, createView, useStorage, keep } from "../src/core/store.js";
+import { useStorage, keep } from "../src/core/store.js";
+import { routeOfHash, hashOf, restoreView, createView } from "../src/core/route.js";
 import { createRouter } from "../src/ui/router.js";
 import { TOAST_MS } from "../src/ui/toast.js";
 import { STOP_IDS } from "../src/scene/poses.js";
@@ -46,11 +47,11 @@ test("an address names any of the six stops, the prologue included; the old #lea
 test("the router writes one history entry per jump and rewrites the current one for everything else", () => {
   const { win, log } = fakeWin("#hoy");
   const router = createRouter({ win });
-  assert.equal(router.write("hoy"), false, "the same address writes nothing");
-  assert.equal(router.write("procesos", null, { push: true }), true);
-  assert.equal(router.write("cola", null, { push: false }), false);
-  assert.equal(router.write("procesos", "fx:3", { push: true }), true);
-  assert.equal(router.write("prologo", "ignored"), false, "the prologue has no application");
+  assert.equal(router.replaceStop("hoy"), false, "the same address writes nothing");
+  assert.equal(router.pushStop("procesos"), true);
+  assert.equal(router.replaceStop("cola"), false);
+  assert.equal(router.pushStop("procesos", "fx:3"), true);
+  assert.equal(router.replaceStop("prologo", "ignored"), false, "the prologue has no application");
   assert.deepEqual(log, [["push", "/#procesos"], ["replace", "/#cola"], ["push", "/#procesos/fx%3A3"], ["replace", "/#prologo"]]);
   assert.deepEqual(router.read(), { stop: "prologo", job: null });
 });
@@ -58,7 +59,7 @@ test("the router writes one history entry per jump and rewrites the current one 
 test("a panel inside another page never touches the history", () => {
   const { win, log } = fakeWin("");
   const router = createRouter({ embedded: true, win });
-  assert.equal(router.write("cola", null, { push: true }), false);
+  assert.equal(router.pushStop("cola"), false);
   assert.deepEqual(log, []);
 });
 

@@ -103,6 +103,13 @@ export function fill(box, ...parts) {
   box.replaceChildren(...parts.flat(Infinity).filter((part) => part != null && part !== false));
 }
 
+/** `el.textContent = text` only when it differs, so a refresh that changes nothing writes nothing. No element (a part that is not drawn) is nothing to write. */
+export function setText(el, text) {
+  if (!el) return;
+  const next = String(text == null ? "" : text);
+  if (el.textContent !== next) el.textContent = next;
+}
+
 /** A link only when the address is http or https; anything else is plain text. */
 export function link(url, text) {
   if (!/^https?:\/\//i.test(url || "")) return h("span", { class: "muted" }, text || url || "");
@@ -117,12 +124,14 @@ export const ARM_MAX_MS = 5000;
 
 // A key held down repeats, and on a button every repeat of Enter is a click: that must never be the second, deliberate one.
 // The repeat is seen in the capture phase, before the click it causes, so `heldKey()` is true inside that click.
+const HELD_REPEAT_MS = 150; // how long after the last auto-repeat a key still counts as held
 let heldAt = 0;
-if (typeof document !== "undefined") {
-  document.addEventListener("keydown", (e) => { if (e.repeat) heldAt = Date.now(); }, true);
-  document.addEventListener("keyup", () => { heldAt = 0; }, true); // letting go ends it: the next press is a new one
+// Installed once by the page at boot, not by importing this module: a test that imports it has no listeners it did not ask for.
+export function trackHeldKeys(page = document) {
+  page.addEventListener("keydown", (e) => { if (e.repeat) heldAt = Date.now(); }, true);
+  page.addEventListener("keyup", () => { heldAt = 0; }, true); // letting go ends it: the next press is a new one
 }
-export const heldKey = () => Date.now() - heldAt < 150;
+export const heldKey = () => Date.now() - heldAt < HELD_REPEAT_MS;
 
 // Where a button keeps its words: in its .act-label when it has one (its key stays), else the whole button.
 const wordsOf = (button) => button.querySelector(".act-label") || button;
@@ -199,12 +208,12 @@ export function isTypingIn(root) {
 }
 
 /**
- * Reads the launch address once: the token (`?t=`) and whether the panel is embedded, and takes the token out of the
+ * Takes the launch address once (it reads it and also changes the address bar and the tab's storage): the token (`?t=`) and whether the panel is embedded, and takes the token out of the
  * address bar so it is not left in the history or on a screenshot. The token is kept in sessionStorage (it dies with the
  * tab), so a reload or a restored tab, which come back without `?t=`, still find it; a new one in the address replaces it.
  * The public demo has no token and saves nothing. `env` is the window, for tests.
  */
-export function readLaunch(env = window) {
+export function takeLaunch(env = window) {
   const launch = parseLaunch(env.location.search, env.top !== env);
   env.history.replaceState(null, "", env.location.pathname + env.location.hash);
   if (env.__DEMO__) return launch;

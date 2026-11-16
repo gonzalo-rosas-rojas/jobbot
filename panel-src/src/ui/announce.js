@@ -3,6 +3,9 @@
 
 import { h } from "../core/dom.js";
 
+// A screen reader only announces a change of text if the region was empty just before; this is how long it stays empty.
+const REPEAT_GAP_MS = 30;
+
 export function createAnnouncer() {
   const el = h("div", { id: "live", class: "sr", role: "status", "aria-live": "polite", "aria-atomic": "true" });
   let timer = 0;
@@ -12,7 +15,7 @@ export function createAnnouncer() {
     say(text) {
       clearTimeout(timer);
       el.textContent = "";
-      timer = setTimeout(() => { el.textContent = text; }, 30);
+      timer = setTimeout(() => { el.textContent = text; }, REPEAT_GAP_MS);
     },
   };
 }

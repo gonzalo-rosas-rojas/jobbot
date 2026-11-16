@@ -13,6 +13,8 @@ pub mod form;
 pub mod handoff;
 mod launch;
 
+pub use launch::start as start_chromium;
+
 #[cfg(test)]
 mod test_support {
     use std::path::{Path, PathBuf};

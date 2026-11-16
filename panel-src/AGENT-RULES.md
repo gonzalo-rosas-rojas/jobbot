@@ -28,7 +28,7 @@ another with nothing to say so.
 | Layer | What it is | May import |
 |---|---|---|
 | `src/main.js` | boot order: wires everything | everything |
-| `src/core/` | pure logic and the DOM helpers: model, session, store, settings, diff, format, time, humanize, `h()` | `core/`, `i18n/`, npm packages |
+| `src/core/` | pure logic and the DOM helpers: model, session, store, route, settings, diff, format, time, humanize, `h()` | `core/`, `i18n/`, npm packages |
 | `src/i18n/` | the dictionaries (`es`, `en`) and `t()` | `i18n/` |
 | `src/scene/` | the camera: engine, poses, clock, jump | `scene/`, `core/`, npm packages |
 | `src/stage/` | the picture behind the sheet: sky, skyline, dial, beam | `stage/`, `core/`, `scene/` |
@@ -37,7 +37,7 @@ another with nothing to say so.
 | `src/moments/` | the stops: one file each plus a folder of parts | `moments/`, `core/`, `i18n/`, `ui/`, `scene/`, npm packages |
 
 Between two moments there is no import at all (only `moments/registry.js`, the table of all of them, reaches into each). A moment reaches another
-through `ctx` (for instance `ctx.go("procesos", opts)`), and what two moments both need goes to `core/` if it knows no moment, or to `src/moments/shared/` if it does (today it holds `armer.js`, below).
+through `ctx` (for instance `ctx.go("procesos", opts)`), and what two moments both need goes to `core/` if it knows no moment, or to `src/moments/shared/` if it does (today it holds `armer.js`, below; the one-key-one-card lookups of `cards.js`; the buttons of a row, `act-buttons.js`; the engine's switch, `engine.js`; the request of a verb on a row, `send.js`; the table of the stops, `stops.js`; `opens.js`; and the small DOM helpers of `util.js`).
 
 `test/arch.layers.test.mjs` enforces this on the import graph of `src/main.js`. It fails on any NEW edge that goes the wrong way, and also when a
 known one disappears, so its list of debts (`DEBT`, 7 edges today: HOY's `actions.js` and `forms.js` imported by PROCESOS, the
@@ -72,8 +72,8 @@ A moment is the module that draws one stop. It is the default export of `src/mom
 - The words are in `src/i18n/{es,en}/`, never literals in a moment (a test scans `src/ui`); both languages keep the same keys.
 
 **Adding or changing a stop touches more than one line.** Today, at least: `src/moments/<id>.js` and its folder; `MOMENTS` in `src/moments/registry.js`;
-`STOPS_META` in `src/moments/shared/stops.js` (`registry.js` re-exports it); `STOP_IDS` and `MARKS` (the dial hour) in `src/scene/poses.js`; `ROOM_IDS` and the address pattern of `routeOfHash` in
-`src/core/store.js`; `ROOM_IDS` (the arrival cue) in `src/sound/recipes.js`;
+`STOPS_META` in `src/moments/shared/stops.js` (`registry.js` re-exports it); `STOP_IDS` and `MARKS` (the dial hour) in `src/scene/poses.js`; `ROOM_IDS` in
+`src/core/route.js` (the address pattern of `routeOfHash` is built from it); `ROOM_IDS` (the arrival cue) in `src/sound/recipes.js`;
 `WIRED` in `src/ui/wired.js`; `WORK` and the `stops` of each key in `src/ui/keys.js`; `NEWTASK_STOPS` and `JOB_STOPS` in `src/ui/shell.js`; the words
 (`tab.<id>`, `stop.<id>.ask` and the stop's own scope) in `src/i18n/es/` and `src/i18n/en/`; and `src/styles/ui/<id>.css`. The tests of the registry,
 the keys and the dictionaries fail on what you forget; read their message before guessing.
@@ -90,7 +90,9 @@ the keys and the dictionaries fail on what you forget; read their message before
    `WebSocket`, `sendBeacon`) and `FORBIDDEN_PATTERNS` (`fetch` of an absolute address, `setTimeout` with a string, `createElement` of a script or an
    iframe). The bundle itself must not contain them either, so do not use a library API that does. Build DOM with
    `h()`/`sv()` from `src/core/dom.js`; set dynamic styles with `el.style.setProperty(...)` or classes. Never turn data into markup.
-   `node build.mjs` and `node build.mjs lab <name>` enforce this on the bundle.
+   `node build.mjs` and `node build.mjs lab <name>` enforce this on the bundle. One exception to `<link`: the published demo (`node build.mjs demo --publish`)
+   carries `<link rel="icon" type="image/svg+xml" href="favicon.svg">`, because a static host has no server to answer `/favicon.ico`; `publishedProblems` accepts exactly that link
+   and no other, and the real page and the dev demo keep none.
 4. **Strict CSP.** `default-src 'none'; script-src 'nonce-…'; style-src 'nonce-…'; connect-src 'self'; img-src 'self' blob:; font-src 'self'; base-uri
    'none'; form-action 'none'; frame-ancestors 'none'; require-trusted-types-for 'script'`. No inline event handlers, no inline `style=""`, no external
    fonts, images or scripts, no web workers. `tools/serve.mjs` sends exactly this policy, and `tools/cdp.mjs` turns every violation into a console

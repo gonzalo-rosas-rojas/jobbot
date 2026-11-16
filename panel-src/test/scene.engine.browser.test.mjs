@@ -3,6 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { openBuilt } from "./helpers/browser.mjs";
+import { WHEEL_STREAM_MS } from "../src/scene/engine.js";
 
 const H = 900;
 const open = (opts = {}) => openBuilt({ args: ["lab", "f0-engine"], file: "dist/lab-f0-engine.html", width: 1440, height: H, ...opts });
@@ -24,6 +25,40 @@ async function arriveAt(t, id) {
   await t.page.waitFor(`window.__lab.state().jumping === false && window.__lab.arrivals().length >= 1`, { timeout: 4000 });
   await sleep(200);
 }
+
+const FLICK_NOTCHES = 4;
+const FLICK_TAIL = 45;
+
+/**
+ * A trip by the keyboard started inside a wheel flick: four notches, `jumpTo(id)`, and a tail of 45 shrinking events, one every 16 ms.
+ * The page makes it on its own clock. Sent one by one through the debugging protocol, each event waits for the page to take the one
+ * before (about 85 ms on a free machine, more on a busy one), so the gaps sat just under the engine's WHEEL_STREAM_MS and crossed it at
+ * random: the engine then rightly read a new gesture and cancelled the trip, and this test failed about one run in three. Resolves with
+ * the number of events the page saw and the longest gap between two of them, so the test can tell a flick that did not arrive as one
+ * gesture from an engine that cancelled. Rejects with whatever a step threw.
+ */
+const tripInsideFlick = (t, id) => ev(t, `new Promise((resolve, reject) => {
+  const TRIP = "trip";
+  const target = document.elementFromPoint(30, 450) || document.body;
+  const seen = [];
+  const note = () => seen.push(performance.now());
+  addEventListener("wheel", note, { capture: true, passive: true });
+  const notches = Array.from({ length: ${FLICK_NOTCHES} }, () => 100);
+  const tail = Array.from({ length: ${FLICK_TAIL} }, (_, i) => Math.max(1, 90 - i * 2));
+  const steps = [...notches, TRIP, ...tail];
+  let next = 0;
+  const stop = () => { clearInterval(timer); removeEventListener("wheel", note, { capture: true }); };
+  const timer = setInterval(() => {
+    try {
+      const step = steps[next++];
+      if (step === TRIP) { window.__lab.clearArrivals(); window.__lab.jumpTo(${JSON.stringify(id)}); }
+      else target.dispatchEvent(new WheelEvent("wheel", { deltaY: step, deltaMode: 0, clientX: 30, clientY: 450, bubbles: true, cancelable: true }));
+    } catch (error) { stop(); reject(error); return; }
+    if (next < steps.length) return;
+    stop();
+    resolve({ events: seen.length, longestGap: Math.round(Math.max(0, ...seen.slice(1).map((time, i) => time - seen[i]))) });
+  }, 16);
+})`);
 
 test("A1 with the real Lenis: after two wheel notches, a wheel in the middle of a trip, or a click in the middle of a trip, the page ends on a stop with the sheet solid", async () => {
   const t = await open();
@@ -113,9 +148,10 @@ test("M1 with the real Lenis: the tail of a wheel flick does not cancel a trip s
   const t = await open();
   try {
     await arriveAt(t, "hoy");
-    for (let i = 0; i < 4; i++) { await wheel(t, 100); await sleep(16); }
-    await ev(t, `window.__lab.clearArrivals(); window.__lab.jumpTo("sistema")`);
-    for (let i = 0; i < 45; i++) { await wheel(t, Math.max(1, 90 - i * 2)); await sleep(16); }
+    const flick = await tripInsideFlick(t, "sistema");
+    assert.equal(flick.events, FLICK_NOTCHES + FLICK_TAIL, "every event of the flick reached the page");
+    // under WHEEL_STREAM_MS the engine counts an event as part of the gesture in progress: a longer gap is a new gesture, and that one may cancel
+    assert.ok(flick.longestGap < WHEEL_STREAM_MS, `the flick reached the page as one gesture (its longest gap was ${flick.longestGap} ms)`);
     await sleep(1500);
     const s = await state(t);
     assert.ok(Math.abs(s.y - 4500) < 1.5, `the trip landed on SISTEMA (scrollY ${s.y})`);

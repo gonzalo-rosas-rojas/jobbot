@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { recorder } from "./helpers/canvas.mjs";
-import { mulberry32, makeLayer, LAYER_SPEC, createSkyline } from "../src/stage/skyline.js";
+import { mulberry32 } from "../src/core/random.js";
+import { makeLayer, LAYER_SPEC, createSkyline } from "../src/stage/skyline.js";
 
 test("the same seed makes the same city, another seed another one", () => {
   const a = createSkyline({ seed: 7 }), b = createSkyline({ seed: 7 }), c = createSkyline({ seed: 8 });
@@ -18,7 +19,7 @@ test("every layer reaches past 4000 px so 3440 wide plus the pan never runs out 
     assert.ok(last.x + last.w > 4000, `last building ends at ${last.x + last.w}`);
     for (const b of layer) assert.ok(b.w > 0 && b.h > 0 && Array.isArray(b.wins));
   }
-  const rand = mulberry32(1), layer = makeLayer(rand, 40, 170, 30, 70, 2.2, 3);
+  const rand = mulberry32(1), layer = makeLayer(rand, { minH: 40, maxH: 170, minW: 30, maxW: 70, winSize: 2.2, gap: 3 });
   assert.ok(layer.length > 50);
 });
 

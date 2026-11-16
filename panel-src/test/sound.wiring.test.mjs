@@ -26,7 +26,7 @@ test("every sound the page asks for by name is a cue, and every cue is asked for
   // The table names every cue by definition: a use is a quoted id anywhere EXCEPT the file that defines the table.
   const outside = sources.filter((f) => path.resolve(f) !== TABLE).map(strip).join("\n");
   const asked = new Set();
-  for (const m of text.matchAll(/\b(?:sound|player|ctx\.sound|me\.ctx\.sound)\.(?:play|preview)\(\s*(?:"([^"]+)"|'([^']+)')/g)) asked.add(m[1] ?? m[2]);
+  for (const m of text.matchAll(/\b(?:sound|player|ctx\.sound|me\.ctx\.sound|state\.ctx\.sound)\.(?:play|preview)\(\s*(?:"([^"]+)"|'([^']+)')/g)) asked.add(m[1] ?? m[2]);
   assert.ok(asked.size > 5, "the scan found the calls");
   for (const name of asked) assert.ok(Object.hasOwn(ALIASES, name) || cueOf(name, { room: "hoy" }), `play("${name}") is not a cue or an alias`);
   // the cue maps of the moments ({ approve: "approve", ... }) and the background detector name cues too: any quoted cue id counts

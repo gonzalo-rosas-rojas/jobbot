@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 
 use super::Source;
-use super::base::{failure, get_json, id_string, join_places, parse_iso, skipped_error, str_field};
+use super::base::{get_json, id_string, join_places, or_if_empty, parse_iso, record, str_field};
 use jobbot_domain::models::{FetchResult, Job};
 use jobbot_domain::scoring::parse_salary_monthly_usd;
 
@@ -68,15 +68,7 @@ impl Source for AshbySource {
     async fn fetch(&self) -> FetchResult {
         let mut result = FetchResult::default();
         for org in &self.orgs {
-            match self.fetch_org(org).await {
-                Ok((jobs, skipped)) => {
-                    result.jobs.extend(jobs);
-                    if skipped > 0 {
-                        result.errors.push(skipped_error("ashby", org, skipped));
-                    }
-                }
-                Err(error) => result.errors.push(failure("ashby", org, &error)),
-            }
+            record(&mut result, "ashby", org, self.fetch_org(org).await);
         }
         result
     }
@@ -123,10 +115,7 @@ fn parse_posting(org: &str, posting: &Value) -> Option<Job> {
     if title.is_empty() || url.is_empty() {
         return None;
     }
-    let apply_url = match str_field(posting, "applyUrl") {
-        "" => url,
-        apply_url => apply_url,
-    };
+    let apply_url = or_if_empty(str_field(posting, "applyUrl"), url);
     let description = str_field(posting, "descriptionPlain");
     let compensation = &posting["compensation"];
     let summary = [
@@ -199,8 +188,8 @@ mod tests {
             .await;
     }
 
-    #[tokio::test]
-    async fn ashby_parses_compensation_and_skips_unlisted() {
+    /// The fetch of the standard `payload()` served as the board of `acme`.
+    async fn fetch_payload() -> FetchResult {
         let server = MockServer::start().await;
         mount_org(
             &server,
@@ -208,13 +197,23 @@ mod tests {
             ResponseTemplate::new(200).set_body_json(payload()),
         )
         .await;
-
         let source = AshbySource::new(["acme"], reqwest::Client::new()).with_base_url(server.uri());
-        let result = source.fetch().await;
+        source.fetch().await
+    }
+
+    #[tokio::test]
+    async fn ashby_skips_postings_that_are_not_listed() {
+        let result = fetch_payload().await;
 
         assert!(result.errors.is_empty(), "{:?}", result.errors);
         let keys: Vec<String> = result.jobs.iter().map(Job::key).collect();
         assert_eq!(keys, ["ashby:a1"]);
+    }
+
+    #[tokio::test]
+    async fn ashby_reads_the_compensation_of_a_posting() {
+        let result = fetch_payload().await;
+
         let job = &result.jobs[0];
         assert!(job.remote);
         assert_eq!(job.salary_min_monthly_usd.map(f64::round), Some(10000.0));

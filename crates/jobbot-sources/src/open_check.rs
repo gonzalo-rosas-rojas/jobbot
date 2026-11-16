@@ -18,23 +18,22 @@ pub use jobbot_app::ports::{OpenChecker, OpenStatus};
 use jobbot_domain::models::Job;
 
 use crate::http::host_key;
+use crate::sources::base::{GREENHOUSE_API_URL, LEVER_API_URL};
 
 /// Upper bound for one open check. The check sits in front of a submission: a slow board must not
 /// hold the whole run, and a check that did not answer in time says nothing.
 pub const CHECK_TIMEOUT: Duration = Duration::from_secs(10);
 
-const GREENHOUSE_BASE_URL: &str = "https://boards-api.greenhouse.io";
-const LEVER_BASE_URL: &str = "https://api.lever.co";
 const ASHBY_BASE_URL: &str = "https://api.ashbyhq.com";
+const LEVER_HOST: &str = "jobs.lever.co";
+const ASHBY_HOST: &str = "jobs.ashbyhq.com";
 
-/// Asks the posting's own source whether it is still open (see the module docs for the rules).
-pub async fn check_open(client: &Client, job: &Job) -> OpenStatus {
-    check_open_with(client, job, None, CHECK_TIMEOUT, None).await
-}
-
-/// `check_open` against another server: `base_url` replaces the Greenhouse, Lever and Ashby API
-/// hosts alike (their paths never collide). Tests point it at a local mock.
-pub async fn check_open_at(client: &Client, job: &Job, base_url: &str) -> OpenStatus {
+/// Asks the posting's own source whether it is still open (see the module docs for the rules),
+/// against another server: `base_url` replaces the Greenhouse, Lever and Ashby API hosts alike
+/// (their paths never collide). Tests point it at a local mock; the run goes through
+/// `NetworkOpenChecker`.
+#[cfg(test)]
+async fn check_open_at(client: &Client, job: &Job, base_url: &str) -> OpenStatus {
     check_open_with(client, job, Some(base_url), CHECK_TIMEOUT, None).await
 }
 
@@ -68,33 +67,39 @@ async fn check_open_with(
             };
             let url = format!(
                 "{}/v1/boards/{board}/jobs/{}",
-                base(GREENHOUSE_BASE_URL),
+                base(GREENHOUSE_API_URL),
                 job.external_id
             );
             single_posting(client, &url, timeout, resting).await
         }
         "lever" => {
-            let Some(company) = slug_in_links(job, "jobs.lever.co") else {
+            let Some(company) = slug_in_links(job, LEVER_HOST) else {
                 return OpenStatus::Unknown;
             };
             let url = format!(
                 "{}/v0/postings/{company}/{}",
-                base(LEVER_BASE_URL),
+                base(LEVER_API_URL),
                 job.external_id
             );
             single_posting(client, &url, timeout, resting).await
         }
         "ashby" => {
-            let Some(org) = slug_in_links(job, "jobs.ashbyhq.com") else {
+            let Some(org) = slug_in_links(job, ASHBY_HOST) else {
                 return OpenStatus::Unknown;
             };
-            let url = format!("{}/posting-api/job-board/{org}", base(ASHBY_BASE_URL));
+            let url = ashby_url(base_url, &org);
             ashby_listing(client, &url, &job.external_id, timeout, resting).await
         }
         // The other sources have no per-posting check: their feeds are listings of everything
         // currently open, which discovery already reads.
         _ => OpenStatus::Unknown,
     }
+}
+
+/// The address of an Ashby org's board listing (`base_url` replaces the API host in tests).
+fn ashby_url(base_url: Option<&str>, org: &str) -> String {
+    let base = base_url.unwrap_or(ASHBY_BASE_URL).trim_end_matches('/');
+    format!("{base}/posting-api/job-board/{org}")
 }
 
 /// GET `url` and keep only what a check needs: the answer's status and body, or `None` when there
@@ -212,7 +217,7 @@ impl NetworkOpenChecker {
         }
     }
 
-    /// Against another server, like `check_open_at`: tests point it at a local mock.
+    /// Against another server: tests point it at a local mock.
     pub fn with_base_url(client: Client, base_url: &str) -> Self {
         Self {
             base_url: Some(base_url.to_string()),
@@ -243,15 +248,14 @@ impl OpenChecker for NetworkOpenChecker {
             )
             .await;
         }
-        let Some(org) = slug_in_links(job, "jobs.ashbyhq.com") else {
+        let Some(org) = slug_in_links(job, ASHBY_HOST) else {
             return OpenStatus::Unknown;
         };
         let known = self.ashby_boards.lock().unwrap().get(&org).cloned();
         let ids = match known {
             Some(ids) => ids,
             None => {
-                let base = self.base_url.as_deref().unwrap_or(ASHBY_BASE_URL);
-                let url = format!("{}/posting-api/job-board/{org}", base.trim_end_matches('/'));
+                let url = ashby_url(self.base_url.as_deref(), &org);
                 let ids = ashby_ids(&self.client, &url, CHECK_TIMEOUT, Some(&self.resting)).await;
                 self.ashby_boards.lock().unwrap().insert(org, ids.clone());
                 ids
@@ -488,7 +492,7 @@ mod tests {
         );
     }
 
-    fn ashby_listing(ids: &[&str]) -> ResponseTemplate {
+    fn ashby_board_json(ids: &[&str]) -> ResponseTemplate {
         let jobs: Vec<Value> = ids
             .iter()
             .map(|id| json!({"id": id, "title": "Engineer", "isListed": true}))
@@ -502,7 +506,7 @@ mod tests {
         mount(
             &server,
             "/posting-api/job-board/baseten",
-            ashby_listing(&["a1", "a2"]),
+            ashby_board_json(&["a1", "a2"]),
         )
         .await;
 
@@ -518,7 +522,7 @@ mod tests {
         mount(
             &server,
             "/posting-api/job-board/baseten",
-            ashby_listing(&["a1", "a2"]),
+            ashby_board_json(&["a1", "a2"]),
         )
         .await;
 
@@ -647,7 +651,7 @@ mod tests {
         mount(
             &server,
             "/posting-api/job-board/acme",
-            ashby_listing(&["a1"]).set_delay(Duration::from_millis(600)),
+            ashby_board_json(&["a1"]).set_delay(Duration::from_millis(600)),
         )
         .await;
         let short = Duration::from_millis(100);
@@ -671,11 +675,6 @@ mod tests {
 
         assert_eq!(greenhouse, OpenStatus::Unknown);
         assert_eq!(ashby, OpenStatus::Unknown);
-    }
-
-    #[test]
-    fn the_production_timeout_is_ten_seconds() {
-        assert_eq!(CHECK_TIMEOUT, Duration::from_secs(10));
     }
 
     #[tokio::test]
@@ -814,7 +813,7 @@ mod tests {
         mount(
             &server,
             "/posting-api/job-board/baseten",
-            ashby_listing(&["a1", "a2"]),
+            ashby_board_json(&["a1", "a2"]),
         )
         .await;
         let checker = NetworkOpenChecker::with_base_url(Client::new(), &server.uri());
@@ -897,7 +896,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_network_checker_answers_like_check_open_for_the_other_sources() {
+    async fn the_network_checker_says_closed_for_a_gone_greenhouse_job_and_unknown_for_a_source_it_cannot_check()
+     {
         let server = MockServer::start().await;
         mount(
             &server,

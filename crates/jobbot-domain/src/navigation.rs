@@ -34,7 +34,9 @@ pub enum NavRefusal {
     PrivateHost(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Where an address leads. The variants run from the least to the most closed: `Ord` makes the
+/// worst of several (a Teredo address) the greatest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Reach {
     Public,
     Loopback,
@@ -139,11 +141,7 @@ fn reach_of(host: &Host<&str>) -> Reach {
                 carried
                     .into_iter()
                     .map(reach_v4)
-                    .max_by_key(|reach| match reach {
-                        Reach::Public => 0,
-                        Reach::Loopback => 1,
-                        Reach::Private => 2,
-                    })
+                    .max()
                     .unwrap_or(Reach::Private)
             }
         }
@@ -160,16 +158,17 @@ fn carried_v4(ip: Ipv6Addr) -> Vec<Ipv4Addr> {
     if ip.is_loopback() || ip.is_unspecified() {
         return Vec::new();
     }
-    let join = |high: u16, low: u16| Ipv4Addr::from((u32::from(high) << 16) | u32::from(low));
+    let ipv4_from_segments =
+        |high: u16, low: u16| Ipv4Addr::from((u32::from(high) << 16) | u32::from(low));
     let [a, b, c, d, e, f, g, h] = ip.segments();
     if [a, b, c, d, e, f] == [0x64, 0xff9b, 0, 0, 0, 0] {
-        return vec![join(g, h)];
+        return vec![ipv4_from_segments(g, h)];
     }
     if a == 0x2002 {
-        return vec![join(b, c)];
+        return vec![ipv4_from_segments(b, c)];
     }
     if [a, b] == [0x2001, 0] {
-        return vec![join(c, d), join(!g, !h)];
+        return vec![ipv4_from_segments(c, d), ipv4_from_segments(!g, !h)];
     }
     ip.to_ipv4().into_iter().collect()
 }
@@ -182,8 +181,9 @@ fn reach_v4(ip: Ipv4Addr) -> Reach {
         || ip.is_link_local()
         || ip.is_multicast()
         || first == 0
-        || first >= 240
+        || first >= 240 // 240.0.0.0/4: reserved
         || (first == 100 && (64..=127).contains(&second))
+    // 100.64.0.0/10: carrier-grade NAT (RFC 6598)
     {
         Reach::Private
     } else {

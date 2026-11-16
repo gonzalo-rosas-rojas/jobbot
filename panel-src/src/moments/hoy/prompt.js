@@ -16,9 +16,10 @@ import { clean } from "../shared/util.js";
 export const ASKS_AFTER = new Set(["blocked", "handoff", "manual_apply"]);
 const YES = KEYS.find((k) => k.id === "confirm").keys[0];
 const NO = KEYS.find((k) => k.id === "close").display;
+const WHO_MAX = 60; // characters of the company (or the task) named in the question
 
 export function createPrompt({ host, run, announce, doc = document }) {
-  let row = null;     // the item he went to do
+  let pendingItem = null;   // the item he went to do
   let shown = null;   // the line on screen
 
   function hide() {
@@ -27,12 +28,12 @@ export function createPrompt({ host, run, announce, doc = document }) {
   }
 
   function cancel() {
-    row = null;
+    pendingItem = null;
     hide();
   }
 
   function yes() {
-    const target = row;
+    const target = pendingItem;
     cancel();
     if (target) run("confirm", target, { confirmed: true });
   }
@@ -51,15 +52,16 @@ export function createPrompt({ host, run, announce, doc = document }) {
   }
 
   function show() {
-    if (!row || shown) return;
-    const who = clean(row.company || row.text, 60);
-    shown = h("div", { class: "prompt", role: "group", "aria-label": t("hoy.prompt.ask", { company: who }) },
-      h("span", { class: "prompt-text" }, t("hoy.prompt.ask", { company: who })),
+    if (!pendingItem || shown) return;
+    const who = clean(pendingItem.company || pendingItem.text, WHO_MAX);
+    const question = t("hoy.prompt.ask", { company: who });
+    shown = h("div", { class: "prompt", role: "group", "aria-label": question },
+      h("span", { class: "prompt-text" }, question),
       actButton({ key: YES, label: t("hoy.prompt.yes"), primary: true, "data-prompt": "yes", onclick: yes }),
       actButton({ key: NO, label: t("hoy.prompt.no"), "data-prompt": "no", onclick: cancel }));
     host.prepend(shown);
     doc.addEventListener("keydown", onKey, true);
-    announce(t("hoy.prompt.ask", { company: who }));
+    announce(question);
   }
 
   function onVisible() {
@@ -71,12 +73,11 @@ export function createPrompt({ host, run, announce, doc = document }) {
     /** Called after `o` opened the posting of `item`: it will be asked about when the tab is visible again. */
     afterLink(item) {
       if (!ASKS_AFTER.has(item.kindId)) return;
-      row = item;
+      pendingItem = item;
       hide();
     },
     cancel,
-    pending: () => row,
-    isShown: () => shown !== null,
+    pending: () => pendingItem,
     show, // when the page is already visible again (a window that opened beside this one)
     destroy() { cancel(); doc.removeEventListener("visibilitychange", onVisible); },
   };

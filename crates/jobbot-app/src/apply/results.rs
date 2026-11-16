@@ -151,6 +151,9 @@ fn cut(text: &str, max: usize) -> String {
     }
 }
 
+/// The columns of the table `format_table` prints.
+const COLUMNS: usize = 7;
+
 /// A short table in Spanish for `jobbot results`: when (Santiago time), mode, state, key, who and
 /// what, how many questions were answered and which required ones were left.
 pub fn format_table(results: &LastResults) -> String {
@@ -168,50 +171,17 @@ pub fn format_table(results: &LastResults) -> String {
         "LLENOS",
         "FALTAN",
     ];
-    let rows: Vec<[String; 7]> = results
-        .lines
-        .iter()
-        .map(|line| {
-            let when = DateTime::parse_from_rfc3339(&line.timestamp)
-                .map(|at| {
-                    at.with_timezone(&Santiago)
-                        .format("%Y-%m-%d %H:%M")
-                        .to_string()
-                })
-                .unwrap_or_else(|_| line.timestamp.clone());
-            let mode = serde_json::to_value(line.mode)
-                .ok()
-                .and_then(|value| value.as_str().map(str::to_string))
-                .unwrap_or_default();
-            let filled = line
-                .fields_filled
-                .map_or("-".to_string(), |count| count.to_string());
-            let left = if line.fields_left.is_empty() {
-                "-".to_string()
-            } else {
-                cut(&line.fields_left.join("; "), 60)
-            };
-            [
-                when,
-                mode,
-                line.state.clone(),
-                line.key.clone(),
-                cut(&format!("{} — {}", line.company, line.title), 40),
-                filled,
-                left,
-            ]
-        })
-        .collect();
-    let mut widths: [usize; 7] = std::array::from_fn(|i| header[i].chars().count());
+    let rows: Vec<[String; COLUMNS]> = results.lines.iter().map(table_cells).collect();
+    let mut widths: [usize; COLUMNS] = std::array::from_fn(|i| header[i].chars().count());
     for row in &rows {
         for (width, cell) in widths.iter_mut().zip(row) {
             *width = (*width).max(cell.chars().count());
         }
     }
-    let render = |cells: [&str; 7]| {
+    let render = |cells: [&str; COLUMNS]| {
         let mut out = String::new();
         for (i, cell) in cells.iter().enumerate() {
-            if i == 6 {
+            if i == COLUMNS - 1 {
                 out.push_str(cell);
             } else {
                 out.push_str(&format!("{cell:<width$}  ", width = widths[i]));
@@ -230,6 +200,48 @@ pub fn format_table(results: &LastResults) -> String {
         text.push_str(&render(std::array::from_fn(|i| row[i].as_str())));
     }
     text
+}
+
+/// The cells of one table row, in the order of the header.
+fn table_cells(line: &ResultLine) -> [String; COLUMNS] {
+    let filled = line
+        .fields_filled
+        .map_or("-".to_string(), |count| count.to_string());
+    let left = if line.fields_left.is_empty() {
+        "-".to_string()
+    } else {
+        cut(&line.fields_left.join("; "), 60)
+    };
+    [
+        santiago_time(&line.timestamp),
+        mode_name(line.mode).to_string(),
+        line.state.clone(),
+        line.key.clone(),
+        cut(&format!("{} — {}", line.company, line.title), 40),
+        filled,
+        left,
+    ]
+}
+
+/// An RFC 3339 `timestamp` as `YYYY-MM-DD HH:MM` in Santiago; text that is not a date stays as it is.
+fn santiago_time(timestamp: &str) -> String {
+    DateTime::parse_from_rfc3339(timestamp)
+        .map(|at| {
+            at.with_timezone(&Santiago)
+                .format("%Y-%m-%d %H:%M")
+                .to_string()
+        })
+        .unwrap_or_else(|_| timestamp.to_string())
+}
+
+/// The name of a mode in the log (the same one serde writes).
+fn mode_name(mode: AttemptMode) -> &'static str {
+    match mode {
+        AttemptMode::DryRun => "dry_run",
+        AttemptMode::Assist => "assist",
+        AttemptMode::Live => "live",
+        AttemptMode::Handoff => "handoff",
+    }
 }
 
 #[cfg(test)]
@@ -307,22 +319,26 @@ mod tests {
 
     #[test]
     fn every_mode_has_its_own_name() {
-        let names: Vec<String> = [
+        let modes = [
             AttemptMode::DryRun,
             AttemptMode::Assist,
             AttemptMode::Live,
             AttemptMode::Handoff,
-        ]
-        .iter()
-        .map(|mode| {
-            serde_json::to_value(mode)
-                .unwrap()
-                .as_str()
-                .unwrap()
-                .to_string()
-        })
-        .collect();
-        assert_eq!(names, ["dry_run", "assist", "live", "handoff"]);
+        ];
+        let written: Vec<String> = modes
+            .iter()
+            .map(|mode| {
+                serde_json::to_value(mode)
+                    .unwrap()
+                    .as_str()
+                    .unwrap()
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(written, ["dry_run", "assist", "live", "handoff"]);
+        // The table shows the very same names.
+        let shown: Vec<&str> = modes.into_iter().map(mode_name).collect();
+        assert_eq!(shown, written);
     }
 
     #[test]
@@ -365,11 +381,16 @@ mod tests {
     }
 
     #[test]
-    fn read_last_survives_a_missing_file_and_damaged_lines() {
+    fn read_last_of_a_missing_file_is_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let none = read_last(&dir.path().join("results.jsonl"), 5).unwrap();
+        assert!(none.lines.is_empty() && none.total == 0);
+    }
+
+    #[test]
+    fn read_last_survives_damaged_lines() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("results.jsonl");
-        let none = read_last(&path, 5).unwrap();
-        assert!(none.lines.is_empty() && none.total == 0);
         append_result(&path, &line(1, AttemptMode::DryRun, State::Prepared)).unwrap();
         // A blank line and a half-written one without its newline (a crash mid-write) must not
         // hide the good ones, nor swallow the next line appended after them.
@@ -394,7 +415,7 @@ mod tests {
     }
 
     #[test]
-    fn the_table_is_short_and_in_spanish() {
+    fn the_table_shows_santiago_time_and_dashes_for_unknown_counts() {
         let mut handoff = line(2, AttemptMode::Handoff, State::NeedsGonza);
         handoff.handoff_sheet = Some("data/handoff/test_2.md".into());
         let unknown = ResultLine {

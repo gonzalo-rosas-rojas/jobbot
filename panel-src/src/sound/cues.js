@@ -26,50 +26,50 @@ export const BUSES = Object.freeze({
   background: Object.freeze({ id: "background", gain: 0.6, minGapMs: 60 * 1000, exempt: Object.freeze(["bg.error"]) }),
 });
 
-const A = "actions";
-const B = "background";
+const ACTIONS = "actions";
+const BACKGROUND = "background";
 
-const arrive = (room) => ({ id: `arrive.${room}`, bus: A, group: "move", recipe: "arrive", opts: { room }, calm: "skip", max: 0.42 });
+const arrive = (room) => ({ id: `arrive.${room}`, bus: ACTIONS, group: "move", recipe: "arrive", opts: { room }, calm: "skip", max: 0.42 });
 
 export const CUES = Object.freeze([
   // ---- moving
-  { id: "step", bus: A, group: "move", recipe: "tick", click: true, calm: "skip", max: 0.05 },
+  { id: "step", bus: ACTIONS, group: "move", recipe: "tick", click: true, calm: "skip", max: 0.05 },
   ...ROOM_IDS.map(arrive),
   // ---- opening and closing: the drawer, the palette, the help, a menu, the sheet of sounds
-  { id: "open", bus: A, group: "open", recipe: "open", click: true, max: 0.12 },
-  { id: "close", bus: A, group: "open", recipe: "close", click: true, max: 0.12 },
+  { id: "open", bus: ACTIONS, group: "open", recipe: "open", click: true, max: 0.12 },
+  { id: "close", bus: ACTIONS, group: "open", recipe: "close", click: true, max: 0.12 },
   // ---- the two presses of what cannot be undone
-  { id: "arm", bus: A, group: "twopress", recipe: "arm", max: 0.15 },
-  { id: "confirm", bus: A, group: "twopress", recipe: "confirm", click: true, max: 0.15 },
+  { id: "arm", bus: ACTIONS, group: "twopress", recipe: "arm", max: 0.15 },
+  { id: "confirm", bus: ACTIONS, group: "twopress", recipe: "confirm", click: true, max: 0.15 },
   // ---- going forward (rising, warm)
-  { id: "approve", bus: A, group: "advance", recipe: "approve", mutates: true, max: 0.2 },
-  { id: "sent", bus: A, group: "advance", recipe: "sent", mutates: true, max: 0.3 },
-  { id: "register", bus: A, group: "advance", recipe: "register", mutates: true, max: 0.3 },
-  { id: "done", bus: A, group: "advance", recipe: "done", click: true, mutates: true, max: 0.2 },
-  { id: "taskadd", bus: A, group: "advance", recipe: "taskadd", mutates: true, max: 0.25 },
+  { id: "approve", bus: ACTIONS, group: "advance", recipe: "approve", mutates: true, max: 0.2 },
+  { id: "sent", bus: ACTIONS, group: "advance", recipe: "sent", mutates: true, max: 0.3 },
+  { id: "register", bus: ACTIONS, group: "advance", recipe: "register", mutates: true, max: 0.3 },
+  { id: "done", bus: ACTIONS, group: "advance", recipe: "done", click: true, mutates: true, max: 0.2 },
+  { id: "taskadd", bus: ACTIONS, group: "advance", recipe: "taskadd", mutates: true, max: 0.25 },
   // ---- putting aside and taking back (falling)
-  { id: "snooze", bus: A, group: "retreat", recipe: "snooze", mutates: true, max: 0.3 },
-  { id: "undo", bus: A, group: "retreat", recipe: "undo", mutates: true, max: 0.15 },
-  { id: "withdraw", bus: A, group: "retreat", recipe: "withdraw", mutates: true, max: 0.3 },
+  { id: "snooze", bus: ACTIONS, group: "retreat", recipe: "snooze", mutates: true, max: 0.3 },
+  { id: "undo", bus: ACTIONS, group: "retreat", recipe: "undo", mutates: true, max: 0.15 },
+  { id: "withdraw", bus: ACTIONS, group: "retreat", recipe: "withdraw", mutates: true, max: 0.3 },
   // ---- the engine's switch: low and warm down, clear up
-  { id: "stop", bus: A, group: "engine", recipe: "stop", mutates: true, max: 0.35 },
-  { id: "resume", bus: A, group: "engine", recipe: "resume", mutates: true, max: 0.3 },
+  { id: "stop", bus: ACTIONS, group: "engine", recipe: "stop", mutates: true, max: 0.35 },
+  { id: "resume", bus: ACTIONS, group: "engine", recipe: "resume", mutates: true, max: 0.3 },
   // ---- preferences
-  { id: "switch", bus: A, group: "pref", recipe: "toggle", opts: { on: true }, alt: { on: false }, max: 0.1 },
-  { id: "theme", bus: A, group: "pref", recipe: "theme", opts: { to: "dark" }, alt: { to: "light" }, max: 0.3 },
-  { id: "lang", bus: A, group: "pref", recipe: "lang", opts: { to: "en" }, alt: { to: "es" }, max: 0.15 },
+  { id: "switch", bus: ACTIONS, group: "pref", recipe: "toggle", opts: { on: true }, alt: { on: false }, max: 0.1 },
+  { id: "theme", bus: ACTIONS, group: "pref", recipe: "theme", opts: { to: "dark" }, alt: { to: "light" }, max: 0.3 },
+  { id: "lang", bus: ACTIONS, group: "pref", recipe: "lang", opts: { to: "en" }, alt: { to: "es" }, max: 0.15 },
   // ---- something he asked for failed
-  { id: "error", bus: A, group: "fail", recipe: "error", max: 0.15 },
+  { id: "error", bus: ACTIONS, group: "fail", recipe: "error", max: 0.15 },
   // ---- the background: what happens by itself
-  { id: "bg.run", bus: B, group: "bg", recipe: "run", max: 0.9 },
-  { id: "bg.runfail", bus: B, group: "bg", recipe: "late", max: 0.2 },
-  { id: "bg.queue", bus: B, group: "bg", recipe: "turn", max: 0.25 },
-  { id: "bg.reply", bus: B, group: "bg", recipe: "chord", max: 0.9 },
-  { id: "bg.interview", bus: B, group: "bg", recipe: "ceremony", max: 0.9 },
-  { id: "bg.gate", bus: B, group: "bg", recipe: "gate", max: 0.9 },
-  { id: "bg.stop", bus: B, group: "bg", recipe: "stop", max: 0.9 },
-  { id: "bg.go", bus: B, group: "bg", recipe: "resume", max: 0.9 },
-  { id: "bg.error", bus: B, group: "bg", recipe: "error", gain: 0.7, max: 0.9 },
+  { id: "bg.run", bus: BACKGROUND, group: "bg", recipe: "run", max: 0.9 },
+  { id: "bg.runfail", bus: BACKGROUND, group: "bg", recipe: "late", max: 0.2 },
+  { id: "bg.queue", bus: BACKGROUND, group: "bg", recipe: "turn", max: 0.25 },
+  { id: "bg.reply", bus: BACKGROUND, group: "bg", recipe: "chord", max: 0.9 },
+  { id: "bg.interview", bus: BACKGROUND, group: "bg", recipe: "ceremony", max: 0.9 },
+  { id: "bg.gate", bus: BACKGROUND, group: "bg", recipe: "gate", max: 0.9 },
+  { id: "bg.stop", bus: BACKGROUND, group: "bg", recipe: "stop", max: 0.9 },
+  { id: "bg.go", bus: BACKGROUND, group: "bg", recipe: "resume", max: 0.9 },
+  { id: "bg.error", bus: BACKGROUND, group: "bg", recipe: "error", gain: 0.7, max: 0.9 },
 ].map((cue) => Object.freeze(cue)));
 
 export const CUE_BY_ID = Object.freeze(Object.fromEntries(CUES.map((cue) => [cue.id, cue])));

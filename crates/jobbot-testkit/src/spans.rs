@@ -138,6 +138,11 @@ impl Visit for Fields<'_> {
     }
 }
 
+/// Where a span lives in `seen` and `metadata`: its id minus one (an id is never zero).
+fn index_of(id: &Id) -> usize {
+    id.into_u64() as usize - 1
+}
+
 impl Subscriber for Recorder {
     fn enabled(&self, _metadata: &Metadata<'_>) -> bool {
         true
@@ -146,8 +151,9 @@ impl Subscriber for Recorder {
     fn new_span(&self, attributes: &Attributes<'_>) -> Id {
         let mut fields = BTreeMap::new();
         attributes.record(&mut Fields(&mut fields));
-        self.metadata.lock().unwrap().push(attributes.metadata());
         let mut seen = self.seen.lock().unwrap();
+        // Pushed under the `seen` lock, so a span's place in both lists is settled together.
+        self.metadata.lock().unwrap().push(attributes.metadata());
         seen.push(SpanSeen {
             name: attributes.metadata().name().to_string(),
             fields,
@@ -160,7 +166,7 @@ impl Subscriber for Recorder {
 
     fn record(&self, span: &Id, values: &Record<'_>) {
         let mut seen = self.seen.lock().unwrap();
-        if let Some(span) = seen.get_mut(span.into_u64() as usize - 1) {
+        if let Some(span) = seen.get_mut(index_of(span)) {
             values.record(&mut Fields(&mut span.fields));
         }
     }
@@ -185,7 +191,7 @@ impl Subscriber for Recorder {
         let Some(id) = entered.last() else {
             return Current::none();
         };
-        let metadata = self.metadata.lock().unwrap()[id.into_u64() as usize - 1];
+        let metadata = self.metadata.lock().unwrap()[index_of(id)];
         Current::new(id.clone(), metadata)
     }
 }

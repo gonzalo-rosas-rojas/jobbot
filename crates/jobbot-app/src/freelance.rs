@@ -26,6 +26,14 @@ const MAX_PORTFOLIO: usize = 5;
 const MAX_QUESTIONS: usize = 4;
 const MAX_RATE_USD: f64 = 300.0;
 const MAX_POSTING_CHARS: usize = 12_000;
+// Cuts of the text Claude writes, in characters (see `clean`).
+const MAX_SKILL_CHARS: usize = 40;
+const MAX_IDEA_TITLE_CHARS: usize = 100;
+const MAX_IDEA_DESCRIPTION_CHARS: usize = 400;
+const MAX_HEADLINE_CHARS: usize = 120;
+const MAX_BIO_CHARS: usize = 1500;
+const MAX_PROPOSAL_CHARS: usize = 2500;
+const MAX_QUESTION_CHARS: usize = 200;
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -103,6 +111,14 @@ pub fn forbidden_in(text: &str, rules: &Exclusions) -> Option<String> {
     if result.excluded { result.reason } else { None }
 }
 
+/// Fails when the text of a draft touches the exclusion list: such a draft is never saved.
+fn ensure_draft_allowed(text: &str, rules: &Exclusions) -> Result<()> {
+    match forbidden_in(text, rules) {
+        Some(reason) => bail!("el borrador toca la lista de exclusión ({reason}): no se guarda"),
+        None => Ok(()),
+    }
+}
+
 // ---- profile
 
 pub const PROFILE_SYSTEM: &str = "You write a draft freelance profile for one engineer. Use ONLY \
@@ -172,6 +188,38 @@ pub struct ProfileDraft {
     pub portfolio: Vec<(String, String)>,
 }
 
+/// The skills the CV has (whole words only), cleaned, without repeats and at most `MAX_SKILLS`,
+/// and how many were dropped for not being in the CV. `cv` is squashed.
+fn filter_skills(raw_skills: Vec<String>, cv: &str) -> (Vec<String>, usize) {
+    let mut skills: Vec<String> = Vec::new();
+    let mut dropped_skills = 0;
+    for skill in raw_skills {
+        let skill = clean(&skill, MAX_SKILL_CHARS);
+        if skill.is_empty() {
+            continue;
+        }
+        // Whole words only: "Go" is not in "MongoDB" and "R" is not in "Run".
+        if !contains_word_lc(cv, &squash(&skill)) {
+            dropped_skills += 1;
+        } else if skills.len() < MAX_SKILLS && !skills.iter().any(|s| squash(s) == squash(&skill)) {
+            skills.push(skill);
+        }
+    }
+    (skills, dropped_skills)
+}
+
+/// The rate Claude asked for, held between Gonza's minimum and `MAX_RATE_USD` (a minimum above
+/// that wins), and whether it had to be raised to the minimum.
+fn clamp_rate(asked: f64, config: &FreelanceConfig) -> (f64, bool) {
+    let asked = if asked.is_finite() { asked } else { 0.0 };
+    let raised = asked < config.min_hourly_usd;
+    let rate = asked.clamp(
+        config.min_hourly_usd,
+        MAX_RATE_USD.max(config.min_hourly_usd),
+    );
+    (rate, raised)
+}
+
 /// Cleans and checks a profile. `cv_text` is the text that was sent to Claude: a skill must be in it.
 pub fn assemble_profile(
     raw: RawProfile,
@@ -179,41 +227,23 @@ pub fn assemble_profile(
     config: &FreelanceConfig,
     rules: &Exclusions,
 ) -> Result<ProfileDraft> {
-    let cv = squash(cv_text);
-    let mut skills: Vec<String> = Vec::new();
-    let mut dropped_skills = 0;
-    for skill in raw.skills {
-        let skill = clean(&skill, 40);
-        if skill.is_empty() {
-            continue;
-        }
-        // Whole words only: "Go" is not in "MongoDB" and "R" is not in "Run".
-        if !contains_word_lc(&cv, &squash(&skill)) {
-            dropped_skills += 1;
-        } else if skills.len() < MAX_SKILLS && !skills.iter().any(|s| squash(s) == squash(&skill)) {
-            skills.push(skill);
-        }
-    }
-    let asked = if raw.hourly_rate_usd.is_finite() {
-        raw.hourly_rate_usd
-    } else {
-        0.0
-    };
-    let rate_raised = asked < config.min_hourly_usd;
-    let rate_usd = asked.clamp(
-        config.min_hourly_usd,
-        MAX_RATE_USD.max(config.min_hourly_usd),
-    );
+    let (skills, dropped_skills) = filter_skills(raw.skills, &squash(cv_text));
+    let (rate_usd, rate_raised) = clamp_rate(raw.hourly_rate_usd, config);
     let portfolio: Vec<(String, String)> = raw
         .portfolio_ideas
         .into_iter()
-        .map(|i| (clean(&i.title, 100), clean(&i.description, 400)))
+        .map(|i| {
+            (
+                clean(&i.title, MAX_IDEA_TITLE_CHARS),
+                clean(&i.description, MAX_IDEA_DESCRIPTION_CHARS),
+            )
+        })
         .filter(|(title, _)| !title.is_empty())
         .take(MAX_PORTFOLIO)
         .collect();
     let draft = ProfileDraft {
-        headline: clean(&raw.headline, 120),
-        bio: clean(&raw.bio, 1500),
+        headline: clean(&raw.headline, MAX_HEADLINE_CHARS),
+        bio: clean(&raw.bio, MAX_BIO_CHARS),
         skills,
         dropped_skills,
         rate_usd,
@@ -232,16 +262,14 @@ pub fn assemble_profile(
             .collect::<Vec<_>>()
             .join("\n")
     );
-    if let Some(reason) = forbidden_in(&everything, rules) {
-        bail!("el borrador toca la lista de exclusión ({reason}): no se guarda");
-    }
+    ensure_draft_allowed(&everything, rules)?;
     Ok(draft)
 }
 
 fn render_profile(platform: &str, d: &ProfileDraft, min_rate: f64, now: DateTime<Utc>) -> String {
     let mut md = format!(
         "# Perfil freelance — {platform}\n\nBorrador generado el {} (hora de Santiago). Revísalo y publícalo tú: el programa no envía nada a ninguna plataforma.\n\n",
-        now.with_timezone(&Santiago).format("%Y-%m-%d")
+        santiago_day(now)
     );
     md.push_str(&format!(
         "## Titular\n\n{}\n\n## Bio\n\n{}\n\n## Habilidades\n\n",
@@ -314,11 +342,11 @@ pub struct ProposalDraft {
 
 pub fn assemble_proposal(raw: RawProposal, rules: &Exclusions) -> Result<ProposalDraft> {
     let draft = ProposalDraft {
-        proposal: clean(&raw.proposal, 2500),
+        proposal: clean(&raw.proposal, MAX_PROPOSAL_CHARS),
         questions: raw
             .questions_for_client
             .iter()
-            .map(|q| clean(q, 200))
+            .map(|q| clean(q, MAX_QUESTION_CHARS))
             .filter(|q| !q.is_empty())
             .take(MAX_QUESTIONS)
             .collect(),
@@ -327,16 +355,14 @@ pub fn assemble_proposal(raw: RawProposal, rules: &Exclusions) -> Result<Proposa
         bail!("la propuesta salió vacía: no se guarda nada");
     }
     let everything = format!("{}\n{}", draft.proposal, draft.questions.join("\n"));
-    if let Some(reason) = forbidden_in(&everything, rules) {
-        bail!("el borrador toca la lista de exclusión ({reason}): no se guarda");
-    }
+    ensure_draft_allowed(&everything, rules)?;
     Ok(draft)
 }
 
 fn render_proposal(platform: &str, d: &ProposalDraft, now: DateTime<Utc>) -> String {
     let mut md = format!(
         "# Propuesta (borrador) — {platform}\n\nGenerada el {} (hora de Santiago). Revísala y envíala tú.\n\n{}\n\n## Preguntas para el cliente\n\n",
-        now.with_timezone(&Santiago).format("%Y-%m-%d"),
+        santiago_day(now),
         d.proposal
     );
     for question in &d.questions {
@@ -525,6 +551,10 @@ mod tests {
             parse_freelance_config("platform = [\"upwork\"]").is_err(),
             "unknown keys are typos"
         );
+    }
+
+    #[test]
+    fn platforms_are_trimmed_and_lowercased() {
         let c =
             parse_freelance_config("platforms = [\" Upwork \", \"FIVERR\"]\nmin_hourly_usd = 25")
                 .unwrap();

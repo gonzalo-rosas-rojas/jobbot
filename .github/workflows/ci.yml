@@ -94,11 +94,15 @@ jobs:
         run: cargo run --locked -- install-browsers
       # The tests marked #[ignore], one thread at a time (a Chromium per test). Two need what a CI
       # runner does not have: a logged-in `claude`, and the Windows Task Scheduler's task.
+      # CI and GITHUB_ACTIONS leave this step's environment first: with either set, playwright-rs
+      # starts Chromium on Windows with --no-sandbox and --disable-web-security, and jobbot refuses
+      # to start it like that (crates/jobbot-browser/src/launch.rs). So the tests drive the same
+      # sandboxed browser a real run does.
       - name: Chromium tests
-        run: >
-          cargo test --locked --workspace --no-fail-fast -- --ignored --test-threads=1
-          --skip real_claude_answers_through_the_runner
-          --skip the_real_scheduler_answers_within_the_deadline
+        shell: pwsh
+        run: |
+          Remove-Item Env:CI, Env:GITHUB_ACTIONS -ErrorAction SilentlyContinue
+          cargo test --locked --workspace --no-fail-fast -- --ignored --test-threads=1 --skip real_claude_answers_through_the_runner --skip the_real_scheduler_answers_within_the_deadline
 
   supply-chain:
     name: supply chain

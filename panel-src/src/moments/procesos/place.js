@@ -29,18 +29,29 @@ export function createPlace() {
   let started = false;
   const last = new Map(); // key -> the state it had in the last sync
 
+  /** Puts each entry at the end of its lane, the ones of a lane in the order a first listing would give them: the one rule of the first order and of the newcomers. */
+  function appendToLanes(entries) {
+    const byLane = new Map();
+    for (const entry of entries) byLane.set(entry.lane, [...(byLane.get(entry.lane) || []), entry]);
+    for (const [lane, group] of byLane) slots.set(lane, [...(slots.get(lane) || []), ...initialOrder(group).map((x) => ({ key: x.key }))]);
+  }
+
+  /** Drops the empty places a cut column left (a card pushed out of the listing is alive, so it keeps no tombstone). */
+  function closeHoles() {
+    for (const [lane, row] of slots) if (row.includes(null)) slots.set(lane, row.filter(Boolean));
+  }
+
   function sync(list, stateOf = () => null, cut = () => false) {
     const seen = new Map();
     for (const entry of list || []) if (!seen.has(entry.key)) seen.set(entry.key, entry);
     const entries = [...seen.values()];
     const moves = [];
+    const result = () => ({ lanes: Object.fromEntries(slots), moves });
     if (!started) {
       started = true;
-      const byLane = new Map();
-      for (const entry of entries) byLane.set(entry.lane, [...(byLane.get(entry.lane) || []), entry]);
-      for (const [lane, group] of byLane) slots.set(lane, initialOrder(group).map((x) => ({ key: x.key })));
+      appendToLanes(entries);
       for (const entry of entries) last.set(entry.key, entry.state);
-      return { lanes: Object.fromEntries(slots), moves };
+      return result();
     }
     const placed = new Set();
     for (const [lane, row] of slots) {
@@ -57,14 +68,11 @@ export function createPlace() {
         }
       });
     }
-    for (const [lane, row] of slots) if (row.includes(null)) slots.set(lane, row.filter(Boolean));
+    closeHoles();
     for (const entry of entries) last.set(entry.key, entry.state);
     // The newcomers, in the order a first listing would give them, each at the end of its lane.
-    const fresh = entries.filter((x) => !placed.has(x.key));
-    const lanes = new Map();
-    for (const entry of fresh) lanes.set(entry.lane, [...(lanes.get(entry.lane) || []), entry]);
-    for (const [lane, group] of lanes) slots.set(lane, [...(slots.get(lane) || []), ...initialOrder(group).map((x) => ({ key: x.key }))]);
-    return { lanes: Object.fromEntries(slots), moves };
+    appendToLanes(entries.filter((x) => !placed.has(x.key)));
+    return result();
   }
 
   return {

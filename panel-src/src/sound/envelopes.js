@@ -1,28 +1,32 @@
 // Small building blocks for the recipes. Everything takes a BaseAudioContext, so the same code runs live and in an
 // OfflineAudioContext. Nothing here keeps state except a noise buffer cache keyed by context.
 
+import { mulberry32 } from "../core/random.js";
+
 // An exponential ramp to 0 throws, so every release ends here and the node is then set to 0 for good.
 export const FLOOR = 0.001;
 
-// mulberry32: tiny seeded generator, so tests are deterministic and repeats can still differ.
-function rng(seed) {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+export const STOP_TAIL_S = 0.002;   // a source is stopped this long after its envelope ends, so the release is never cut
+const PITCH_JITTER = 0.005;          // the pitch factor of one sound moves by up to this much either way (0.5 %)
+const TIMING_JITTER_S = 0.003;      // and each note's start by up to this much (3 ms)
+const NOISE_SEED = 20261007;         // the white noise of every context is the same noise
+
+// A number in (-1, 1) from a generator of [0, 1).
+const symmetric = (r) => r() * 2 - 1;
+
+// The latest of several end times: when a sound of many notes is over.
+export const latestEnd = (...ends) => Math.max(...ends);
+
+// A warm pair of partials at a given level: [type, ratio, peak] for note() in recipes.js and gestures.js.
+export const soft = (k) => [["sine", 1, 0.1 * k], ["triangle", 1, 0.06 * k]];
 
 // The only randomness a recipe has: one pitch factor per sound (+-0.5 %, shared by all its notes so intervals stay
 // exact) and a timing nudge per note (+-3 ms). Without opts.seed there is no jitter at all.
 export function jitter(opts = {}) {
   const live = opts.seed != null;
-  const r = rng(live ? opts.seed : 1);
-  const pitch = live ? 1 + (r() * 2 - 1) * 0.005 : 1;
-  const at = (t) => (live && t > 0 ? t + (r() * 2 - 1) * 0.003 : t);
+  const r = mulberry32(live ? opts.seed : 1);
+  const pitch = live ? 1 + symmetric(r) * PITCH_JITTER : 1;
+  const at = (t) => (live && t > 0 ? t + symmetric(r) * TIMING_JITTER_S : t);
   return { pitch, at, r };
 }
 
@@ -48,6 +52,8 @@ export function free(src, ...nodes) {
   });
 }
 
+const WARM_Q = 0.7;   // the resonance of the soft low-pass every warm sound goes through
+
 export function filter(ctx, type, f, q, dest) {
   const node = ctx.createBiquadFilter();
   node.type = type;
@@ -56,6 +62,9 @@ export function filter(ctx, type, f, q, dest) {
   node.connect(dest);
   return node;
 }
+
+/** The soft low-pass in front of `out` that rounds a warm sound: nothing above `cutoff` Hz gets through. */
+export const warm = (ctx, out, cutoff) => filter(ctx, "lowpass", cutoff, WARM_Q, out);
 
 // One enveloped oscillator. Returns the time its envelope ends.
 export function tone(ctx, dest, { f, t, peak, decay, attack = 0.006, type = "sine", to }) {
@@ -67,7 +76,7 @@ export function tone(ctx, dest, { f, t, peak, decay, attack = 0.006, type = "sin
   const end = env(g.gain, t, peak, attack, decay);
   o.connect(g).connect(dest);
   o.start(t);
-  o.stop(end + 0.002);
+  o.stop(end + STOP_TAIL_S);
   free(o, g);
   return end;
 }
@@ -79,11 +88,16 @@ export function noise(ctx) {
   if (!buf) {
     buf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
     const d = buf.getChannelData(0);
-    const r = rng(20261007);
-    for (let i = 0; i < d.length; i++) d[i] = r() * 2 - 1;
+    const r = mulberry32(NOISE_SEED);
+    for (let i = 0; i < d.length; i++) d[i] = symmetric(r);
     noises.set(ctx, buf);
   }
   return buf;
+}
+
+/** A note is a stack of partials sharing pitch and envelope: [type, ratio, peak]. `to` glides the pitch. Returns where it ends. */
+export function note(ctx, dest, { f, t, decay, parts, attack, to }) {
+  return latestEnd(...parts.map(([type, ratio, peak]) => tone(ctx, dest, { f: f * ratio, t, peak, decay, attack, type, to: to ? to * ratio : undefined })));
 }
 
 // A short filtered-noise burst; `to` sweeps the filter frequency. `at` picks the slice of the noise buffer.
@@ -98,7 +112,7 @@ export function burst(ctx, dest, { t, dur, f, to, q = 1, peak, type = "bandpass"
   const g = ctx.createGain();
   const end = env(g.gain, t, peak, attack, dur - attack);
   src.connect(flt).connect(g).connect(dest);
-  src.start(t, at, dur + 0.002);
+  src.start(t, at, dur + STOP_TAIL_S);
   free(src, flt, g);
   return end;
 }

@@ -10,6 +10,8 @@ import Lenis from "lenis";
 import { createEngine } from "../src/scene/engine.js";
 import { STOP_IDS, sheetOpacity } from "../src/scene/poses.js";
 import { typingIn } from "../src/ui/keyfilter.js";
+import { trackHeldKeys } from "../src/core/dom.js";
+trackHeldKeys();   // the page does it at boot (src/main.js); a lab has no main
 
 const sheet = document.getElementById("sheet");
 const list = document.getElementById("list");

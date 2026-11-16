@@ -258,8 +258,16 @@ test("an engine that throws never reaches the page", () => {
   const r = rig();
   r.engine.play = () => { throw new Error("boom"); };
   r.engine.preview = () => { throw new Error("boom"); };
-  assert.equal(r.player.play("approve"), false);
-  assert.equal(r.player.preview("approve"), false);
+  const reported = [];
+  const original = console.error;
+  console.error = (e) => reported.push(e);
+  try {
+    assert.equal(r.player.play("approve"), false);
+    assert.equal(r.player.preview("approve"), false);
+  } finally {
+    console.error = original;
+  }
+  assert.equal(reported.length, 2, "and each failure is reported, not swallowed");
 });
 
 // ---- the real engine on a fake AudioContext that counts nodes -----------------------------------------------------------------------

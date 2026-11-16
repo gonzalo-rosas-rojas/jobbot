@@ -62,12 +62,12 @@ impl Renderer for BrowserRenderer {
         let playwright = Playwright::launch()
             .await
             .context("starting the Playwright driver")?;
-        let browser = playwright
-            .chromium()
-            .launch_with_options(crate::launch::launch_options())
+        let browser = crate::launch::start(&playwright, crate::launch::launch_options())
             .await
-            .context("launching Chromium (install it once with playwright_rs::install_browsers)")?;
+            .context("launching Chromium")?;
         let printed = print_pdf(&browser, &html, out_path).await;
+        // A failed close is ignored on purpose: the PDF is already written (or its own error is
+        // returned below), and this crate has no log to report it to.
         let _ = browser.close().await;
         printed?;
         Ok(out_path.to_path_buf())
@@ -105,6 +105,11 @@ mod tests {
         let html = markdown_to_html("# NAME\n\n## SKILLS\na | b\n--|--\n1 | 2");
         assert!(html.contains("<h1>NAME</h1>"));
         assert!(!html.contains("<table"));
+    }
+
+    #[test]
+    fn the_page_uses_the_standard_fonts() {
+        let html = markdown_to_html("# NAME");
         assert!(html.contains("font-family: Arial"));
     }
 
@@ -137,21 +142,6 @@ mod tests {
             text.contains("Builds agents."),
             "extracted text was: {text}"
         );
-    }
-
-    /// Page objects in a PDF: `/Type /Page` that is not the `/Type /Pages` tree node.
-    fn pdf_page_count(bytes: &[u8]) -> usize {
-        const MARK: &[u8] = b"/Type /Page";
-        bytes
-            .windows(MARK.len() + 1)
-            .filter(|w| w.starts_with(MARK) && w[MARK.len()] != b's')
-            .count()
-    }
-
-    #[test]
-    fn page_count_ignores_the_pages_tree_node() {
-        let pdf = b"<< /Type /Pages /Count 2 >> << /Type /Page /Parent 1 0 R >> << /Type /Page >>";
-        assert_eq!(pdf_page_count(pdf), 2);
     }
 
     #[test]
@@ -203,7 +193,10 @@ mod tests {
             pdf_extract::extract_text(&out).unwrap().contains("NAME"),
             "and it still has its text"
         );
-        let seen = server.received_requests().await.unwrap_or_default();
+        let seen = server
+            .received_requests()
+            .await
+            .expect("wiremock records requests unless told not to");
         assert!(seen.is_empty(), "the CV page made requests: {seen:?}");
     }
 }

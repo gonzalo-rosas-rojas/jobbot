@@ -13,7 +13,7 @@ import sistema from "../src/moments/sistema.js";
 import { model, stopCounts } from "../src/core/model.js";
 import { installKeys, KEYS } from "../src/ui/keys.js";
 import { createStage, clockText } from "../src/stage/stage.js";
-import { mulberry32 } from "../src/stage/skyline.js";
+import { mulberry32 } from "../src/core/random.js";
 import { createHud } from "../src/ui/hud.js";
 import { createStops } from "../src/ui/stops.js";
 import { createBar } from "../src/ui/bar.js";
@@ -25,6 +25,8 @@ import { scenariosOf } from "../test/helpers/sistema-core.mjs";
 import empty from "../test/fixtures/snapshot.empty.json";
 import rich from "../test/fixtures/snapshot.rich.json";
 import heavy from "../test/fixtures/snapshot.heavy.json";
+import { trackHeldKeys } from "../src/core/dom.js";
+trackHeldKeys();   // the page does it at boot (src/main.js); a lab has no main
 
 const SCENARIOS = scenariosOf({ rich, empty, heavy });
 setTimeZone("America/Santiago");

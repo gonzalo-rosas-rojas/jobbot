@@ -262,18 +262,19 @@ impl Browse {
         // The page has a sound engine; a test browser must never play it through the real speakers.
         args.push("--mute-audio".to_string());
         let playwright = Playwright::launch().await.unwrap();
-        // The same launch as jobbot-browser's launch.rs: the sandbox asked for (Playwright passes --no-sandbox otherwise)
-        // and 30 s for the launch instead of Playwright's three minutes.
-        let browser = playwright
-            .chromium()
-            .launch_with_options(
-                LaunchOptions::new()
-                    .args(args)
-                    .chromium_sandbox(true)
-                    .timeout(30_000.0),
-            )
-            .await
-            .unwrap();
+        // Started the way jobbot-browser starts its own: the sandbox asked for (Playwright passes --no-sandbox otherwise),
+        // 30 s for the launch instead of Playwright's three minutes, and refused where the library would take the
+        // sandbox away and turn web security off (a CI runner on Windows): the policy and origin tests below would
+        // prove nothing there.
+        let browser = jobbot_browser::start_chromium(
+            &playwright,
+            LaunchOptions::new()
+                .args(args)
+                .chromium_sandbox(true)
+                .timeout(30_000.0),
+        )
+        .await
+        .unwrap();
         let page = browser.new_page().await.unwrap();
         let problems = Arc::new(Mutex::new(Vec::new()));
         let seen = problems.clone();
@@ -349,7 +350,30 @@ impl Browse {
     }
 
     async fn open(&self, url: &str) {
-        self.page.goto(url, None).await.unwrap();
+        if let Err(error) = self.page.goto(url, None).await {
+            panic!(
+                "opening {url} failed: {error}\n{}",
+                self.what_the_load_waited_for(url)
+            );
+        }
+    }
+
+    /// For a navigation that never finished: the requests the page made that got no answer, and
+    /// whether the server still answers a connection of its own. One says a resource hung, the
+    /// other whether it hung in the server or in the browser. An answer here is the head of a
+    /// response: a body that stalls after its headers is not told apart from one that arrived.
+    fn what_the_load_waited_for(&self, url: &str) -> String {
+        let answers = self.answers.lock().unwrap().clone();
+        let unanswered = unanswered(&self.requests.lock().unwrap(), &answers);
+        let server = url
+            .strip_prefix("http://")
+            .and_then(|rest| rest.split(['/', '?']).next())
+            .unwrap_or_default();
+        format!(
+            "requests without an answer: {unanswered:#?}\nanswers received: {}\na new connection to {server}: {}",
+            answers.len(),
+            probe(server)
+        )
     }
 
     /// Opens the page of `env` and waits for the first snapshot to be drawn.
@@ -546,6 +570,76 @@ impl Browse {
     }
 }
 
+/// The `requests` ("METHOD address") that no line of `answers` ("STATUS address") pays for. One
+/// answer pays for one request to the same address, so a second request that hung is still listed.
+fn unanswered(requests: &[String], answers: &[String]) -> Vec<String> {
+    let mut owed: BTreeMap<&str, usize> = BTreeMap::new();
+    for answer in answers {
+        if let Some((_, address)) = answer.split_once(' ') {
+            *owed.entry(address).or_default() += 1;
+        }
+    }
+    requests
+        .iter()
+        .filter(|request| {
+            let address = request.split_once(' ').map_or("", |(_, address)| address);
+            match owed.get_mut(address) {
+                Some(left) if *left > 0 => {
+                    *left -= 1;
+                    false
+                }
+                _ => true,
+            }
+        })
+        .cloned()
+        .collect()
+}
+
+/// What a plain `GET /` on a connection of its own gets from `server` (`ip:port`): the status
+/// line and how long it took, or why there was none. Connecting, writing and reading wait three
+/// seconds each at most.
+fn probe(server: &str) -> String {
+    use std::io::{BufRead, BufReader, Write};
+    let started = std::time::Instant::now();
+    let limit = Duration::from_secs(3);
+    let asked = (|| -> std::io::Result<String> {
+        let address = server
+            .parse()
+            .map_err(|_| std::io::Error::other(format!("{server:?} is not an address")))?;
+        let mut stream = std::net::TcpStream::connect_timeout(&address, limit)?;
+        stream.set_read_timeout(Some(limit))?;
+        stream.set_write_timeout(Some(limit))?;
+        // In one write: `write!` on a socket sends each piece of the format on its own.
+        let request = format!("GET / HTTP/1.1\r\nHost: {server}\r\nConnection: close\r\n\r\n");
+        stream.write_all(request.as_bytes())?;
+        let mut status = String::new();
+        if BufReader::new(stream).read_line(&mut status)? == 0 {
+            return Err(std::io::Error::other("closed without answering"));
+        }
+        Ok(status.trim_end().to_string())
+    })();
+    match asked {
+        Ok(status) => format!("{status:?} after {:?}", started.elapsed()),
+        Err(error) => format!("no answer after {:?} ({error})", started.elapsed()),
+    }
+}
+
+/// Polls until `path` exists (`present`) or is gone: the page can show a change before the server has
+/// made it, so a file is waited for like anything else on the page.
+async fn wait_for_file(path: &std::path::Path, present: bool) {
+    for _ in 0..150 {
+        if path.exists() == present {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!(
+        "timed out waiting for {} to {}",
+        path.display(),
+        if present { "exist" } else { "be removed" }
+    );
+}
+
 /// The text of the sheet reads like words: nothing in it is a leaked value.
 fn assert_no_strays(what: &str, text: &str) {
     for stray in STRAYS {
@@ -595,6 +689,89 @@ async fn the_frame_is_up_before_the_data_and_the_token_leaves_the_address() {
     assert!(b.text_of("#hoy-title").await.contains("Te tocan"));
     b.shot("frame-hoy").await;
     b.stop().await;
+}
+
+/// The harness itself: a navigation that fails says what the load was waiting for, so a hang on
+/// a slow machine explains itself instead of being a bare timeout.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs chromium"]
+async fn a_navigation_that_fails_says_what_it_waited_for() {
+    // A port that was free a moment ago: nothing listens there, so the navigation is refused.
+    let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let url = format!("http://127.0.0.1:{port}/");
+    let b = Browse::start().await;
+    b.page.goto(&url, None).await.unwrap_err();
+    let report = b.what_the_load_waited_for(&url);
+    b.browser.close().await.unwrap();
+    assert!(report.contains(&format!("\"GET {url}\"")), "{report}");
+    assert!(
+        report.contains(&format!("a new connection to 127.0.0.1:{port}: no answer")),
+        "{report}"
+    );
+}
+
+/// A request is owed an answer of its own: the second request to one address is still listed when
+/// only one answer came, and an answer to a longer address does not pay for a shorter one.
+#[test]
+fn a_request_is_unanswered_until_an_answer_to_its_own_address_pays_for_it() {
+    let lines = |lines: &[&str]| {
+        lines
+            .iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+    };
+    let requests = lines(&[
+        "GET http://h/a",
+        "GET http://h/poll",
+        "GET http://h/poll",
+        "POST http://h/b",
+    ]);
+    let answers = lines(&["200 http://h/poll", "200 http://h/proxy?u=http://h/a"]);
+    assert_eq!(
+        unanswered(&requests, &answers),
+        lines(&["GET http://h/a", "GET http://h/poll", "POST http://h/b"])
+    );
+}
+
+/// The probe tells an answer (a refusal is one) from a server that takes the connection and says
+/// nothing.
+#[test]
+fn the_probe_tells_an_answer_from_silence() {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let server = listener.local_addr().unwrap().to_string();
+    let serving = std::thread::spawn(move || {
+        // The first caller is answered; the second is hung up on without a word.
+        let (mut answered, _) = listener.accept().unwrap();
+        // The whole request is read first: hanging up on bytes still unread resets the
+        // connection, and the caller would lose the answer already written.
+        let mut asked = Vec::new();
+        let mut chunk = [0u8; 256];
+        while !asked.windows(4).any(|end| end == b"\r\n\r\n") {
+            match answered.read(&mut chunk) {
+                Ok(0) | Err(_) => break,
+                Ok(read) => asked.extend_from_slice(&chunk[..read]),
+            }
+        }
+        answered
+            .write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
+            .unwrap();
+        drop(answered);
+        let (silent, _) = listener.accept().unwrap();
+        drop(silent);
+    });
+    let answered = probe(&server);
+    let silent = probe(&server);
+    serving.join().unwrap();
+    assert!(
+        answered.starts_with("\"HTTP/1.1 403 Forbidden\" after "),
+        "{answered}"
+    );
+    assert!(silent.starts_with("no answer after "), "{silent}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1032,7 +1209,19 @@ async fn hoy_says_what_waits_and_hostile_text_stays_text() {
             .await
             .contains("1 por aprobar")
     );
-    assert!(b.text_of(".foot-line").await.contains("STOP apagado"));
+    // STOP off is the normal state, so HOY's footer says nothing about it (it names STOP only when it
+    // is on: the stop test below checks that); the switch in COLA's footer says it either way.
+    assert!(
+        !b.text_of("[data-moment=\"hoy\"] .foot-line")
+            .await
+            .contains("STOP")
+    );
+    b.go("cola").await;
+    assert_eq!(
+        b.text_of("[data-moment=\"cola\"] .stop-state").await,
+        "STOP apagado"
+    );
+    b.go("hoy").await;
     b.shot("hoy-seeded").await;
     b.stop().await;
 }
@@ -1177,7 +1366,7 @@ async fn a_card_is_put_aside_from_the_keyboard_and_comes_back_from_the_fold() {
     b.cursor_to("card:test:2").await;
     b.key("s").await;
     // "Until when" is a little menu beside the row; its keys are its own.
-    b.wait("document.querySelector('.menu[role=\"menu\"]') !== null")
+    b.wait("document.querySelector('.menu [role=\"menu\"]') !== null")
         .await;
     assert_eq!(b.count(".menu .menu-item").await, 4);
     b.watch_pending().await;
@@ -1217,8 +1406,20 @@ async fn a_form_that_needs_him_is_confirmed_or_returned_to_the_queue_from_the_ke
     b.visit(&env).await;
     b.wait("document.querySelector('[data-card=\"test:1\"]') !== null")
         .await;
-    // `u` takes it back to the queue: it is not permanent (the engine can do it again), so one press does it.
+    // `u` takes it back to the queue: the server cannot take that back, so it takes two presses (the first
+    // only arms the row, "¿Seguro? Pulsa otra vez").
     b.cursor_to("card:test:1").await;
+    b.key("u").await;
+    assert_eq!(
+        b.attr("[data-card=\"test:1\"]", "data-armed").await,
+        "resolve"
+    );
+    assert_eq!(
+        env.app("test:1").state,
+        State::NeedsGonza,
+        "one press on 'volver a la cola' changes nothing"
+    );
+    tokio::time::sleep(ARM_PAUSE).await;
     b.key("u").await;
     b.wait("document.querySelector('[data-card=\"test:1\"]') === null")
         .await;
@@ -1228,7 +1429,7 @@ async fn a_form_that_needs_him_is_confirmed_or_returned_to_the_queue_from_the_ke
         "without a CV it goes back to the scored ones"
     );
 
-    // Another form that needs him: `c` says it was sent, and that cannot be undone, so it takes two presses.
+    // Another form that needs him: `c` says it was sent, and that cannot be undone either, so it takes two presses.
     let t = env.tracker();
     let job = make_job_with(|j| {
         j.external_id = "5".into();
@@ -1484,7 +1685,7 @@ async fn withdrawing_from_the_drawer_asks_which_reason_and_lands_in_sqlite() {
         .await;
     b.click("#detail [data-act=\"withdraw\"]").await;
     // The question is the second step: nothing changes until a reason is chosen.
-    b.wait("document.querySelector('.menu[role=\"menu\"]') !== null")
+    b.wait("document.querySelector('.menu [role=\"menu\"]') !== null")
         .await;
     assert_eq!(env.app("test:3").state, State::Submitted);
     assert_eq!(b.count(".menu .menu-item").await, 3);
@@ -1513,7 +1714,7 @@ async fn an_answer_is_registered_from_procesos_with_the_keyboard() {
         .await;
     b.cursor_to("card:test:3").await;
     b.key("r").await;
-    b.wait("document.querySelector('.menu[role=\"menu\"]') !== null")
+    b.wait("document.querySelector('.menu [role=\"menu\"]') !== null")
         .await;
     let first = b.text_of(".menu .menu-item .menu-label").await;
     assert!(!first.is_empty());
@@ -1660,7 +1861,7 @@ async fn the_gate_steps_through_the_proposals_and_skipping_sends_nothing() {
         .await;
     // Skipping asks until when and sends nothing: it only puts the proposal aside.
     b.key("s").await;
-    b.wait("document.querySelector('.menu[role=\"menu\"]') !== null")
+    b.wait("document.querySelector('.menu [role=\"menu\"]') !== null")
         .await;
     b.key("1").await;
     b.wait("document.querySelector('.prop').dataset.card === 'test:4'")
@@ -1831,13 +2032,14 @@ async fn stop_and_resume_work_from_sistema_and_the_whole_page_knows() {
         .await;
     assert_eq!(b.attr(".sistema", "data-stopped").await, "false");
     assert_eq!(b.text_of("[data-row=\"stop\"] .stop-text").await, "apagado");
-    // Stopping the engine is one press (it must never be slower than the thing it stops); the
-    // STOP file is on disk when the page says so.
+    // Stopping the engine is one press (it must never be slower than the thing it stops). The page
+    // shows STOP at once, before the server answers (moments/shared/engine.js, `intent`), so the file on disk is
+    // waited for, not read the instant the page changes.
     b.watch_pending().await;
     b.click(button).await;
     b.wait("document.querySelector('.sistema').dataset.stopped === 'true'")
         .await;
-    assert!(env.paths.stop_file.exists());
+    wait_for_file(&env.paths.stop_file, true).await;
     assert!(b.saw_pending().await, "the row dimmed at once");
     assert_ne!(b.text_of("[data-row=\"stop\"] .stop-text").await, "apagado");
     // The other moments say so too: HOY's footer, and COLA's engine switch.
@@ -1858,7 +2060,7 @@ async fn stop_and_resume_work_from_sistema_and_the_whole_page_knows() {
     b.click(button).await;
     b.wait("document.querySelector('.sistema').dataset.stopped === 'false'")
         .await;
-    assert!(!env.paths.stop_file.exists());
+    wait_for_file(&env.paths.stop_file, false).await;
     b.stop().await;
 }
 
@@ -1955,7 +2157,8 @@ async fn the_open_drawer_keeps_its_screenshot_and_note_when_the_page_redraws() {
     b.eval("(() => { document.activeElement.blur(); return 'ok'; })()")
         .await;
     b.key("l").await;
-    b.wait("document.documentElement.lang === 'en' && document.querySelector('#detail').innerText.toLowerCase().includes('journey')")
+    // (`drawer.journey` in i18n/en/common.js: the heading of the five stages reads "Layers")
+    b.wait("document.documentElement.lang === 'en' && document.querySelector('#detail').innerText.toLowerCase().includes('layers')")
         .await;
     assert_eq!(b.eval(&format!("String({picture})")).await, "true");
     assert_eq!(

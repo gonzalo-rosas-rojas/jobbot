@@ -7,6 +7,7 @@
 import { ARM_MAX_MS, twoStep } from "../../core/dom.js";
 import { t } from "../../i18n/index.js";
 
+const SYNC_SLACK_MS = 40; // past ARM_MAX_MS, so the timer of `twoStep` has already disarmed the button when the mark is re-synced
 const STAGED_MS = 600; // how long "Aprobada" stays on the button before the list closes over it
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -15,24 +16,21 @@ function sync(button, label) {
   button.toggleAttribute("data-armed", !button.classList.contains("sent") && button.textContent !== label);
 }
 
-// Where the arming is said aloud (the shell's live region) and sounded ("arm": the first press); renderDetail hands both over with each drawing.
-let say = () => {};
-let sounds = null;
-export function sayArming(announce, sound = null) {
-  say = typeof announce === "function" ? announce : () => {};
-  sounds = sound;
-}
-
-/** The click handler of a permanent button: `core/dom` twoStep, plus a `data-armed` mark the styles can show. */
-export function armed(label, run) {
-  const step = twoStep(label, run, { onArm: () => { if (sounds) sounds.play("arm"); } });      // the second press sounds as the button's own "confirm" (perform)
+/**
+ * The click handler of a permanent button: `core/dom` twoStep, plus a `data-armed` mark the styles can show.
+ * `sound` plays "arm" on the first press and `announce` says it aloud (the shell's live region); each button keeps the ones of
+ * the drawing it was made in, so a button of an older drawing never uses what a newer one handed over.
+ */
+export function armed(label, run, { sound = null, announce = null } = {}) {
+  const step = twoStep(label, run, { onArm: () => { if (sound) sound.play("arm"); } });      // the second press sounds as the button's own "confirm" (perform)
   return (event) => {
     const button = event.currentTarget;
     const before = button.textContent;
     step(event);
-    if (button.textContent !== before && button.textContent === t("act.sure")) say(t("act.sure")); // armed just now: say so
+    const armedNow = button.textContent !== before && button.textContent === t("act.sure");
+    if (armedNow && typeof announce === "function") announce(t("act.sure")); // armed just now: say so
     sync(button, label);
-    setTimeout(() => sync(button, label), ARM_MAX_MS + 40);
+    setTimeout(() => sync(button, label), ARM_MAX_MS + SYNC_SLACK_MS);
   };
 }
 

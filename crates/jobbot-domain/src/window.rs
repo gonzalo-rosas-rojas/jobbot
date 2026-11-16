@@ -163,6 +163,10 @@ pub fn next_window_start(schedule: &Schedule, now: DateTime<Utc>) -> DateTime<Ut
         return now;
     }
     let minute = TimeDelta::minutes(1);
+    // Truncating to a minute only fails for a time outside chrono's range, which a real clock
+    // never gives; a panic here would be worse than the fallback. Without the cut the answer
+    // carries the seconds of `now` instead of landing on the exact minute edge, which for a time
+    // that cannot be cut is all the precision there is to keep.
     let mut t = now.duration_trunc(minute).unwrap_or(now) + minute;
     let limit = now + TimeDelta::days(LOOKAHEAD_DAYS);
     while t < limit {
@@ -311,7 +315,7 @@ mod tests {
     }
 
     #[test]
-    fn schedule_file_is_validated() {
+    fn a_valid_schedule_file_is_read() {
         let ok = r#"
             [[busy]]
             zone = "America/Santiago"
@@ -321,27 +325,60 @@ mod tests {
         "#;
         let parsed = parse_schedule(ok).unwrap();
         assert_eq!(parsed.busy[0].days, vec![Weekday::Mon, Weekday::Fri]);
+    }
 
-        let bad = |text: &str| parse_schedule(text).unwrap_err().to_string();
-        let block = |zone: &str, start: &str, end: &str, days: &str| {
-            format!(
-                "[[busy]]\nzone = \"{zone}\"\nstart = \"{start}\"\nend = \"{end}\"\ndays = {days}\n"
-            )
-        };
+    /// The message with which `parse_schedule` refuses `text`.
+    fn bad(text: &str) -> String {
+        parse_schedule(text).unwrap_err().to_string()
+    }
+
+    /// A schedule of one `[[busy]]` block.
+    fn block(zone: &str, start: &str, end: &str, days: &str) -> String {
+        format!(
+            "[[busy]]\nzone = \"{zone}\"\nstart = \"{start}\"\nend = \"{end}\"\ndays = {days}\n"
+        )
+    }
+
+    #[test]
+    fn a_schedule_that_is_not_toml_is_refused() {
         assert!(bad("").contains("invalid schedule TOML"));
+    }
+
+    #[test]
+    fn a_schedule_without_blocks_is_refused() {
         assert!(bad("busy = []").contains("no [[busy]] blocks"));
+    }
+
+    #[test]
+    fn an_unknown_time_zone_is_refused() {
         assert!(
             bad(&block("Mars/Olympus", "09:00", "17:00", "[\"mon\"]"))
                 .contains("unknown time zone")
         );
+    }
+
+    #[test]
+    fn a_time_not_written_as_hh_mm_is_refused() {
         assert!(
             bad(&block("America/Santiago", "9am", "17:00", "[\"mon\"]")).contains("expected HH:MM")
         );
+    }
+
+    #[test]
+    fn a_block_that_does_not_end_after_it_starts_is_refused() {
         assert!(
             bad(&block("America/Santiago", "17:00", "09:00", "[\"mon\"]"))
                 .contains("end must be after start")
         );
+    }
+
+    #[test]
+    fn a_block_without_days_is_refused() {
         assert!(bad(&block("America/Santiago", "09:00", "17:00", "[]")).contains("lists no days"));
+    }
+
+    #[test]
+    fn an_unknown_weekday_is_refused() {
         assert!(
             bad(&block("America/Santiago", "09:00", "17:00", "[\"funday\"]"))
                 .contains("unknown weekday")

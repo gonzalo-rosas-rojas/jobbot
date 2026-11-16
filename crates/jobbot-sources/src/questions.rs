@@ -16,8 +16,6 @@ use jobbot_domain::text::html_to_text;
 
 pub use jobbot_domain::questions::*;
 
-pub const DEFAULT_BASE_URL: &str = "https://boards-api.greenhouse.io";
-
 /// Every question of a `?questions=true` response, in form order: application, location, EEOC,
 /// demographic. Lenient: an entry without a label or a field name is skipped and a body that is
 /// not an object gives an empty list.
@@ -52,7 +50,7 @@ fn kind_of(api_type: &str) -> FieldKind {
 /// one `Question` per field that has a name.
 fn push_questions(out: &mut Vec<Question>, items: &Value, section: Section) {
     for item in items.as_array().into_iter().flatten() {
-        let label = str_field(item, "label").trim();
+        let label = label_of(item);
         if label.is_empty() {
             continue;
         }
@@ -63,20 +61,6 @@ fn push_questions(out: &mut Vec<Question>, items: &Value, section: Section) {
             if name.is_empty() {
                 continue;
             }
-            let options = field["values"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|value| {
-                    let label = str_field(value, "label").trim();
-                    (!label.is_empty()).then(|| QuestionOption {
-                        label: label.to_string(),
-                        value: id_string(&value["value"]).unwrap_or_default(),
-                        free_form: false,
-                        decline: is_decline_label(label),
-                    })
-                })
-                .collect();
             out.push(Question {
                 section,
                 label: label.to_string(),
@@ -84,16 +68,42 @@ fn push_questions(out: &mut Vec<Question>, items: &Value, section: Section) {
                 field: name.to_string(),
                 kind: kind_of(str_field(field, "type")),
                 required,
-                options,
+                options: select_options(field),
             });
         }
     }
 }
 
+/// The choices of a select field, `values: [{label, value}]`, without the blank ones. A choice
+/// that comes without its `value` stays, with an empty one: what reads these questions (the
+/// review of what the answer bank covers) goes by the labels a person sees on the form, and a
+/// choice left out would make a question look like it had fewer of them than the form shows.
+fn select_options(field: &Value) -> Vec<QuestionOption> {
+    field["values"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|value| {
+            let label = label_of(value);
+            (!label.is_empty()).then(|| QuestionOption {
+                label: label.to_string(),
+                value: id_string(&value["value"]).unwrap_or_default(),
+                free_form: false,
+                decline: is_decline_label(label),
+            })
+        })
+        .collect()
+}
+
+/// The `label` of a question or choice, trimmed; empty when it has none.
+fn label_of(item: &Value) -> &str {
+    str_field(item, "label").trim()
+}
+
 /// `{id, label, required, type, answer_options: [{id, label, free_form, decline_to_answer}]}`.
 fn push_demographic(out: &mut Vec<Question>, items: &Value) {
     for item in items.as_array().into_iter().flatten() {
-        let label = str_field(item, "label").trim();
+        let label = label_of(item);
         let Some(id) = id_string(&item["id"]) else {
             continue;
         };
@@ -105,7 +115,7 @@ fn push_demographic(out: &mut Vec<Question>, items: &Value) {
             .into_iter()
             .flatten()
             .filter_map(|option| {
-                let label = str_field(option, "label").trim();
+                let label = label_of(option);
                 (!label.is_empty()).then(|| QuestionOption {
                     label: label.to_string(),
                     value: id_string(&option["id"]).unwrap_or_default(),
@@ -127,16 +137,7 @@ fn push_demographic(out: &mut Vec<Question>, items: &Value) {
     }
 }
 
-/// The questions of one job on the public Greenhouse API.
-pub async fn fetch_questions(
-    http: &Http,
-    board: &str,
-    job_id: &str,
-) -> anyhow::Result<Vec<Question>> {
-    fetch_questions_from(http, DEFAULT_BASE_URL, board, job_id).await
-}
-
-/// Like [`fetch_questions`] against another server (tests use a wiremock server).
+/// The questions of one job on a Greenhouse API at `base_url` (tests use a wiremock server).
 pub async fn fetch_questions_from(
     http: &Http,
     base_url: &str,
@@ -175,6 +176,25 @@ mod tests {
             .iter()
             .filter(|question| question.section == section)
             .collect()
+    }
+
+    #[test]
+    fn a_choice_without_its_value_keeps_its_place_and_its_label() {
+        let body = json!({"questions": [{
+            "label": "How did you hear?",
+            "required": false,
+            "fields": [{"name": "question_1", "type": "multi_value_multi_select",
+                "values": [{"label": "A friend", "value": 1}, {"label": "A site"}]}]
+        }]});
+
+        let questions = parse_questions(&body);
+
+        let choices: Vec<(&str, &str)> = questions[0]
+            .options
+            .iter()
+            .map(|option| (option.label.as_str(), option.value.as_str()))
+            .collect();
+        assert_eq!(choices, [("A friend", "1"), ("A site", "")]);
     }
 
     #[test]
@@ -278,7 +298,10 @@ mod tests {
             race.decline_option().map(|o| o.label.as_str()),
             Some("Decline To Self Identify")
         );
-        assert!(race.options.iter().filter(|option| option.decline).count() == 1);
+        assert_eq!(
+            race.options.iter().filter(|option| option.decline).count(),
+            1
+        );
         assert!(!eeoc.iter().any(|q| q.required));
     }
 
@@ -394,16 +417,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fetch_names_the_job_when_it_is_gone_or_the_body_is_not_json() {
+    async fn a_gone_job_is_an_error_that_names_the_job() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/v1/boards/acme/jobs/1"))
             .respond_with(ResponseTemplate::new(404))
-            .mount(&server)
-            .await;
-        Mock::given(method("GET"))
-            .and(path("/v1/boards/acme/jobs/2"))
-            .respond_with(ResponseTemplate::new(200).set_body_string("<html>blocked</html>"))
             .mount(&server)
             .await;
 
@@ -420,6 +438,17 @@ mod tests {
             "{gone:#}"
         );
         assert!(format!("{gone:#}").contains("404"), "{gone:#}");
+    }
+
+    #[tokio::test]
+    async fn a_body_that_is_not_json_is_an_error_that_names_the_job() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/boards/acme/jobs/2"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("<html>blocked</html>"))
+            .mount(&server)
+            .await;
+
         let html = fetch_questions_from(
             &Http::new(reqwest::Client::new()),
             &server.uri(),
@@ -429,5 +458,9 @@ mod tests {
         .await
         .unwrap_err();
         assert!(format!("{html:#}").contains("not JSON"), "{html:#}");
+        assert!(
+            format!("{html:#}").contains("greenhouse:acme/2"),
+            "{html:#}"
+        );
     }
 }

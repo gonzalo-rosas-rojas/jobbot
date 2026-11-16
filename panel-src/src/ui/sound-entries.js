@@ -8,10 +8,13 @@
 //   run     { master(), bus(id), mute(kind), work(), volume(), listen() }
 //   time    (ms) -> "21:40", in the page's time zone
 
-import { t } from "../i18n/index.js";
+import { t, fmtDate } from "../i18n/index.js";
 import { LEVEL_IDS } from "../sound/player.js";
 
-const on = (flag) => (flag ? "on" : "off");
+const onOff = (flag) => (flag ? "on" : "off");
+
+/** A moment as "21:40", in the page's time zone. */
+export const clockTime = (ms) => fmtDate(ms, "time");
 
 /** The words for the mode now ("acciones y fondo", "silencio hasta 21:40", ...): the indicator of the HUD and the sub-lines say the same thing. */
 export function stateWords(status, time) {
@@ -25,26 +28,27 @@ export function stateWords(status, time) {
 
 export function soundEntries({ status, run, time }) {
   const base = { group: "prefs", tag: "", current: false };
+  const quiet = { ...base, quiet: true, key: "" };                // second-level entries: they wait for a word and have no key
   const words = t("sound.alias") + " " + t("palette.alias.sound");
-  const here = t("palette.current") + ": ";
+  const nowPrefix = t("palette.current") + ": ";
   const nextLevel = LEVEL_IDS[(LEVEL_IDS.indexOf(status.level) + 1) % LEVEL_IDS.length];
   const entries = [
-    { ...base, id: "pref:sound", label: t(status.enabled ? "sound.cmd.off" : "sound.cmd.on"), sub: here + stateWords(status, time), words, key: "m", run: () => run.master() },
-    { ...base, id: "pref:sound:actions", quiet: true, label: t("sound.cmd.actions." + (status.actions ? "off" : "on")), sub: here + t("sound.ctl." + on(status.actions)), words, key: "", run: () => run.bus("actions") },
-    { ...base, id: "pref:sound:background", quiet: true, label: t("sound.cmd.background." + (status.background ? "off" : "on")), sub: here + t("sound.ctl." + on(status.background)), words, key: "", run: () => run.bus("background") },
+    { ...base, id: "pref:sound", label: t(status.enabled ? "sound.cmd.off" : "sound.cmd.on"), sub: nowPrefix + stateWords(status, time), words, key: "m", run: () => run.master() },
+    { ...quiet, id: "pref:sound:actions", label: t("sound.cmd.actions." + (status.actions ? "off" : "on")), sub: nowPrefix + t("sound.ctl." + onOff(status.actions)), words, run: () => run.bus("actions") },
+    { ...quiet, id: "pref:sound:background", label: t("sound.cmd.background." + (status.background ? "off" : "on")), sub: nowPrefix + t("sound.ctl." + onOff(status.background)), words, run: () => run.bus("background") },
   ];
   if (status.muted) {
-    entries.push({ ...base, id: "pref:sound:unmute", quiet: true, label: t("sound.cmd.mute.off"), sub: t("sound.state.muted", { until: time(status.muteUntil) }), words, key: "", run: () => run.mute("off") });
+    entries.push({ ...quiet, id: "pref:sound:unmute", label: t("sound.cmd.mute.off"), sub: t("sound.state.muted", { until: time(status.muteUntil) }), words, run: () => run.mute("off") });
   } else {
     entries.push(
-      { ...base, id: "pref:sound:mute1h", quiet: true, label: t("sound.cmd.mute.hour"), sub: "", words, key: "", run: () => run.mute("hour") },
-      { ...base, id: "pref:sound:muteTomorrow", quiet: true, label: t("sound.cmd.mute.tomorrow"), sub: "", words, key: "", run: () => run.mute("tomorrow") },
+      { ...quiet, id: "pref:sound:mute1h", label: t("sound.cmd.mute.hour"), sub: "", words, run: () => run.mute("hour") },
+      { ...quiet, id: "pref:sound:muteTomorrow", label: t("sound.cmd.mute.tomorrow"), sub: "", words, run: () => run.mute("tomorrow") },
     );
   }
   entries.push(
-    { ...base, id: "pref:sound:work", quiet: true, label: t("sound.cmd.work." + (status.work.on ? "allow" : "silence")), sub: t(status.work.on ? "sound.cmd.sub.work" : "sound.cmd.sub.workoff", { from: status.work.from, to: status.work.to }), words, key: "", run: () => run.work() },
-    { ...base, id: "pref:sound:volume", quiet: true, label: t("sound.cmd.volume", { level: t("sound.volume." + nextLevel).toLowerCase() }), sub: here + t("sound.volume." + status.level).toLowerCase(), words, key: "", run: () => run.volume() },
-    { ...base, id: "pref:sound:listen", quiet: true, label: t("sound.cmd.listen"), sub: "", words, key: "", run: () => run.listen() },
+    { ...quiet, id: "pref:sound:work", label: t("sound.cmd.work." + (status.work.on ? "allow" : "silence")), sub: t(status.work.on ? "sound.cmd.sub.work" : "sound.cmd.sub.workoff", { from: status.work.from, to: status.work.to }), words, run: () => run.work() },
+    { ...quiet, id: "pref:sound:volume", label: t("sound.cmd.volume", { level: t("sound.volume." + nextLevel).toLowerCase() }), sub: nowPrefix + t("sound.volume." + status.level).toLowerCase(), words, run: () => run.volume() },
+    { ...quiet, id: "pref:sound:listen", label: t("sound.cmd.listen"), sub: "", words, run: () => run.listen() },
   );
   return entries;
 }

@@ -102,15 +102,21 @@ pub fn squash(text: &str) -> String {
         .to_lowercase()
 }
 
+/// Shortest quoted CV line that is a specific claim and not a keyword.
+const MIN_EVIDENCE_CHARS: usize = 40;
+
 /// A quoted CV line counts as evidence only when it really is in the CV (case, spacing and the
-/// bullet mark ignored) and is long enough to be a specific claim, not a keyword.
+/// bullet mark ignored) and has at least `MIN_EVIDENCE_CHARS` characters.
 pub fn evidence_in_cv(evidence: &str, cv_md: &str) -> bool {
     let wanted = squash(evidence.trim().trim_start_matches(['•', '-', '*']).trim());
-    wanted.chars().count() >= 40 && squash(cv_md).contains(&wanted)
+    wanted.chars().count() >= MIN_EVIDENCE_CHARS && squash(cv_md).contains(&wanted)
 }
 
+/// The longest a `slug` is.
+const MAX_SLUG_CHARS: usize = 80;
+
 /// A file-name-safe version of `text`: lowercase ASCII letters and digits separated by single
-/// dashes, at most 80 characters, never empty.
+/// dashes, at most `MAX_SLUG_CHARS` characters, never empty.
 pub fn slug(text: &str) -> String {
     let mut out = String::new();
     let mut last_was_dash = false;
@@ -123,7 +129,7 @@ pub fn slug(text: &str) -> String {
             last_was_dash = true;
         }
     }
-    let capped: String = out.chars().take(80).collect();
+    let capped: String = out.chars().take(MAX_SLUG_CHARS).collect();
     let capped = capped.trim_end_matches('-');
     if capped.is_empty() {
         "item".to_string()
@@ -314,6 +320,26 @@ mod tests {
         );
     }
 
+    /// The lines of the CV entry that line `hit` belongs to: the line itself, the `**bold**` title
+    /// line above it, and every line below it up to the next heading.
+    fn lines_of_entry<'a>(lines: &[&'a str], hit: usize) -> Vec<&'a str> {
+        let is_heading = |line: &str| line.starts_with("**") || line.starts_with('#');
+        let mut entry: Vec<&str> = vec![lines[hit]];
+        if let Some(title) = lines[..hit].iter().rev().find(|l| !l.trim().is_empty())
+            && title.starts_with("**")
+            && !title.contains(':')
+        {
+            entry.push(title);
+        }
+        entry.extend(
+            lines[hit + 1..]
+                .iter()
+                .take_while(|l| !is_heading(l))
+                .filter(|l| !l.trim().is_empty()),
+        );
+        entry
+    }
+
     #[test]
     fn nothing_of_the_employer_entry_of_the_real_cv_survives_whatever_its_layout() {
         // Structural property of the real file (nothing is printed): for every line that hits the
@@ -329,27 +355,13 @@ mod tests {
             };
             check_exclusion(&probe, &rules).excluded
         };
-        let is_heading = |line: &str| line.starts_with("**") || line.starts_with('#');
         let out = strip_excluded_entries(&redact_contact(&cv), &rules);
         let kept: Vec<&str> = out.lines().map(str::trim).collect();
         for (i, line) in lines.iter().enumerate() {
             if !hits_the_list(line) {
                 continue;
             }
-            let mut entry: Vec<&str> = vec![line];
-            if let Some(title) = lines[..i].iter().rev().find(|l| !l.trim().is_empty())
-                && title.starts_with("**")
-                && !title.contains(':')
-            {
-                entry.push(title);
-            }
-            entry.extend(
-                lines[i + 1..]
-                    .iter()
-                    .take_while(|l| !is_heading(l))
-                    .filter(|l| !l.trim().is_empty()),
-            );
-            for text in entry {
+            for text in lines_of_entry(&lines, i) {
                 assert!(
                     !kept.contains(&text.trim()),
                     "a line of an excluded entry is still in the text sent to Claude (line {})",
@@ -384,6 +396,7 @@ mod tests {
         assert_eq!(slug(""), "item");
         assert_eq!(slug("¿¡?!"), "item");
         let long = slug(&"a".repeat(200));
+        // the literal on purpose: dossier names are cut here, and a different cap renames them
         assert_eq!(long.len(), 80);
         for hostile in ["a/b", "a\\b", "a:b", "..", "a b.c", "CON.txt"] {
             let s = slug(hostile);
@@ -425,22 +438,26 @@ mod tests {
     fn keys_that_slug_alike_get_different_names() {
         assert_eq!(slug("greenhouse:a/b"), slug("greenhouse:a-b"));
         assert_ne!(key_slug("greenhouse:a/b"), key_slug("greenhouse:a-b"));
-        let long_a = format!("{}x", "a".repeat(100));
-        let long_b = format!("{}y", "a".repeat(100));
+        let long_a = format!("{}x", "a".repeat(MAX_SLUG_CHARS + 20));
+        let long_b = format!("{}y", "a".repeat(MAX_SLUG_CHARS + 20));
         assert_eq!(
             slug(&long_a),
             slug(&long_b),
-            "the slug is cut at 80 characters"
+            "the slug is cut at MAX_SLUG_CHARS"
         );
         assert_ne!(key_slug(&long_a), key_slug(&long_b));
     }
 
     #[test]
-    fn a_key_slug_is_stable_and_safe_in_a_file_name() {
-        // FNV-1a test vectors: a dossier's name must never change between runs or versions.
+    fn fnv1a32_matches_the_reference_vectors() {
+        // A dossier's name must never change between runs or versions.
         assert_eq!(fnv1a32(""), 0x811c_9dc5);
         assert_eq!(fnv1a32("a"), 0xe40c_292c);
         assert_eq!(fnv1a32("foobar"), 0xbf9c_f968);
+    }
+
+    #[test]
+    fn key_slug_is_a_safe_file_name() {
         assert_eq!(
             key_slug("test:1"),
             format!("test-1-{:08x}", fnv1a32("test:1"))

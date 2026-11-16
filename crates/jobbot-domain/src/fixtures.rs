@@ -92,6 +92,13 @@ mod tests {
     }
 
     #[test]
+    fn the_sample_bullets_are_word_for_word_lines_of_the_sample_cv() {
+        for bullet in [SAMPLE_BULLET_MCP, SAMPLE_BULLET_JOBS] {
+            assert!(SAMPLE_CV.contains(bullet), "{bullet:?} is not in SAMPLE_CV");
+        }
+    }
+
+    #[test]
     fn now_is_the_fixed_test_instant() {
         assert_eq!(NOW.to_rfc3339(), "2026-10-01T12:00:00+00:00");
     }

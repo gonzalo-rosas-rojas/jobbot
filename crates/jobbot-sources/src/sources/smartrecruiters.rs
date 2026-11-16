@@ -20,7 +20,7 @@ use serde_json::Value;
 use std::collections::HashSet;
 
 use super::Source;
-use super::base::{failure, get_json, id_string, parse_iso, skipped_error, str_field};
+use super::base::{failure, get_json, id_string, or_if_empty, parse_iso, skipped_error, str_field};
 use jobbot_domain::models::{FetchError, FetchResult, Job};
 use jobbot_domain::region::title_matches_extra_words;
 use jobbot_domain::scoring::parse_salary_monthly_usd;
@@ -117,32 +117,43 @@ impl SmartRecruitersSource {
                 .as_array()
                 .context("response has no `content` array")?;
             postings.extend(content.iter().cloned());
-            let total = body["totalFound"].as_u64().unwrap_or(0) as usize;
-            if content.len() < PAGE_SIZE || postings.len() >= total {
-                break;
+            // A short page is the last one. `totalFound` ends the listing early only when the
+            // server sends it: without it a full page is followed by another request.
+            if content.len() < PAGE_SIZE {
+                return Ok(postings);
+            }
+            let all_read = body["totalFound"]
+                .as_u64()
+                .is_some_and(|total| postings.len() as u64 >= total);
+            if all_read {
+                return Ok(postings);
             }
         }
+        tracing::warn!(
+            company,
+            filter = ?filter,
+            pages = MAX_PAGES,
+            "listing stopped at the page cap with more postings possibly left"
+        );
         Ok(postings)
     }
 
     /// The remote postings of one company and its postings in `onsite_countries`, each posting
     /// once: those with a relevant title first, then the rest, each group newest first, and how
-    /// many are relevant. A country listing that fails is recorded and the others are kept; the
-    /// remote listing failing fails the company.
+    /// many are relevant, and the errors of the country listings that failed (those are kept out,
+    /// the others stay). The remote listing failing fails the company.
     async fn postings(
         &self,
         company: &str,
-        result: &mut FetchResult,
-    ) -> anyhow::Result<(Vec<Value>, usize)> {
+    ) -> anyhow::Result<(Vec<Value>, usize, Vec<FetchError>)> {
         let mut postings = self.listing(company, ("locationType", "REMOTE")).await?;
+        let mut country_errors = Vec::new();
         for country in &self.onsite_countries {
             match self.listing(company, ("country", country)).await {
                 Ok(listing) => postings.extend(listing),
                 Err(error) => {
                     let error = error.context(format!("country {country}"));
-                    result
-                        .errors
-                        .push(failure("smartrecruiters", company, &error));
+                    country_errors.push(failure("smartrecruiters", company, &error));
                 }
             }
         }
@@ -158,7 +169,7 @@ impl SmartRecruitersSource {
         let (mut first, rest): (Vec<Value>, Vec<Value>) = postings.into_iter().partition(relevant);
         let relevant_count = first.len();
         first.extend(rest);
-        Ok((first, relevant_count))
+        Ok((first, relevant_count, country_errors))
     }
 
     async fn detail(&self, company: &str, id: &str) -> anyhow::Result<Value> {
@@ -167,7 +178,8 @@ impl SmartRecruitersSource {
     }
 
     async fn fetch_company(&self, company: &str, result: &mut FetchResult) -> anyhow::Result<()> {
-        let (postings, relevant) = self.postings(company, result).await?;
+        let (postings, relevant, country_errors) = self.postings(company).await?;
+        result.errors.extend(country_errors);
         // With no title words every title is relevant and nothing is worth reporting.
         if !self.title_words.is_empty() && relevant > MAX_DETAILS {
             result.errors.push(FetchError::failed(
@@ -242,10 +254,7 @@ fn parse_posting(company: &str, item: &Value, detail: Option<&Value>) -> Option<
     if title.is_empty() {
         return None;
     }
-    let identifier = match str_field(&item["company"], "identifier") {
-        "" => company,
-        identifier => identifier,
-    };
+    let identifier = or_if_empty(str_field(&item["company"], "identifier"), company);
     let page = format!("https://jobs.smartrecruiters.com/{identifier}/{external_id}");
     let url = detail
         .map(|detail| str_field(detail, "postingUrl"))
@@ -314,10 +323,7 @@ mod tests {
 
         assert_eq!(job.key(), "smartrecruiters:744000153279439");
         assert_eq!(job.company, "Bosch Group");
-        assert_eq!(
-            job.title,
-            "ANALISTA MARKETING PRODUTO JR ou PL -  36087".trim()
-        );
+        assert_eq!(job.title, "ANALISTA MARKETING PRODUTO JR ou PL -  36087");
         assert_eq!(job.location, "Campinas, SP, Brazil");
         assert!(job.remote);
         assert!(
@@ -434,6 +440,67 @@ mod tests {
         let mut newest_first = dates.clone();
         newest_first.sort_by(|a, b| b.cmp(a));
         assert_eq!(dates, newest_first, "postings come newest first");
+    }
+
+    /// A listing page of `count` postings numbered from `first`, with or without `totalFound`.
+    fn page_of(first: usize, count: usize, total_found: Option<usize>) -> Value {
+        let content: Vec<Value> = (first..first + count)
+            .map(|n| json!({"id": format!("{}", 1000 + n), "name": format!("Engineer {n}")}))
+            .collect();
+        let mut page = json!({"content": content});
+        if let Some(total) = total_found {
+            page["totalFound"] = json!(total);
+        }
+        page
+    }
+
+    async fn mount_page(server: &MockServer, offset: &str, page: Value, expected_calls: u64) {
+        Mock::given(method("GET"))
+            .and(path("/v1/companies/Acme/postings"))
+            .and(query_param("offset", offset))
+            .respond_with(ResponseTemplate::new(200).set_body_json(page))
+            .expect(expected_calls)
+            .mount(server)
+            .await;
+    }
+
+    fn acme(server: &MockServer) -> SmartRecruitersSource {
+        SmartRecruitersSource::new(["Acme"], reqwest::Client::new()).with_base_url(server.uri())
+    }
+
+    #[tokio::test]
+    async fn without_total_found_a_full_page_is_followed_by_the_next_one() {
+        let server = MockServer::start().await;
+        mount_page(&server, "0", page_of(0, 100, None), 1).await;
+        mount_page(&server, "100", page_of(100, 5, None), 1).await;
+
+        let postings = acme(&server).listing("Acme", ("x", "y")).await.unwrap();
+
+        assert_eq!(postings.len(), 105);
+    }
+
+    #[tokio::test]
+    async fn total_found_ends_the_listing_when_it_is_reached() {
+        let server = MockServer::start().await;
+        mount_page(&server, "0", page_of(0, 100, Some(100)), 1).await;
+        mount_page(&server, "100", page_of(100, 5, Some(100)), 0).await;
+
+        let postings = acme(&server).listing("Acme", ("x", "y")).await.unwrap();
+
+        assert_eq!(postings.len(), 100);
+    }
+
+    #[tokio::test]
+    async fn a_listing_never_reads_more_than_three_pages() {
+        let server = MockServer::start().await;
+        for (offset, first) in [("0", 0), ("100", 100), ("200", 200)] {
+            mount_page(&server, offset, page_of(first, 100, None), 1).await;
+        }
+        mount_page(&server, "300", page_of(300, 100, None), 0).await;
+
+        let postings = acme(&server).listing("Acme", ("x", "y")).await.unwrap();
+
+        assert_eq!(postings.len(), 300);
     }
 
     #[tokio::test]
@@ -581,7 +648,8 @@ mod tests {
             .expect(1)
             .mount(&server)
             .await;
-        // The country listing has no remote filter, and repeats 1001 (a remote posting in Australia).
+        // The country listing has no remote filter and repeats 1001; the copy from the remote
+        // listing is the one kept.
         Mock::given(method("GET"))
             .and(path("/v1/companies/Acme/postings"))
             .and(query_param("country", "au"))

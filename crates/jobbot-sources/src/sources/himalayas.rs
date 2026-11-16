@@ -16,12 +16,13 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::Source;
-use super::base::{failure, get_json, parse_time, skipped_error, str_field};
+use super::base::{failure, get_json, parse_time, skipped_error, str_field, with_labeled_lines};
 use super::pay::{monthly_usd_range, number};
 use jobbot_domain::models::{FetchResult, Job};
 use jobbot_domain::text::html_to_text;
 
 const DEFAULT_BASE_URL: &str = "https://himalayas.app";
+const SOURCE_NAME: &str = "himalayas";
 /// The API serves at most 20 jobs per page.
 const PAGE_SIZE: usize = 20;
 
@@ -124,11 +125,9 @@ impl HimalayasSource {
             if skipped > 0 {
                 result
                     .errors
-                    .push(skipped_error("himalayas", query, skipped));
+                    .push(skipped_error(SOURCE_NAME, query, skipped));
             }
-            let total = body["totalCount"].as_u64().unwrap_or(0);
-            if items.len() < PAGE_SIZE || (total > 0 && u64::from(page) * PAGE_SIZE as u64 >= total)
-            {
+            if is_last_page(items.len(), body["totalCount"].as_u64().unwrap_or(0), page) {
                 break;
             }
         }
@@ -139,7 +138,7 @@ impl HimalayasSource {
 #[async_trait]
 impl Source for HimalayasSource {
     fn name(&self) -> &str {
-        "himalayas"
+        SOURCE_NAME
     }
 
     async fn fetch(&self) -> FetchResult {
@@ -147,11 +146,16 @@ impl Source for HimalayasSource {
         let mut seen = HashSet::new();
         for query in &self.config.queries {
             if let Err(error) = self.fetch_query(query, &mut seen, &mut result).await {
-                result.errors.push(failure("himalayas", query, &error));
+                result.errors.push(failure(SOURCE_NAME, query, &error));
             }
         }
         result
     }
+}
+
+/// Whether `page` was the last one: it came back short, or `total` (when the API says it) is read.
+fn is_last_page(items_on_page: usize, total: u64, page: u32) -> bool {
+    items_on_page < PAGE_SIZE || (total > 0 && u64::from(page) * PAGE_SIZE as u64 >= total)
 }
 
 /// True when the posting carries an `expiryDate` (Unix seconds) that already passed.
@@ -173,6 +177,14 @@ fn joined(item: &Value, key: &str) -> String {
         .unwrap_or_default()
 }
 
+/// The id of a job: its page's last path segment, behind the company's slug when it has one.
+fn external_id_of(item: &Value, page_slug: &str) -> String {
+    match str_field(item, "companySlug") {
+        "" => page_slug.to_string(),
+        company_slug => format!("{company_slug}-{page_slug}"),
+    }
+}
+
 /// Every Himalayas job is remote. `locationRestrictions` lists the countries it is open to; an
 /// empty list means no restriction. Pay arrives as numbers with a currency and a period.
 fn parse_job(item: &Value) -> Option<Job> {
@@ -185,28 +197,20 @@ fn parse_job(item: &Value) -> Option<Job> {
         return None;
     }
     let page_slug = url.trim_end_matches('/').rsplit('/').next().unwrap_or("");
-    let external_id = match str_field(item, "companySlug") {
-        "" => page_slug.to_string(),
-        company_slug => format!("{company_slug}-{page_slug}"),
-    };
+    let external_id = external_id_of(item, page_slug);
     let restrictions = joined(item, "locationRestrictions");
     let location = if restrictions.is_empty() {
         "Worldwide".to_string()
     } else {
         restrictions
     };
-    let mut description = html_to_text(str_field(item, "description"));
-    for (label, value) in [
-        (
-            "Employment type",
-            str_field(item, "employmentType").to_string(),
-        ),
-        ("Seniority", joined(item, "seniority")),
-    ] {
-        if !value.is_empty() {
-            description = format!("{description}\n{label}: {value}");
-        }
-    }
+    let description = with_labeled_lines(
+        html_to_text(str_field(item, "description")),
+        &[
+            ("Employment type", str_field(item, "employmentType")),
+            ("Seniority", &joined(item, "seniority")),
+        ],
+    );
     let (salary_min, salary_max) = monthly_usd_range(
         number(&item["minSalary"]),
         number(&item["maxSalary"]),
@@ -214,7 +218,7 @@ fn parse_job(item: &Value) -> Option<Job> {
         str_field(item, "salaryPeriod"),
     );
     Some(Job {
-        source: "himalayas".to_string(),
+        source: SOURCE_NAME.to_string(),
         external_id,
         company: str_field(item, "companyName").to_string(),
         title: title.to_string(),
@@ -322,6 +326,21 @@ mod tests {
         assert!(!is_expired(&json!({"expiryDate": null}), now));
     }
 
+    fn source_for(server: &MockServer, config: HimalayasConfig) -> HimalayasSource {
+        HimalayasSource::new(reqwest::Client::new())
+            .with_base_url(server.uri())
+            .with_config(config)
+    }
+
+    #[test]
+    fn the_last_page_is_a_short_one_or_the_one_that_reaches_the_total() {
+        assert!(is_last_page(19, 0, 1));
+        assert!(!is_last_page(20, 0, 1), "no total: a full page has a next");
+        assert!(!is_last_page(20, 41, 2));
+        assert!(is_last_page(20, 40, 2));
+        assert!(is_last_page(20, 30, 2));
+    }
+
     #[tokio::test]
     async fn fetch_reads_the_search_endpoint() {
         let server = MockServer::start().await;
@@ -335,10 +354,9 @@ mod tests {
             .mount(&server)
             .await;
 
-        let source = HimalayasSource::new(reqwest::Client::new())
-            .with_base_url(server.uri())
-            .with_config(config(&["ai engineer"], 3));
-        let result = source.fetch().await;
+        let result = source_for(&server, config(&["ai engineer"], 3))
+            .fetch()
+            .await;
 
         assert!(result.errors.is_empty(), "{:?}", result.errors);
         assert_eq!(result.jobs.len(), 2, "a short page ends the walk");
@@ -346,7 +364,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fetch_sends_employment_types_only_when_set() {
+    async fn fetch_sends_the_employment_types_when_set() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/jobs/api/search"))
@@ -357,13 +375,36 @@ mod tests {
         let mut cfg = config(&["x"], 1);
         cfg.employment_types = vec!["Contractor".to_string(), "Full Time".to_string()];
 
-        let source = HimalayasSource::new(reqwest::Client::new())
-            .with_base_url(server.uri())
-            .with_config(cfg);
-        let result = source.fetch().await;
+        let result = source_for(&server, cfg).fetch().await;
 
         assert!(result.errors.is_empty(), "{:?}", result.errors);
         assert_eq!(result.jobs.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn fetch_sends_no_employment_type_filter_when_none_is_set() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/jobs/api/search"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(real_payload()))
+            .mount(&server)
+            .await;
+
+        let result = source_for(&server, config(&["x"], 1)).fetch().await;
+
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let asked = server.received_requests().await.unwrap();
+        assert!(!asked.is_empty());
+        for request in asked {
+            assert!(
+                request
+                    .url
+                    .query_pairs()
+                    .all(|(name, _)| name != "employment_type"),
+                "{}",
+                request.url
+            );
+        }
     }
 
     #[tokio::test]
@@ -381,10 +422,9 @@ mod tests {
                 .await;
         }
 
-        let source = HimalayasSource::new(reqwest::Client::new())
-            .with_base_url(server.uri())
-            .with_config(config(&["first", "second"], 5));
-        let result = source.fetch().await;
+        let result = source_for(&server, config(&["first", "second"], 5))
+            .fetch()
+            .await;
 
         assert!(result.errors.is_empty(), "{:?}", result.errors);
         assert_eq!(
@@ -405,10 +445,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let source = HimalayasSource::new(reqwest::Client::new())
-            .with_base_url(server.uri())
-            .with_config(config(&["x"], 1));
-        let result = source.fetch().await;
+        let result = source_for(&server, config(&["x"], 1)).fetch().await;
 
         assert!(result.jobs.is_empty());
         assert!(result.errors.is_empty(), "{:?}", result.errors);
@@ -430,10 +467,9 @@ mod tests {
             .mount(&server)
             .await;
 
-        let source = HimalayasSource::new(reqwest::Client::new())
-            .with_base_url(server.uri())
-            .with_config(config(&["limited", "fine"], 1));
-        let result = source.fetch().await;
+        let result = source_for(&server, config(&["limited", "fine"], 1))
+            .fetch()
+            .await;
 
         assert!(result.jobs.is_empty(), "{:?}", result.jobs);
         assert_eq!(result.errors.len(), 2, "{:?}", result.errors);
@@ -444,14 +480,9 @@ mod tests {
             "{}",
             result.errors[0]
         );
-        assert!(
-            result.errors[1].to_string().starts_with("himalayas:fine: ")
-                && result.errors[1]
-                    .to_string()
-                    .contains("asked us to slow down"),
-            "{}",
-            result.errors[1]
-        );
+        let rested = result.errors[1].to_string();
+        assert!(rested.starts_with("himalayas:fine: "), "{rested}");
+        assert!(rested.contains("asked us to slow down"), "{rested}");
         let asked = server.received_requests().await.unwrap();
         assert!(
             asked

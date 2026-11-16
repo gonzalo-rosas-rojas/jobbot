@@ -4,25 +4,30 @@
 //! the form filler can already answer. What is left is grouped by question, across jobs, so a
 //! question that thirty jobs ask is answered once instead of thirty times. The rules are the
 //! planner's own (`form::plan_fields`): the option matching, the `;` list of a multi-select, the
-//! consent rule for checkbox groups, the essay rule and the Hispanic rule come from `crate::form`,
-//! not from a private copy, but are applied to the schema: nothing here opens a browser or touches
+//! consent rule for checkbox groups, the essay rule, the resume label and the Hispanic rule come
+//! from `crate::form`, not from a private copy, but are applied to the schema: nothing here opens a browser or touches
 //! a form.
 
 use std::sync::LazyLock;
 
 use jobbot_domain::answers::{AnswerBank, AnswerEntry};
-use jobbot_domain::form::{answer_entry, is_essay_box, options_named, single_checkbox_label};
+use jobbot_domain::form::{
+    answer_entry, is_essay_box, is_resume_label, options_named, single_checkbox_label,
+};
 use jobbot_domain::questions::{FieldKind, Question, Section};
 use regex::Regex;
-
-/// The same test `form::plan_fields` uses to tell a resume input from any other file.
-static RESUME_LABEL: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)r[eé]sum[eé]|\bcv\b|curr[ií]culum").expect("valid resume regex")
-});
 
 static COVER_LETTER_LABEL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)cover\s+letter|carta\s+de\s+presentaci[oó]n").expect("valid cover regex")
 });
+
+/// The field name of the resume upload, and of the text box next to it.
+const RESUME_FIELD: &str = "resume";
+const RESUME_TEXT_FIELD: &str = "resume_text";
+/// The field names of a cover letter start with this.
+const COVER_LETTER_FIELD_PREFIX: &str = "cover_letter";
+/// The `kind` `is_essay_box` is asked about: a schema has none (it is the page scan's `combobox`), only a tag and a label.
+const NO_INPUT_TYPE: &str = "";
 
 /// How many option labels a group keeps as a sample.
 pub const MAX_OPTIONS: usize = 12;
@@ -77,18 +82,13 @@ pub struct Review {
     pub ignored: usize,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ReviewOptions {
     /// Count the EEOC and demographic questions that have a decline option apart
     /// (`Review::eeo_by_decline`) instead of listing them, as if a decline policy existed. It does
-    /// not: the filler never declines, so turn this off to see those questions as open.
+    /// not: the filler never declines, so this is off by default and those questions are listed as
+    /// open, which is what they are on a real form.
     pub eeo_decline: bool,
-}
-
-impl Default for ReviewOptions {
-    fn default() -> Self {
-        Self { eeo_decline: true }
-    }
 }
 
 /// [`group_unanswered_with`] with the default options.
@@ -145,10 +145,10 @@ fn classify(question: &Question, bank: &AnswerBank, options: ReviewOptions) -> V
         return Verdict::EeoDecline;
     }
     let is_cover_letter =
-        question.field.starts_with("cover_letter") || COVER_LETTER_LABEL.is_match(label);
+        question.field.starts_with(COVER_LETTER_FIELD_PREFIX) || COVER_LETTER_LABEL.is_match(label);
     match question.kind {
         FieldKind::File => {
-            if question.field == "resume" || RESUME_LABEL.is_match(label) {
+            if question.field == RESUME_FIELD || is_resume_label(label) {
                 Verdict::Answered
             } else if question.required {
                 Verdict::Open(BankSays::Unknown)
@@ -157,7 +157,7 @@ fn classify(question: &Question, bank: &AnswerBank, options: ReviewOptions) -> V
             }
         }
         // The text box next to the resume upload: the CV answers it too.
-        _ if question.field == "resume_text" => Verdict::Answered,
+        _ if question.field == RESUME_TEXT_FIELD => Verdict::Answered,
         _ if is_cover_letter && !question.required => Verdict::Ignored,
         // A multi-select with at most one option is a lone checkbox on the page, and the planner
         // ticks a lone checkbox only for a consent phrase: the bank's answers play no part.
@@ -193,7 +193,7 @@ fn classify(question: &Question, bank: &AnswerBank, options: ReviewOptions) -> V
                 "input"
             };
             let found = bank.lookup(label);
-            let entry = answer_entry(bank, label, is_essay_box(tag, "", label));
+            let entry = answer_entry(bank, label, is_essay_box(tag, NO_INPUT_TYPE, label));
             let has_answer = |entry: Option<&AnswerEntry>| {
                 entry.is_some_and(|entry| !entry.candidates().is_empty())
             };
@@ -291,6 +291,14 @@ mod tests {
         }
     }
 
+    /// A bank whose only answer is the race `White`, written for the whole label.
+    fn race_bank() -> AnswerBank {
+        AnswerBank {
+            entries: vec![AnswerEntry::new(&["=race"], Some("White"))],
+            consent_phrases: Vec::new(),
+        }
+    }
+
     fn question(label: &str, kind: FieldKind, required: bool, options: &[&str]) -> Question {
         Question {
             section: Section::Application,
@@ -317,10 +325,7 @@ mod tests {
 
     #[test]
     fn an_option_that_says_not_of_hispanic_origin_never_answers_the_race_question() {
-        let bank = AnswerBank {
-            entries: vec![AnswerEntry::new(&["=race"], Some("White"))],
-            consent_phrases: Vec::new(),
-        };
+        let bank = race_bank();
         let race = question(
             "Race",
             FieldKind::SingleSelect,
@@ -339,10 +344,47 @@ mod tests {
         let mut gender = question("Gender", FieldKind::SingleSelect, true, &["Female", "Male"]);
         gender.section = Section::Eeoc;
 
-        let review = group_unanswered(&one(vec![gender]), &bank());
+        let review = group_unanswered_with(
+            &one(vec![gender]),
+            &bank(),
+            ReviewOptions { eeo_decline: true },
+        );
 
         assert_eq!(review.eeo_by_decline, 0);
         assert_eq!(review.groups.len(), 1);
+    }
+
+    fn gender_with_a_decline_option() -> Question {
+        let mut gender = question(
+            "Gender",
+            FieldKind::SingleSelect,
+            true,
+            &["Female", "Male", "Decline to self-identify"],
+        );
+        gender.section = Section::Eeoc;
+        gender.options[2].decline = true;
+        gender
+    }
+
+    #[test]
+    fn by_default_an_eeo_question_with_a_decline_option_is_open_because_the_filler_never_declines()
+    {
+        let review = group_unanswered(&one(vec![gender_with_a_decline_option()]), &bank());
+
+        assert_eq!(review.eeo_by_decline, 0);
+        assert_eq!(review.groups.len(), 1);
+    }
+
+    #[test]
+    fn with_the_decline_policy_on_that_question_is_counted_apart() {
+        let review = group_unanswered_with(
+            &one(vec![gender_with_a_decline_option()]),
+            &bank(),
+            ReviewOptions { eeo_decline: true },
+        );
+
+        assert_eq!(review.eeo_by_decline, 1);
+        assert!(review.groups.is_empty());
     }
 
     #[test]
@@ -395,28 +437,35 @@ mod tests {
     }
 
     #[test]
-    fn an_essay_the_bank_does_not_know_is_unknown_and_a_select_without_options_trusts_the_bank() {
+    fn an_essay_the_bank_does_not_know_stays_open() {
         let review = group_unanswered(
-            &one(vec![
-                question(
-                    "Why are you interested in Acme?",
-                    FieldKind::Textarea,
-                    true,
-                    &[],
-                ),
-                question(
-                    "How did you hear about us?",
-                    FieldKind::SingleSelect,
-                    true,
-                    &[],
-                ),
-            ]),
+            &one(vec![question(
+                "Why are you interested in Acme?",
+                FieldKind::Textarea,
+                true,
+                &[],
+            )]),
             &bank(),
         );
 
         assert_eq!(review.groups.len(), 1);
         assert_eq!(review.groups[0].bank_says, BankSays::Unknown);
         assert_eq!(review.groups[0].kind, FieldKind::Textarea);
+    }
+
+    #[test]
+    fn a_select_without_options_takes_the_bank_value() {
+        let review = group_unanswered(
+            &one(vec![question(
+                "How did you hear about us?",
+                FieldKind::SingleSelect,
+                true,
+                &[],
+            )]),
+            &bank(),
+        );
+
+        assert!(review.groups.is_empty());
         assert_eq!(
             review.answered, 1,
             "no options to check: the bank value is taken"
@@ -533,11 +582,8 @@ mod tests {
     }
 
     #[test]
-    fn a_single_choice_list_with_a_hispanic_option_is_never_answered_by_a_race() {
-        let bank = AnswerBank {
-            entries: vec![AnswerEntry::new(&["=race"], Some("White"))],
-            consent_phrases: Vec::new(),
-        };
+    fn a_race_list_with_a_hispanic_option_is_answered_only_when_it_is_multi_select() {
+        let bank = race_bank();
         let options = ["White", "Asian", "Hispanic or Latino"];
         let single = question("Race", FieldKind::SingleSelect, true, &options);
         let review = review_of(vec![single], &bank);

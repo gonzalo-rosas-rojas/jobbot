@@ -8,11 +8,19 @@
 import { t, tn, fmtDate } from "../i18n/index.js";
 import { nightFigures } from "../core/model.js";
 import { ago } from "../core/format.js";
-import { h } from "../core/dom.js";
-import { setText, setHidden } from "./shared/util.js";
+import { h, setText } from "../core/dom.js";
+import { HOUR_MS, DAY_MS } from "../core/time.js";
+import { setHidden, setData } from "./shared/util.js";
 
-const DAY = 24 * 3600000;
+const LONG_SPAN_MS = 20 * HOUR_MS; // a window this long or longer is a whole day: its times carry their date
 const FIGURES = ["read", "above", "complete", "awaiting"];
+
+/** What the page says of last night: it ran, it has not run since some time ago, or it has never run. */
+function voiceOf({ ran, lastMs, lastRun, nowMs }) {
+  if (ran) return t("prologo.voice");
+  if (Number.isFinite(lastMs)) return t("prologo.norun", { ago: ago(lastRun, nowMs) });
+  return t("prologo.never");
+}
 
 /** { eyebrow, title, voice, ran, figures[{ id, n, label, gold? }], base, night, go, goHint }. */
 export function prologoView(m, { nowMs }) {
@@ -22,15 +30,15 @@ export function prologoView(m, { nowMs }) {
   const a = snap.activity || {};
   const lastMs = c.last_run_at ? Date.parse(c.last_run_at) : NaN;
   // Ran last night: the last run is within the last 24 hours. A clock that is wrong (a run "in the future") counts as ran: the run exists.
-  const ran = Number.isFinite(lastMs) && nowMs - lastMs <= DAY;
+  const ran = Number.isFinite(lastMs) && nowMs - lastMs <= DAY_MS;
   // The window of `activity` is the last 24 hours, so two bare clock times read "18:30 → 18:30"; from a day long they carry their date.
   const span = Date.parse(a.to) - Date.parse(a.from);
-  const stamp = (iso) => fmtDate(iso, span >= 20 * 3600000 ? "datetime" : "time");
+  const stamp = (iso) => fmtDate(iso, span >= LONG_SPAN_MS ? "datetime" : "time");
   return {
     eyebrow: a.from && a.to ? t("prologo.eyebrow", { from: stamp(a.from), to: stamp(a.to) }) : t("prologo.eyebrow.plain"),
     title: t("prologo.title"),
     ran,
-    voice: ran ? t("prologo.voice") : Number.isFinite(lastMs) ? t("prologo.norun", { ago: ago(c.last_run_at, nowMs) }) : t("prologo.never"),
+    voice: voiceOf({ ran, lastMs, lastRun: c.last_run_at, nowMs }),
     figures: [
       { id: "read", n: night.read, label: t("hoy.fig.read") },
       { id: "above", n: night.above, label: night.threshold == null ? t("hoy.fig.aboveAny") : t("hoy.fig.above", { threshold: night.threshold }) },
@@ -41,6 +49,27 @@ export function prologoView(m, { nowMs }) {
     night: [tn("prologo.seen", night.newPostings), tn("prologo.moves", night.moves)].join(" · "),
     go: t("prologo.go"),
     goHint: t("prologo.go.hint"),
+  };
+}
+
+/**
+ * The four figures inside `dl`, each under its own data-fig. `paint(list)` writes each figure of the view to its place by id; one whose id
+ * the page has no place for is left out.
+ */
+export function createFigures(dl) {
+  // A dl reads the term before its description, so the label comes first in the markup; the page draws the number above it.
+  const places = new Map(FIGURES.map((id) => [id, { label: h("dt", { class: "fig-l label" }), n: h("dd", { class: "fig-n cond num" }) }]));
+  for (const [id, f] of places) dl.append(h("div", { class: "fig", "data-fig": id }, f.label, f.n));
+  return {
+    paint(list) {
+      for (const fig of list) {
+        const f = places.get(fig.id);
+        if (!f) continue;
+        setText(f.n, String(fig.n));
+        setText(f.label, fig.label);
+        if (fig.gold) setData(f.n, "gold", "true");
+      }
+    },
   };
 }
 
@@ -57,27 +86,21 @@ function mount(host, ctx) {
     night: h("p", { class: "night label" }),
     go: h("button", { class: "go label", type: "button" }),
   };
-  // A dl reads the term before its description, so the label comes first in the markup; the page draws the number above it.
-  const figEls = FIGURES.map((id) => ({ label: h("dt", { class: "fig-l label" }), n: h("dd", { class: "fig-n cond num" }) }));
-  figEls.forEach((f, i) => parts.figs.append(h("div", { class: "fig", "data-fig": FIGURES[i] }, f.label, f.n)));
+  const figures = createFigures(parts.figs);
   parts.go.addEventListener("click", () => ctx.go("hoy"));
   const el = h("section", { class: "prologo", "aria-labelledby": "prologo-title" }, parts.eyebrow, parts.title, parts.voice, parts.figs, parts.base, parts.night, parts.go);
   host.append(el);
-  S = { host, el, parts, figEls };
+  S = { el, parts, figures };
 }
 
 function update(model, ctx) {
   if (!S) return;
   const v = prologoView(model, { nowMs: ctx.now() });
-  const { parts, figEls } = S;
+  const { parts, figures } = S;
   setText(parts.eyebrow, v.eyebrow);
   setText(parts.title, v.title);
   setText(parts.voice, v.voice);
-  v.figures.forEach((fig, i) => {
-    setText(figEls[i].n, String(fig.n));
-    setText(figEls[i].label, fig.label);
-    if (fig.gold && figEls[i].n.dataset.gold !== "true") figEls[i].n.dataset.gold = "true";
-  });
+  figures.paint(v.figures);
   setText(parts.base, v.base || "");
   setHidden(parts.base, !v.base);
   setText(parts.night, v.night);

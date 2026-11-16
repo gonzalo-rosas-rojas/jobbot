@@ -3,7 +3,7 @@
 //   - `open(key, origin)` reads /api/job?key=, shows it, moves the focus in, adds ONE history entry (`#<stop>/<key>`) so Back closes it and
 //     tells the shell (`onOpenChange(true)`: the camera stops, the keys 0-5 stop travelling). It is NOT modal: nothing behind it goes inert,
 //     the list stays alive with its cursor, and the keys of a row keep working there.
-//   - `close()` (Esc, the button, Back): the focus goes back to the element that opened it and the history entry is taken back.
+//   - `closeAndRestore()` (Esc, the button): the focus goes back to the element that opened it and the history entry is taken back; `closeFromHistory()` (Back) and `closeQuietly()` (the stop changes) are the other two ways out.
 //   - `step(dir)` (j/k, ] [): the next or previous application among the ones behind the drawer, "n of N".
 //   - it is NOT redrawn by a snapshot refresh (that would lose the picture, the note and the folds); `reload()` reads the same application
 //     again and redraws it in place (the detail's actions call it), `rerender()` redraws what it has (a language change).
@@ -21,9 +21,12 @@
 
 import { h, fill, focusMark, restoreFocus } from "../core/dom.js";
 import { t } from "../i18n/index.js";
-import { renderDetail, releaseDetail } from "./detail.js";
+import { drawDetail, releaseDetail } from "./detail.js";
 import { actButton } from "./act.js";
 
+const SLIDE_PX = 14; // how far the content travels in the direction of the step
+const SLIDE_MS = 180;
+const SLIDE_EASING = "cubic-bezier(0.23, 1, 0.32, 1)";
 const CLEAR_MS = 320; // the slide out is on screen this long, then the content goes
 const ORIGINS = ["data-card", "data-open"]; // the elements a row puts its application's key on
 
@@ -68,7 +71,7 @@ export function createDrawer({ el, session, router, stop, sound, getCtx, jobKeys
     }
     if (!body) {
       try {
-        body = renderDetail(detail, detail.card, getCtx());
+        body = drawDetail(detail, detail.card, getCtx());
       } catch (e) {
         console.error(e);
         body = h("p", { class: "muted" }, t("err.job"));
@@ -83,7 +86,43 @@ export function createDrawer({ el, session, router, stop, sound, getCtx, jobKeys
     if (!node || typeof node.animate !== "function") return;
     const ctx = getCtx();
     if (ctx.reduced && ctx.reduced()) return;
-    node.animate([{ opacity: 0, transform: `translateX(${dir === -1 ? -14 : 14}px)` }, { opacity: 1, transform: "none" }], { duration: 180, easing: "cubic-bezier(0.23, 1, 0.32, 1)" });
+    node.animate([{ opacity: 0, transform: `translateX(${dir === -1 ? -SLIDE_PX : SLIDE_PX}px)` }, { opacity: 1, transform: "none" }], { duration: SLIDE_MS, easing: SLIDE_EASING });
+  }
+
+  /** After a redraw: the focus goes back to the control that had it, or to the drawer itself when that control is gone (an approved application has no Approve button). */
+  function restoreFocusInside(mark) {
+    restoreFocus(mark, el);
+    if (isOpen() && !el.contains(document.activeElement)) el.focus({ preventScroll: true });
+  }
+
+  /** The same application read again (after an action): drawn where it stands, with the focus where it was. */
+  function repaintSame() {
+    const mark = focusMark(document.activeElement, el);
+    paint();
+    restoreFocusInside(mark);
+  }
+
+  /** Another application while the drawer is already open (j/k, the step buttons): the focus stays on the same control, the title is announced, the content slides. */
+  function stepWithin(kept, key, dir) {
+    restoreFocusInside(kept);
+    const title = el.querySelector("h2");
+    if (title && title.textContent) getCtx().announce(title.textContent);
+    slide(el.querySelector(".detail-body"), dir);
+    router.replaceStop(stop(), key);
+  }
+
+  /** The first opening: it remembers where the focus goes back to, shows the drawer, adds the one history entry and takes the focus in. */
+  function openFresh(key, origin, opener) {
+    const given = origin instanceof Element && origin.isConnected ? origin : null; // a moment may name its row by an id, which is not an element
+    const focusedOutside = opener && opener !== document.body && !el.contains(opener) ? opener : null; // the control that opened it, if it still holds the focus
+    state.returnTo = focusedOutside || given || originOf(key);
+    state.stepped = false;
+    el.inert = false;
+    el.classList.add("open");
+    if (onOpenChange) onOpenChange(true);
+    state.pushed = router.pushStop(stop(), key);
+    el.focus({ preventScroll: true });
+    sound.play("open");
   }
 
   async function open(key, origin, dir) {
@@ -98,7 +137,7 @@ export function createDrawer({ el, session, router, stop, sound, getCtx, jobKeys
     if (!r.ok || !r.data) {
       toast(session.said(r, t("err.job")), false);
       if (isOpen()) state.key = shownKey; // a drawer already open keeps what it shows (the note being written, the folds) and says the error; only a first opening is left closed
-      else { state.key = null; router.write(stop(), null); }
+      else { state.key = null; router.replaceStop(stop(), null); }
       return;
     }
     const wasOpen = isOpen();
@@ -107,41 +146,23 @@ export function createDrawer({ el, session, router, stop, sound, getCtx, jobKeys
     // application moves nothing
     if (onShow && !same) onShow(key, origin);
     if (same) {
-      const mark = focusMark(document.activeElement, el);
-      paint();
-      restoreFocus(mark, el);
-      // the control that had the focus may be gone (an approved application has no Approve button): keep it in the drawer
-      if (isOpen() && !el.contains(document.activeElement)) el.focus({ preventScroll: true });
+      repaintSame();
       return;
     }
     clearTimeout(clearing);
     const kept = wasOpen ? focusMark(document.activeElement, el) : null; // stepping with the buttons: the focus stays on the same one
     paint();
     el.scrollTop = 0; // a new application starts at its top, not where the last one was scrolled to
-    if (wasOpen) {
-      restoreFocus(kept, el);
-      if (!el.contains(document.activeElement)) el.focus({ preventScroll: true });
-      const title = el.querySelector("h2");
-      if (title && title.textContent) getCtx().announce(title.textContent);
-      slide(el.querySelector(".detail-body"), dir);
-      router.write(stop(), key);
-      return;
-    }
-    const active = opener;
-    const given = origin instanceof Element && origin.isConnected ? origin : null; // a moment may name its row by an id, which is not an element
-    state.returnTo = active && active !== document.body && !el.contains(active) ? active : given || originOf(key);
-    state.stepped = false;
-    el.inert = false;
-    el.classList.add("open");
-    if (onOpenChange) onOpenChange(true);
-    state.pushed = router.write(stop(), key, { push: true });
-    el.focus({ preventScroll: true });
-    sound.play("open");
+    if (wasOpen) stepWithin(kept, key, dir);
+    else openFresh(key, origin, opener);
   }
 
-  /** Closes the drawer. `fromPop`: the address already moved (Back). `silent`: the stop is changing, leave the history alone. */
-  function close({ fromPop = false, silent = false } = {}) {
-    if (!state.key && !isOpen()) return;
+  /**
+   * What every way of closing does: the drawer goes, the shell hears it, the sound plays, and the content is cleared once its slide is out. It answers the
+   * element the focus should go back to: after j/k the list's cursor went with the drawer, so Esc returns to the row of the application on screen, not to
+   * the one it was opened from.
+   */
+  function shut() {
     serial += 1;
     const was = isOpen();
     const back = state.returnTo;
@@ -155,33 +176,56 @@ export function createDrawer({ el, session, router, stop, sound, getCtx, jobKeys
       if (onOpenChange) onOpenChange(false);
       sound.play("close");
     }
-    // after j/k the list's cursor went with the drawer: Esc returns to the row of the application on screen, not to the one it was opened from
     const first = state.stepped ? origin : back;
-    const target = first && first.isConnected ? first : back && back.isConnected ? back : origin;
-    if (target && target.focus && !silent) target.focus({ preventScroll: true });
+    const target = [first, back].find((node) => node && node.isConnected) || origin;
     clearTimeout(clearing);
     clearing = setTimeout(() => {
       if (isOpen()) return;
       el.replaceChildren();
       releaseDetail(); // the capture's blob URL goes only once the content that shows it is gone
     }, CLEAR_MS);
-    if (silent) { state.pushed = false; return; }
-    if (state.pushed && !fromPop) {
-      // the address had a step for the drawer: take it back, so "Back" does not open it again
+    return target;
+  }
+
+  const isShown = () => state.key || isOpen();
+  const focusOn = (target) => { if (target && target.focus) target.focus({ preventScroll: true }); };
+
+  /** Esc or the button: the focus goes back, and the history entry the drawer added is taken back (the address had a step for it, so "Back" would open it again). */
+  function closeAndRestore() {
+    if (!isShown()) return;
+    focusOn(shut());
+    if (state.pushed) {
       state.pushed = false;
       router.back();
     } else {
-      state.pushed = false;
-      router.write(stop(), null);
+      router.replaceStop(stop(), null);
     }
   }
+
+  /** Back: the address already moved, so it is only rewritten (a no-op when it says the same) and the focus goes back. */
+  function closeFromHistory() {
+    if (!isShown()) return;
+    focusOn(shut());
+    state.pushed = false;
+    router.replaceStop(stop(), null);
+  }
+
+  /** The stop is changing: no focus moves and the history is left to whoever moved it. */
+  function closeQuietly() {
+    if (!isShown()) return;
+    shut();
+    state.pushed = false;
+  }
+
 
   function step(dir) {
     const keys = jobKeys();
     const at = keys.indexOf(state.key);
     if (keys.length === 0 || (at >= 0 && keys.length < 2)) return;
     // an application that is not one of the rows (opened from a task, an address or a link): j goes to the first row and k to the last
-    const next = at < 0 ? keys[dir > 0 ? 0 : keys.length - 1] : keys[(at + dir + keys.length) % keys.length];
+    let next;
+    if (at < 0) next = keys[dir > 0 ? 0 : keys.length - 1];
+    else next = keys[(at + dir + keys.length) % keys.length];
     state.stepped = true;
     open(next, null, dir);
   }
@@ -204,7 +248,9 @@ export function createDrawer({ el, session, router, stop, sound, getCtx, jobKeys
 
   return {
     open,
-    close,
+    closeAndRestore,
+    closeFromHistory,
+    closeQuietly,
     step,
     reload,
     rerender,

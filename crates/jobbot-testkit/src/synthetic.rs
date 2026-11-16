@@ -255,6 +255,17 @@ const REASONS: [&str; 6] = [
 /// privacy filter then takes out.
 const SCREENSHOTS: &str = r"C:\Users\someone\jobbot\data\screenshots";
 
+// How often things happen in a generated set, in thousandths of the applications, tasks or
+// postings (`SplitMix64::chance` takes per mille), and how the postings spread over companies.
+const SCREENSHOT_PER_MILLE: usize = 100; // of the Prepared applications
+const NO_DUE_DATE_PER_MILLE: usize = 300; // of the tasks
+const SALARY_PER_MILLE: usize = 300; // of the postings
+const LONG_DESCRIPTION_PER_MILLE: usize = 20; // of the postings
+const DIRECT_NEEDS_GONZA_PER_MILLE: usize = 500; // of the applications that end in NeedsGonza
+const POSTINGS_PER_COMPANY: usize = 6;
+/// Scores run from 0.0 to 100.0 in tenths: 1,001 steps.
+const SCORE_STEPS: usize = 1_001;
+
 /// The set `seed` names, of `size`, with every date before `now`. `size.applications` is at most
 /// `size.jobs`: one application per posting.
 pub fn generate(seed: u64, size: Size, now: DateTime<Utc>) -> SyntheticSet {
@@ -263,7 +274,7 @@ pub fn generate(seed: u64, size: Size, now: DateTime<Utc>) -> SyntheticSet {
         "one application per posting at most"
     );
     let mut rng = SplitMix64::new(seed);
-    let companies = (size.jobs / 6).max(1);
+    let companies = (size.jobs / POSTINGS_PER_COMPANY).max(1);
     let jobs: Vec<(Job, f64)> = (0..size.jobs)
         .map(|i| (posting(&mut rng, i, companies, now), score(&mut rng)))
         .collect();
@@ -289,7 +300,7 @@ pub fn generate(seed: u64, size: Size, now: DateTime<Utc>) -> SyntheticSet {
             let reason = moves
                 .contains(&State::NeedsGonza)
                 .then(|| rng.pick(&REASONS).to_string());
-            let screenshot = (end == State::Prepared && rng.chance(100))
+            let screenshot = (end == State::Prepared && rng.chance(SCREENSHOT_PER_MILLE))
                 .then(|| format!(r"{SCREENSHOTS}\{i}.png"));
             SyntheticApplication {
                 job_key: job.key(),
@@ -330,7 +341,7 @@ pub fn generate(seed: u64, size: Size, now: DateTime<Utc>) -> SyntheticSet {
                 text: format!("Follow up: {}", sentence(&mut rng)),
                 job_key,
                 kind: rng.pick(&TASK_KINDS).to_string(),
-                due_at: (!rng.chance(300))
+                due_at: (!rng.chance(NO_DUE_DATE_PER_MILLE))
                     .then(|| now + Duration::hours(rng.below(24 * 14) as i64)),
                 source_message_id: None,
                 link: None,
@@ -350,7 +361,7 @@ fn posting(rng: &mut SplitMix64, i: usize, companies: usize, now: DateTime<Utc>)
     let company = rng.below(companies);
     let location = *rng.pick(&LOCATIONS);
     let url = format!("https://{source}.jobs.example/company-{company:04}/{i}");
-    let salary = rng.chance(300).then(|| {
+    let salary = rng.chance(SALARY_PER_MILLE).then(|| {
         let min = 2_000.0 + 500.0 * rng.below(8) as f64;
         (min, min + 1_000.0 * (1 + rng.below(3)) as f64)
     });
@@ -378,7 +389,7 @@ fn posting(rng: &mut SplitMix64, i: usize, companies: usize, now: DateTime<Utc>)
 }
 
 fn score(rng: &mut SplitMix64) -> f64 {
-    rng.below(1_001) as f64 / 10.0
+    rng.below(SCORE_STEPS) as f64 / 10.0
 }
 
 /// When the posting was first seen: six hours after it was posted, never after `now`.
@@ -390,7 +401,7 @@ fn first_seen(job: &Job, now: DateTime<Utc>) -> DateTime<Utc> {
 /// A description with the live database's spread: most between 800 and 9,600 characters (5,200 on
 /// average), one in fifty between 12,000 and 25,000.
 fn description(rng: &mut SplitMix64) -> String {
-    let target = if rng.chance(20) {
+    let target = if rng.chance(LONG_DESCRIPTION_PER_MILLE) {
         12_000 + rng.below(13_001)
     } else {
         800 + rng.below(8_801)
@@ -423,7 +434,7 @@ fn history(rng: &mut SplitMix64, end: State) -> Vec<State> {
     match end {
         Scored => vec![],
         Prepared => vec![Prepared],
-        NeedsGonza if rng.chance(500) => vec![NeedsGonza],
+        NeedsGonza if rng.chance(DIRECT_NEEDS_GONZA_PER_MILLE) => vec![NeedsGonza],
         NeedsGonza => vec![Prepared, NeedsGonza],
         Withdrawn => match rng.below(3) {
             0 => vec![Withdrawn],
@@ -449,9 +460,11 @@ pub fn load(set: &SyntheticSet, tracker: &Tracker, now: DateTime<Utc>) -> Result
         tracker.create_application(&app.job_key, app.started)?;
         for (step, state) in (1i64..).zip(&app.moves) {
             let at = (app.started + Duration::hours(7 * step)).min(now);
-            let note = (*state == State::NeedsGonza)
-                .then_some(app.reason.as_deref())
-                .flatten();
+            let note = if *state == State::NeedsGonza {
+                app.reason.as_deref()
+            } else {
+                None
+            };
             tracker.transition(&app.job_key, *state, note, at)?;
         }
         if let Some(screenshot) = &app.screenshot {
@@ -470,7 +483,7 @@ pub fn load(set: &SyntheticSet, tracker: &Tracker, now: DateTime<Utc>) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{NOW, Tracker};
+    use crate::NOW;
     use jobbot_domain::privacy::address_pattern;
     use jobbot_domain::text::host_of;
 
@@ -521,12 +534,7 @@ mod tests {
             ),
             (1_000, 1_000, 17, 35)
         );
-        let count = |state: State| {
-            set.applications
-                .iter()
-                .filter(|a| a.state() == state)
-                .count()
-        };
+        let count = |state: State| count_in(&set, state);
         use State::*;
         assert_eq!(
             [
@@ -547,6 +555,10 @@ mod tests {
         let keys: std::collections::HashSet<_> =
             set.applications.iter().map(|a| &a.job_key).collect();
         assert_eq!(keys.len(), 1_000, "one application per job at most");
+    }
+
+    #[test]
+    fn times_scales_the_jobs_of_the_real_size() {
         assert_eq!(Size::REAL.times(10).jobs, 35_000);
     }
 
@@ -609,23 +621,37 @@ mod tests {
         assert!(lengths.iter().all(|n| (500..=26_000).contains(n)));
     }
 
-    #[test]
-    fn a_loaded_store_holds_what_the_set_holds() {
+    /// The set of seed 3 loaded into a fresh in-memory store.
+    fn loaded() -> (SyntheticSet, Tracker) {
         let set = generate(3, THOUSAND, *NOW);
         let tracker = Tracker::in_memory().unwrap();
         load(&set, &tracker, *NOW).unwrap();
+        (set, tracker)
+    }
+
+    /// How many applications of `set` end in `state`.
+    fn count_in(set: &SyntheticSet, state: State) -> usize {
+        set.applications
+            .iter()
+            .filter(|a| a.state() == state)
+            .count()
+    }
+
+    #[test]
+    fn loading_keeps_every_state_count() {
+        let (set, tracker) = loaded();
         for state in State::ALL {
-            let expected = set
-                .applications
-                .iter()
-                .filter(|a| a.state() == state)
-                .count();
             assert_eq!(
                 tracker.list_by_state(state).unwrap().len(),
-                expected,
+                count_in(&set, state),
                 "{state}"
             );
         }
+    }
+
+    #[test]
+    fn loading_keeps_jobs_emails_and_tasks() {
+        let (set, tracker) = loaded();
         for (job, _) in &set.jobs {
             assert!(
                 tracker.get_job(&job.key()).unwrap().is_some(),
@@ -637,6 +663,11 @@ mod tests {
             assert!(tracker.email_exists(&email.message_id).unwrap());
         }
         assert_eq!(tracker.open_tasks().unwrap().len(), set.tasks.len());
+    }
+
+    #[test]
+    fn loading_keeps_reasons_and_screenshots() {
+        let (set, tracker) = loaded();
         // Every application waiting for Gonza says why; prepared ones with a screenshot wait for
         // his approval, like the ones the pipeline fills in.
         let waiting = tracker.list_by_state(State::NeedsGonza).unwrap();

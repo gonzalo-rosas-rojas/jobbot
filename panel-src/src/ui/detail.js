@@ -2,12 +2,14 @@
 // stopped". The drawer (ui/drawer.js) owns everything around it: the step buttons with "n of N", the close button, focus,
 // history, and the fetch of /api/job. This file turns the answer into DOM; the parts live in ui/detail/*.
 //
-//   renderDetail(detail, card, ctx) -> Node
+//   drawDetail(detail, card, ctx) -> Node
 //     detail  the JobDetail the server sent for /api/job?key= (FEATURES.md section 2.6 lists what the drawer must show)
 //     card    `detail.card`, the card as the server describes it now
 //     ctx     the room context (t, tn, lang, session, sound, drawer, toast, go, model, reduced, ...); `ctx.drawer.reload()`
 //             re-reads and redraws the drawer after an action; `ctx.session.act(path, body, opts)` does the action and
 //             refreshes the snapshot; `ctx.session.blob(path)` fetches the dry-run capture with the token
+//   It also keeps the drawer's memory of the application (ui/detail/memo.js): it makes `card.key` the application on screen (the one
+//   before is released) and remembers the signature of the answer it drew, to flash a change after an action.
 //   It returns ONE node (a div) that contains the application's title as an <h2>. The drawer calls it again after every
 //   action, when the language changes and when it steps to another application, and NEVER when a snapshot refreshes (that
 //   would lose the picture, the half-typed note and the open folds). Its words follow the active language.
@@ -31,15 +33,18 @@ import { actionHint, actionLabel, ago, countdown, kindLabel, pointsOf, reasonSho
 import { memo, adopt, release } from "./detail/memo.js";
 import { answerOf } from "./detail/now.js";
 import { journeyView } from "./detail/journey.js";
-import { shotView, noShotView } from "./detail/shot.js";
-import { markView } from "./detail/mark.js";
+import { showShot, noShotView } from "./detail/shot.js";
+import { markView, firstMarkTarget } from "./detail/mark.js";
 import { timelineView } from "./detail/timeline.js";
 import { scoreView } from "./detail/score.js";
-import { armed, perform, sayArming } from "./detail/act.js";
+import { armed, perform } from "./detail/act.js";
 
 export function releaseDetail() {
   release();
 }
+
+const NOW_TASK_ID = "d-now-task"; // the text of the task that sits with the answer; its button points at it with aria-describedby
+const SHOT_LAYER = 3; // index of the layer from which the dry run's capture is expected
 
 const httpUrl = (url) => typeof url === "string" && /^https?:\/\//i.test(url);
 const upperFirst = (text) => text.charAt(0).toUpperCase() + text.slice(1);
@@ -87,31 +92,39 @@ function headerView(detail, card) {
 
 // ---- the answer and the actions row
 
-function taskLine(task, nowMs) {
-  const left = countdown(task, nowMs);
-  return h("p", { class: "d-task", "data-dtask": task.id },
-    h("span", { id: "d-now-task", class: "d-task-text wrap-any" }, task.text),
-    left ? h("span", { class: "chip " + (left.tone === "late" ? "late" : left.tone === "soon" ? "you" : "") }, left.text) : null);
+/** The chip that says how long a task has left, or null when it has no deadline. */
+function countdownChip(left) {
+  if (!left) return null;
+  return h("span", { class: "chip " + (left.tone === "late" ? "late" : left.tone === "soon" ? "you" : "") }, left.text);
 }
 
-function nowView(a, inline) {
-  return h("section", { id: "d-now", class: "d-now", "data-tone": a.tone, "aria-label": t("detail.now.aria") },
-    a.turn ? h("p", { class: "d-turn" }, h("span", { class: "chip " + a.turn.cls }, a.turn.text)) : null,
-    h("h3", { class: "d-sentence" }, a.sentence),
-    a.sub ? h("p", { class: "d-sub" }, a.sub) : null,
-    inline ? taskLine(inline, a.nowMs) : null);
+function taskLine(task, nowMs) {
+  return h("p", { class: "d-task", "data-dtask": task.id },
+    h("span", { id: NOW_TASK_ID, class: "d-task-text wrap-any" }, task.text),
+    countdownChip(countdown(task, nowMs)));
 }
+
+function nowView(answer, inline) {
+  return h("section", { id: "d-now", class: "d-now", "data-tone": answer.tone, "aria-label": t("detail.now.aria") },
+    answer.turn ? h("p", { class: "d-turn" }, h("span", { class: "chip " + answer.turn.cls }, answer.turn.text)) : null,
+    h("h3", { class: "d-sentence" }, answer.sentence),
+    answer.sub ? h("p", { class: "d-sub" }, answer.sub) : null,
+    inline ? taskLine(inline, answer.nowMs) : null);
+}
+
+const ACTION_CUE = { resolve: "undo", approve: "approve", confirm: "sent" };
+const ACTION_STAGED = { approve: "act.approved", confirm: "act.noted" };
 
 function actionButton(ctx, card, action, primary) {
   const label = actionLabel(action);
   const permanent = PERMANENT_ACTIONS.includes(action);
   const run = (button) => perform(ctx, button, "/api/" + action, { key: card.key }, {
-    cue: action === "resolve" ? "undo" : action === "approve" ? "approve" : action === "confirm" ? "sent" : null,
-    staged: action === "approve" ? "act.approved" : action === "confirm" ? "act.noted" : null,
+    cue: ACTION_CUE[action] ?? null,
+    staged: ACTION_STAGED[action] ?? null,
   });
   return actButton({
     id: "act-" + action, label, primary, "data-action": action, title: actionHint(action) || null,
-    onclick: permanent ? armed(label, run) : (e) => run(e.currentTarget),
+    onclick: permanent ? armed(label, run, ctx) : (e) => run(e.currentTarget),
   });
 }
 
@@ -119,16 +132,16 @@ function doneButton(ctx, task, described) {
   const label = t("act.done");
   const run = (button) => perform(ctx, button, "/api/task/done", { id: task.id }, { cue: "done" });
   return actButton({
-    id: "d-done-" + task.id, label, primary: true, "data-done": task.id, title: t("act.done.hint"), "aria-describedby": described || null, onclick: armed(label, run),
+    id: "d-done-" + task.id, label, primary: true, "data-done": task.id, title: t("act.done.hint"), "aria-describedby": described || null, onclick: armed(label, run, ctx),
   });
 }
 
 /** The jump to "Registrar una respuesta": its first answer (or, after one went through, the way to record another) is focused and brought into view. */
-function jumpButton(sole) {
+function jumpButton(primary) {
   return actButton({
-    id: "d-jump", label: t("drawer.mark.title"), primary: sole, cls: sole ? null : "quiet", "data-jump": "mark",
+    id: "d-jump", label: t("drawer.mark.title"), primary, cls: primary ? null : "quiet", "data-jump": "mark",
     onclick: () => {
-      const target = document.querySelector("#d-mark [data-mark], #mark-again, #mark-undo");
+      const target = firstMarkTarget();
       if (!target) return;
       target.scrollIntoView({ block: "center" });
       target.focus({ preventScroll: true });
@@ -139,7 +152,7 @@ function jumpButton(sole) {
 function actionsView(ctx, card, inline) {
   const buttons = card.actions.map((action, i) => actionButton(ctx, card, action, i === 0));
   if (card.actions.length === 0 && inline) {
-    buttons.push(doneButton(ctx, inline, "d-now-task"));
+    buttons.push(doneButton(ctx, inline, NOW_TASK_ID));
     if (httpUrl(inline.link)) buttons.push(outLink(inline.link, t("act.openLink")));
   }
   if (card.actions.length === 0 && card.marks.length > 0) buttons.push(jumpButton(buttons.length === 0));
@@ -149,8 +162,8 @@ function actionsView(ctx, card, inline) {
 
 // ---- evidence
 
-function reasonView(card, a) {
-  const onTheWay = a.layer.at >= 0 && a.layer.who !== "done";
+function reasonView(card, answer) {
+  const onTheWay = answer.layer.at >= 0 && answer.layer.who !== "done";
   const short = reasonShort(card);
   const parts = [];
   if (!onTheWay && short) parts.push(h("p", { class: "d-reason" }, short));
@@ -159,17 +172,16 @@ function reasonView(card, a) {
   return parts.length ? h("div", { class: "d-block" }, parts) : null;
 }
 
-function tasksView(ctx, a, shownAbove) {
-  const list = a.tasks.filter((task) => task !== shownAbove);
+function tasksView(ctx, answer, shownAbove) {
+  const list = answer.tasks.filter((task) => task !== shownAbove);
   if (list.length === 0) return null;
   return section("tasks", t(shownAbove ? "detail.tasks.other" : "drawer.tasks"),
     h("ul", { class: "d-items" }, list.map((task) => {
-      const left = countdown(task, a.nowMs);
       const textId = "d-task-" + task.id;
       return h("li", { class: "d-item", "data-dtask": task.id },
         h("div", { class: "d-item-main" },
           h("span", { id: textId, class: "wrap-any" }, task.text),
-          left ? h("span", { class: "chip " + (left.tone === "late" ? "late" : left.tone === "soon" ? "you" : "") }, left.text) : null,
+          countdownChip(countdown(task, answer.nowMs)),
           httpUrl(task.link) ? outLink(task.link, t("act.openLink")) : null),
         doneButton(ctx, task, textId));
     })));
@@ -205,29 +217,31 @@ function textFolds(detail) {
   ];
 }
 
-export function renderDetail(detail, card, ctx) {
+export function drawDetail(detail, card, ctx) {
   adopt(card.key);
-  sayArming(ctx.announce, ctx.sound);
   const m = ctx.model();
-  const a = answerOf(card, m);
-  const inline = card.actions.length === 0 ? a.task : null; // the task that is next sits with the answer, with its own button
-  const awaiting = card.state === "prepared" && a.layer.who === "you";
-  // a capture is expected from the dry run on; before that, and once the application went out, its absence says nothing
-  const shot = card.has_screenshot ? shotView(ctx, card) : a.layer.at >= 3 && a.layer.who !== "done" ? noShotView() : null;
+  const answer = answerOf(card, m);
+  const inline = card.actions.length === 0 ? answer.task : null; // the task that is next sits with the answer, with its own button
+  const awaiting = card.state === "prepared" && answer.layer.who === "you";
+  // a capture is expected from the dry run on (layer SHOT_LAYER); before that, and once the application went out, its absence says nothing
+  const shotExpected = answer.layer.at >= SHOT_LAYER && answer.layer.who !== "done";
+  let shot = null;
+  if (card.has_screenshot) shot = showShot(ctx, card);
+  else if (shotExpected) shot = noShotView();
 
-  const now = nowView(a, inline);
-  if (memo.seen && memo.seen !== a.sig && !(ctx.reduced && ctx.reduced())) now.classList.add("fresh"); // the flash is motion: under reduced motion it is a cut
-  memo.seen = a.sig;
+  const now = nowView(answer, inline);
+  if (memo.seen && memo.seen !== answer.sig && !(ctx.reduced && ctx.reduced())) now.classList.add("fresh"); // the flash is motion: under reduced motion it is a cut
+  memo.seen = answer.sig;
 
   return h("div", { class: "detail-body d-body", "data-job": card.key },
     headerView(detail, card),
     now,
     actionsView(ctx, card, inline),
-    journeyView(detail, card, m, a),
+    journeyView(detail, card, m, answer),
     awaiting ? shot : null,
-    reasonView(card, a),
-    tasksView(ctx, a, inline),
-    mailsView(card, m, a.nowMs),
+    reasonView(card, answer),
+    tasksView(ctx, answer, inline),
+    mailsView(card, m, answer.nowMs),
     awaiting ? null : shot,
     markView(ctx, card),
     timelineView(detail),

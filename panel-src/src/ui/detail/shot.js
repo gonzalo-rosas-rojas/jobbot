@@ -6,7 +6,7 @@
 
 import { h, fill } from "../../core/dom.js";
 import { t } from "../../i18n/index.js";
-import { memo } from "./memo.js";
+import { memo, shotState, revokeShot } from "./memo.js";
 import { actButton } from "../act.js";
 
 /** What the slot says now, for the state of the fetch. */
@@ -15,7 +15,8 @@ function body(ctx, key) {
   if (s.status === "ready") {
     const img = h("img", { class: "d-shot-img", src: s.url, alt: t("drawer.shot.alt"), onerror: () => fail(ctx, key) });
     return h("div", { class: "d-shotbox" + (s.zoom ? " zoom" : "") },
-      h("div", { class: "d-shotscroll" }, img),
+      // it scrolls (a tall capture in a short box), so the keyboard must be able to reach it: a named region in the tab order
+      h("div", { class: "d-shotscroll", tabindex: 0, role: "region", "aria-label": t("drawer.shot.alt") }, img),
       actButton({ label: t(s.zoom ? "detail.shot.fit" : "detail.shot.zoom"), "aria-pressed": s.zoom, onclick: () => { s.zoom = !s.zoom; paint(ctx, key); } }));
   }
   if (s.status === "failed") {
@@ -32,32 +33,34 @@ function paint(ctx, key) {
   fill(memo.slot, body(ctx, key));
 }
 
+const setShot = (key, status, serial, url = null) => { memo.shot = shotState(key, status, serial, url); };
+
 function fail(ctx, key) {
   if (memo.key !== key) return;
-  if (memo.shot.url) URL.revokeObjectURL(memo.shot.url);
-  memo.shot = { key, url: null, status: "failed", serial: memo.shot.serial, zoom: false };
+  revokeShot();
+  setShot(key, "failed", memo.shot.serial);
   paint(ctx, key);
 }
 
 function start(ctx, key) {
-  if (memo.shot.url) URL.revokeObjectURL(memo.shot.url);
+  revokeShot();
   const mine = memo.shot.serial + 1;
-  memo.shot = { key, url: null, status: "loading", serial: mine, zoom: false };
+  setShot(key, "loading", mine);
   Promise.resolve(ctx.session.blob("/api/shot?key=" + encodeURIComponent(key))).then((blob) => {
     if (memo.shot.serial !== mine || memo.key !== key) return; // closed, or another application opened: nobody wants it now
     if (!blob || (blob.type && !/^image\//i.test(blob.type))) {
-      memo.shot = { key, url: null, status: "failed", serial: mine, zoom: false };
+      setShot(key, "failed", mine);
     } else {
-      memo.shot = { key, url: URL.createObjectURL(blob), status: "ready", serial: mine, zoom: false };
+      setShot(key, "ready", mine, URL.createObjectURL(blob));
     }
     paint(ctx, key);
   }, () => {
-    if (memo.shot.serial === mine && memo.key === key) { memo.shot = { key, url: null, status: "failed", serial: mine, zoom: false }; paint(ctx, key); }
+    if (memo.shot.serial === mine && memo.key === key) { setShot(key, "failed", mine); paint(ctx, key); }
   });
 }
 
-/** The section for an application whose card says it has a capture; fetches it the first time. */
-export function shotView(ctx, card) {
+/** The section for an application whose card says it has a capture. It also starts the fetch the first time and becomes the slot the picture is painted into. */
+export function showShot(ctx, card) {
   const key = card.key;
   const slot = h("div", { id: "shot-slot", class: "d-shot" });
   memo.slot = slot;

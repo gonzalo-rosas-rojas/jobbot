@@ -12,6 +12,7 @@ pub mod synthetic;
 use std::collections::VecDeque;
 use std::path::Path;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
 
@@ -47,7 +48,7 @@ pub struct FakeClaude {
     /// What `preflight` answers: a private login by default, or a refusal.
     account: Result<AccountSeen, ClaudeError>,
     /// How many times the login was closed (`logout`).
-    logouts: std::sync::atomic::AtomicUsize,
+    logouts: AtomicUsize,
 }
 
 impl FakeClaude {
@@ -56,13 +57,13 @@ impl FakeClaude {
             replies: Mutex::new(replies.into()),
             asked: Mutex::new(Vec::new()),
             account: Ok(FakeClaude::private_account()),
-            logouts: std::sync::atomic::AtomicUsize::new(0),
+            logouts: AtomicUsize::new(0),
         }
     }
 
     /// How many times the login was closed.
     pub fn logouts(&self) -> usize {
-        self.logouts.load(std::sync::atomic::Ordering::SeqCst)
+        self.logouts.load(Ordering::SeqCst)
     }
 
     /// The same fake whose preflight refuses the login with `message` (so no call may follow).
@@ -141,8 +142,7 @@ impl ClaudeRunner for FakeClaude {
     }
 
     async fn logout(&self) -> Result<(), ClaudeError> {
-        self.logouts
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.logouts.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 }

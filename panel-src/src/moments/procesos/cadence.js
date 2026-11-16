@@ -14,7 +14,7 @@ export const CADENCE = Object.freeze({
 });
 
 /** The days a card has spent in its stage as a whole number of at least 0; a missing or broken value is 0, never NaN. */
-export function dayOf(card) {
+export function daysInStage(card) {
   const n = Math.trunc(Number(card && card.days_in_state));
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
@@ -26,7 +26,7 @@ export function dayOf(card) {
  *         "task" (answered, a task is on it) · "test" · "interview" · "offer" · "quiet" (no news, `daysTo` the 45th day) · "pre" (not sent yet)
  */
 export function cadenceOf(card, { hasTask = false } = {}) {
-  const day = dayOf(card);
+  const day = daysInStage(card);
   const base = { day, inWindow: false, daysTo: 0 };
   const [ask0, ask1] = CADENCE.ask;
   const [insist0, insist1] = CADENCE.insist;

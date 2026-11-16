@@ -11,6 +11,15 @@ import { WINDOW_END } from "../scene/clock.js";
 import { KEYS } from "./keys.js";
 import { icon } from "./icons.js";
 
+/** A key of the table in the form `aria-keyshortcuts` takes ("$mod+k" is "Control+K"). */
+const ariaShortcut = (key) => key.replace("$mod", "Control").replace(/[a-z]$/, (c) => c.toUpperCase());
+
+/** The dial is "big" (prologue, HOY), "docked", or "none" (no dial is drawn: the attribute goes). Written on the HUD only when it differs; the CSS reads `data-dial`. */
+export function setDialMode(el, mode) {
+  if (mode === "none") delete el.dataset.dial;
+  else if (el.dataset.dial !== mode) el.dataset.dial = mode;
+}
+
 const two = (n) => String(n).padStart(2, "0");
 
 /**
@@ -21,15 +30,15 @@ const two = (n) => String(n).padStart(2, "0");
 export function statusParts(snap, nowMs) {
   const c = snap && snap.controls;
   if (!c) return { window: "", run: "" };
-  let window;
-  if (c.window_open === true) window = t("hud.window.open", { until: two(WINDOW_END) + ":00" });
-  else if (c.window_open === false) window = c.next_window ? t("hud.window.closed", { when: nextWindowLabel(c.next_window, serverDay(nowMs)) }) : t("hud.window.closedNoNext");
-  else window = t("hud.window.unknown");
-  if (c.stopped === true) window = t("run.stopped") + " · " + window;
-  let run = "";
-  if (c.last_run_at) run = t("hud.run.ago", { ago: ago(c.last_run_at, nowMs) });
-  else if (c.engine === "never") run = t("hud.run.never");
-  return { window, run };
+  let windowPhrase;
+  if (c.window_open === true) windowPhrase = t("hud.window.open", { until: two(WINDOW_END) + ":00" });
+  else if (c.window_open === false) windowPhrase = c.next_window ? t("hud.window.closed", { when: nextWindowLabel(c.next_window, serverDay(nowMs)) }) : t("hud.window.closedNoNext");
+  else windowPhrase = t("hud.window.unknown");
+  if (c.stopped === true) windowPhrase = t("run.stopped") + " · " + windowPhrase;
+  let runPhrase = "";
+  if (c.last_run_at) runPhrase = t("hud.run.ago", { ago: ago(c.last_run_at, nowMs) });
+  else if (c.engine === "never") runPhrase = t("hud.run.never");
+  return { window: windowPhrase, run: runPhrase };
 }
 
 /**
@@ -50,7 +59,7 @@ export function createHud({ onSearch = () => {}, extra = null, brand } = {}) {
   const status = h("p", { class: "hud-status label" });
   // the keys and the word, like "? Atajos" below: two key caps alone did not say what they open (2026-10-24)
   const word = h("span", { class: "hud-search-word" });
-  const button = h("button", { class: "hud-search", type: "button", "aria-haspopup": "dialog", "aria-keyshortcuts": "Control+K", onclick: () => onSearch() },
+  const button = h("button", { class: "hud-search", type: "button", "aria-haspopup": "dialog", "aria-keyshortcuts": ariaShortcut(search.keys[0]), onclick: () => onSearch() },
     icon("search", "icon-lg"), ...search.display.split(" ").map((k) => h("kbd", {}, k)), word);      // the icon shows only where there is no keyboard (stage.css)
   const clock = h("span", { class: "hud-clock mono num" });
   const el = h("header", { id: "hud", class: "hud" },
@@ -59,14 +68,18 @@ export function createHud({ onSearch = () => {}, extra = null, brand } = {}) {
     h("div", { class: "hud-right" }, status, extra, button, clock));
 
   function paintStatus() {
-    const { window, run } = statusParts(last.snap, last.nowMs);
-    status.textContent = [window, run].filter(Boolean).join(" · ");
+    const { window: windowPhrase, run } = statusParts(last.snap, last.nowMs);
+    status.textContent = [windowPhrase, run].filter(Boolean).join(" · ");
     status.hidden = status.textContent === "";
+  }
+
+  function paintStop() {
+    name.textContent = stop ? t("tab." + stop) : "";
   }
 
   function relabel() {
     mark.textContent = brand || t("hud.brand");
-    name.textContent = stop ? t("tab." + stop) : "";
+    paintStop();
     button.setAttribute("aria-label", t("ctrl.search"));
     word.textContent = t("ctrl.search");
     button.title = t("ctrl.search.hint");
@@ -77,7 +90,7 @@ export function createHud({ onSearch = () => {}, extra = null, brand } = {}) {
   return {
     el,
     center,
-    setStop(id) { stop = id; name.textContent = id ? t("tab." + id) : ""; },
+    setStop(id) { stop = id; paintStop(); },
     setStatus(snap, nowMs) { last = { snap, nowMs }; paintStatus(); },
     setClock(text) { if (clock.textContent !== text) clock.textContent = text; },
     relabel,

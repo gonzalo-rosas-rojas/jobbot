@@ -1,6 +1,5 @@
 // es text of APRENDER, the night desk of the turn (spec §5.4). Keys are `aprender.<thing>`. The English twin is ../en/aprender.js:
-// same keys, same {variables} (test/i18n.test.mjs fails if they differ). Shared words (errors) live in common.js. The words of the v2 room
-// (`room.aprender.*`) left with the tower, archive/2026-10-07-torre/.
+// same keys, same {variables} (test/i18n.test.mjs fails if they differ). Shared words (errors) live in common.js.
 // Labels are written as they read (spec §4.2): one that stands alone starts with a capital. Nothing here counts, scolds or hurries.
 export default {
   "aprender.eyebrow": "{ask} {hora}",

@@ -9,6 +9,8 @@ import { cardOf } from "./data.js";
 
 export const GRADES = [0, 1, 2, 3, 4, 5];
 
+const UNSEEN = { shown: false, answer: "" }; // a card whose reference answer has not been asked for, and nothing typed in it
+
 /**
  * createDrill({ api, act, said, toast, t, sound, onChange }) -> { state, start(topic), reveal(), grade(n), leave() }
  *   api(path) -> { ok, status, data }      act(path, body, { onOk }) -> { ok, status, message }      said(r, fallback) -> the server's message
@@ -21,7 +23,7 @@ export function createDrill({ api, act, said, toast, t, sound, onChange = () => 
   let serial = 0; // a newer request for a card (or leaving) makes an older answer stale
 
   const change = () => onChange();
-  const clear = () => Object.assign(state, { waiting: false, card: null, empty: false, failed: false, shown: false, answer: "" });
+  const clear = () => Object.assign(state, { waiting: false, card: null, empty: false, failed: false }, UNSEEN);
 
   /** Asks for the next card. `initial`: it is the first one, so a failure opens nothing. True when the state was brought up to date. */
   async function pull({ fresh = false, initial = false } = {}) {
@@ -37,7 +39,7 @@ export function createDrill({ api, act, said, toast, t, sound, onChange = () => 
     }
     state.waiting = false;
     if (card && state.card && card.id === state.card.id && !fresh) { change(); return true; } // the queue moves only when a card is graded
-    Object.assign(state, { card, empty: !card, failed: false, shown: false, answer: "" });
+    Object.assign(state, { card, empty: !card, failed: false }, UNSEEN);
     change();
     return true;
   }
@@ -82,7 +84,7 @@ export function createDrill({ api, act, said, toast, t, sound, onChange = () => 
       if (pulling) {
         const got = await pulling;
         // graded, but the next card could not be brought: the old one must not stay up to be graded twice
-        if (!got && state.card === card) Object.assign(state, { card: null, empty: false, failed: true, shown: false, answer: "" });
+        if (!got && state.card === card) Object.assign(state, { card: null, empty: false, failed: true }, UNSEEN);
       }
     } finally {
       state.busy = null;

@@ -33,9 +33,13 @@ const FUTURE_SLACK_DAYS: i64 = 1;
 pub const MAX_MESSAGES: usize = 500;
 pub const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 
+/// The `meta` key that holds when the mailbox was last read (RFC 3339, UTC): the time of the last
+/// import, even one that brought no message. The panel warns when it is old.
+pub const INBOX_IMPORTED_AT: &str = "inbox_imported_at";
+
 /// The states in which a company may still answer: the ones a company name can match. Silence
 /// (`Ghosted`) and an `Offer` are in: a late reply or a withdrawn offer is real.
-const LIVE_STATES: [State; 6] = [
+pub const LIVE_STATES: [State; 6] = [
     State::Submitted,
     State::Replied,
     State::TechnicalTest,
@@ -374,6 +378,9 @@ pub fn import(tracker: &dyn Store, items: &[Value], now: DateTime<Utc>) -> Resul
     for (position, item) in valid {
         import_one(tracker, position, &item, now, &mut report)?;
     }
+    // What this records is "the mailbox was read", not "mail arrived": an empty file or one whose
+    // messages were all rejected still counts, so the panel can tell silence from a missed read.
+    tracker.set_meta(INBOX_IMPORTED_AT, &now.to_rfc3339())?;
     crate::record_counts(&[
         ("imported", report.imported),
         ("rejected", report.rejected),

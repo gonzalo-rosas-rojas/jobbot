@@ -6,9 +6,16 @@
 //! is read (a request that will be refused anyway costs nothing), and the body of a POST is read
 //! by a short-lived thread of its own that the serving thread waits for only up to a deadline:
 //! tiny_http reads the body from the socket on the thread that asks for it and offers no timeout,
-//! so a client that sends half a body and stops would otherwise freeze the panel for good.
+//! so a client that sends half a body and stops would otherwise freeze the panel for good. The
+//! same goes for a request that is answered while it still owes body (refused on its head, or
+//! too big): tiny_http waits for the owed bytes when the request ends, so that answer is given
+//! on a thread of its own too.
+//!
+//! The answer to a request whose body is settled closes its connection, because tiny_http can
+//! leave a kept-alive connection with no thread to read it
+//! (docs/adr/0014-one-request-per-connection.md).
 
-use std::io::Read;
+use std::io::{Read, Write};
 use std::net::SocketAddr;
 use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -17,7 +24,8 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
-use tiny_http::{Header, Response, Server};
+use chrono::{DateTime, Utc};
+use tiny_http::{Header, Method, Response, Server, StatusCode};
 
 use super::Panel;
 use super::http::{
@@ -148,7 +156,10 @@ fn serve(server: &Server, panel: &Panel, guard: &Guard, policy: BodyPolicy, stop
                 }
             }
             Ok(None) => {}
-            Err(_) => break,
+            Err(error) => {
+                tracing::error!(%error, "the panel's socket failed; it stops serving");
+                break;
+            }
         }
     }
 }
@@ -207,10 +218,13 @@ fn read_body(
             };
             alive.fetch_sub(1, Ordering::SeqCst);
             // Nobody waits any more (the deadline passed): the answer is this thread's to give.
-            if let Err(mpsc::SendError((request, done))) = sender.send((request, done))
-                && !matches!(done, Done::Broken)
-            {
-                send_reply(request, late_reply());
+            if let Err(mpsc::SendError((request, done))) = sender.send((request, done)) {
+                match done {
+                    Done::Whole(_) => write_last_reply(request, &late_reply()),
+                    // More body is on its way: this thread can wait for it.
+                    Done::TooBig => respond_and_wait_out_the_body(request, late_reply()),
+                    Done::Broken => {}
+                }
             }
         });
     if spawned.is_err() {
@@ -253,23 +267,23 @@ fn answer(
         body: Vec::new(),
     };
     // What the head alone can refuse (Host, token, Origin, route, method, content type) is
-    // refused before a byte of the body is read.
-    if let Some(refusal) = refuse_early(panel, guard, &head) {
-        send_reply(request, refusal);
-        return;
-    }
-    if head.method != "POST" {
-        send_reply(request, handle(panel, guard, &head));
+    // refused before a byte of the body is read, and only a POST has a body to read.
+    let without_reading = refuse_early(panel, guard, &head)
+        .or_else(|| (head.method != "POST").then(|| handle(panel, guard, &head)));
+    if let Some(reply) = without_reading {
+        let owes = Owes::when_unread(&request);
+        send_reply(request, reply, owes);
         return;
     }
     match read_body(request, body_limit(&head.target), policy, readers) {
         BodyRead::Whole(request, body) => {
             let reply = handle(panel, guard, &Request { body, ..head });
-            send_reply(request, reply);
+            send_reply(request, reply, Owes::Nothing);
         }
         BodyRead::TooBig(request) => send_reply(
             request,
             with_common_headers(Reply::message(413, "Cuerpo demasiado grande")),
+            Owes::Body,
         ),
         BodyRead::Busy(request) => send_reply(
             request,
@@ -277,12 +291,90 @@ fn answer(
                 503,
                 "Hay peticiones a medias sin terminar: intenta de nuevo en un momento",
             )),
+            Owes::Body,
         ),
         BodyRead::Late => {}
     }
 }
 
-fn send_reply(request: tiny_http::Request, reply: Reply) {
+/// What a client still owes of its request when the answer is ready.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Owes {
+    /// It declared no body, or all of it has been read.
+    Nothing,
+    /// It declared a body that was not read whole.
+    Body,
+}
+
+impl Owes {
+    /// For a request whose body this server did not read: the body, if the head declares one.
+    fn when_unread(request: &tiny_http::Request) -> Owes {
+        let declares_a_body = request.body_length().is_some_and(|length| length > 0)
+            || request
+                .headers()
+                .iter()
+                .any(|header| header.field.equiv("Transfer-Encoding"));
+        if declares_a_body {
+            Owes::Body
+        } else {
+            Owes::Nothing
+        }
+    }
+}
+
+/// Sends `reply` from the serving thread. Every request the page makes owes nothing by now, and
+/// its answer closes the connection (`write_last_reply`). Answering a request that still owes
+/// body includes waiting for that client, so it is done on a thread of its own.
+fn send_reply(request: tiny_http::Request, reply: Reply, owes: Owes) {
+    match owes {
+        Owes::Nothing => write_last_reply(request, &reply),
+        Owes::Body => answer_aside(request, reply),
+    }
+}
+
+/// Answers, on a thread of its own, a request that still owes body.
+///
+/// Not counted against `max_readers`: a reader past that number can be turned away, but the
+/// turning away is itself one of these answers, and there is no cheaper one to fall back on. A
+/// cap here would only choose who waits, and it would be the serving thread. Each of these
+/// threads lasts as long as its connection, for which tiny_http already keeps a thread of its own,
+/// and a browser opens only a handful of connections to one host.
+fn answer_aside(request: tiny_http::Request, reply: Reply) {
+    let spawned = std::thread::Builder::new()
+        .name("panel-owed".to_string())
+        .spawn(move || respond_and_wait_out_the_body(request, reply));
+    if let Err(error) = spawned {
+        // The request went into the closure and ended with it, on this thread: tiny_http has
+        // answered 500 and waited here for what that client owed. A machine with no thread left
+        // to give is the one case in which the serving thread waits for a client.
+        tracing::error!(%error, "no thread to answer a request that still owes its body");
+    }
+}
+
+/// Writes `reply` and says it is the last answer on this connection.
+///
+/// Why not `request.respond`: tiny_http would keep the connection open for the next request, and
+/// one of its pool threads stays on a connection for as long as the browser keeps it. Its pool
+/// also miscounts its idle threads when connections arrive together, and then queues one with no
+/// thread to read it until some other connection ends: a request that waits for minutes while the
+/// server answers every new connection at once. tiny_http drops a `Connection` header that an
+/// application adds, so the reply is written here. With `Connection: close` the browser hangs up
+/// after each answer, a thread comes free within milliseconds and nothing waits in that queue
+/// (docs/adr/0014-one-request-per-connection.md).
+fn write_last_reply(request: tiny_http::Request, reply: &Reply) {
+    let head_only = *request.method() == Method::Head;
+    let mut connection = request.into_writer();
+    // A client that has already left is not an error to report: there is nobody to tell.
+    let _ = connection
+        .write_all(&on_the_wire(reply, head_only, Utc::now()))
+        .and_then(|()| connection.flush());
+}
+
+/// Writes `reply` through tiny_http's own `respond` and returns when the client has sent the
+/// body it still owes, or has left: tiny_http reads those bytes off the socket when a request
+/// ends, with no timeout. `respond` is the one way to have the answer written before that wait
+/// (`into_writer` waits first), so these answers do not say that the connection closes.
+fn respond_and_wait_out_the_body(request: tiny_http::Request, reply: Reply) {
     let mut response = Response::from_data(reply.body).with_status_code(reply.status);
     if let Ok(header) = Header::from_bytes(&b"Content-Type"[..], reply.content_type.as_bytes()) {
         response.add_header(header);
@@ -293,6 +385,48 @@ fn send_reply(request: tiny_http::Request, reply: Reply) {
         }
     }
     let _ = request.respond(response);
+}
+
+/// The bytes of `reply` as one HTTP/1.1 response that closes its connection. `head_only` leaves
+/// the body out (the answer to a `HEAD`); `204` and `304` never carry one, nor its length.
+fn on_the_wire(reply: &Reply, head_only: bool, now: DateTime<Utc>) -> Vec<u8> {
+    let reason = StatusCode(reply.status).default_reason_phrase();
+    let mut head = format!("HTTP/1.1 {} {reason}\r\n", reply.status);
+    head.push_str(&format!(
+        "Date: {}\r\n",
+        now.format("%a, %d %b %Y %H:%M:%S GMT")
+    ));
+    let content_type = ("Content-Type", reply.content_type);
+    let own = reply
+        .headers
+        .iter()
+        .map(|(name, value)| (*name, value.as_str()));
+    for (name, value) in std::iter::once(content_type).chain(own) {
+        if breaks_the_head(name) || breaks_the_head(value) {
+            tracing::error!(
+                name,
+                "a reply header that would break the response was left out"
+            );
+            continue;
+        }
+        head.push_str(&format!("{name}: {value}\r\n"));
+    }
+    let bodiless = matches!(reply.status, 204 | 304);
+    if !bodiless {
+        head.push_str(&format!("Content-Length: {}\r\n", reply.body.len()));
+    }
+    head.push_str("Connection: close\r\n\r\n");
+    let mut bytes = head.into_bytes();
+    if !bodiless && !head_only {
+        bytes.extend_from_slice(&reply.body);
+    }
+    bytes
+}
+
+/// A line break or any other control character in a header would end the header early, or start
+/// another one.
+fn breaks_the_head(text: &str) -> bool {
+    text.chars().any(|c| c.is_control())
 }
 
 #[cfg(test)]
@@ -330,7 +464,7 @@ mod tests {
             .unwrap();
         stream.write_all(request.as_bytes()).unwrap();
         let mut raw = Vec::new();
-        let _ = stream.read_to_end(&mut raw);
+        let read = stream.read_to_end(&mut raw);
         let text = String::from_utf8_lossy(&raw).into_owned();
         let (head, body) = text.split_once("\r\n\r\n").unwrap_or((&text, ""));
         let mut lines = head.lines();
@@ -338,7 +472,7 @@ mod tests {
             .next()
             .and_then(|l| l.split_whitespace().nth(1))
             .and_then(|s| s.parse().ok())
-            .unwrap_or_else(|| panic!("no status line in {text:?}"));
+            .unwrap_or_else(|| panic!("no status line in {text:?} (the read ended with {read:?})"));
         let headers = lines
             .filter_map(|l| l.split_once(':'))
             .map(|(k, v)| (k.trim().to_ascii_lowercase(), v.trim().to_string()))
@@ -401,6 +535,20 @@ mod tests {
             format!("127.0.0.1:{}", self.server.addr().port())
         }
 
+        /// A `GET` with the panel's token.
+        fn get(&self, target: &str) -> Wire {
+            send(
+                self.server.addr(),
+                &raw(
+                    "GET",
+                    target,
+                    &self.host(),
+                    &[("X-Panel-Token", self.server.token())],
+                    "",
+                ),
+            )
+        }
+
         fn json_post(&self, target: &str, body: &str, extra: &[(&str, &str)]) -> Wire {
             let mut headers = vec![
                 ("X-Panel-Token", self.server.token()),
@@ -459,6 +607,161 @@ mod tests {
         server.shutdown();
     }
 
+    /// What a browser does with one request: it opens a connection, asks without
+    /// `Connection: close`, and hangs up after the answer only if the answer says the connection
+    /// closes; otherwise it keeps the connection for its next request. Says whether a whole
+    /// answer came within `patience`, and hands back the connection it kept, if any.
+    fn ask_as_a_browser(
+        addr: SocketAddr,
+        host: &str,
+        token: &str,
+        patience: Duration,
+    ) -> (bool, Option<TcpStream>) {
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream.set_read_timeout(Some(patience)).unwrap();
+        let request =
+            format!("GET /api/snapshot HTTP/1.1\r\nHost: {host}\r\nX-Panel-Token: {token}\r\n\r\n");
+        stream.write_all(request.as_bytes()).unwrap();
+        let mut seen = Vec::new();
+        let mut chunk = [0u8; 4096];
+        loop {
+            match stream.read(&mut chunk) {
+                Ok(0) | Err(_) => return (false, None),
+                Ok(n) => seen.extend_from_slice(&chunk[..n]),
+            }
+            let text = String::from_utf8_lossy(&seen);
+            let Some((head, body)) = text.split_once("\r\n\r\n") else {
+                continue;
+            };
+            let head = head.to_ascii_lowercase();
+            let length: usize = head
+                .lines()
+                .find_map(|line| line.strip_prefix("content-length:"))
+                .and_then(|value| value.trim().parse().ok())
+                .expect("the answer says how long it is");
+            if body.len() < length {
+                continue;
+            }
+            let answered = head.starts_with("http/1.1 200");
+            let closes = head.lines().any(|line| line == "connection: close");
+            return (answered, (!closes).then_some(stream));
+        }
+    }
+
+    #[test]
+    fn every_connection_of_a_burst_is_answered() {
+        use std::sync::{Arc, Barrier};
+        // More than the four threads tiny_http keeps waiting: that is what a page load opens.
+        const BURST: usize = 8;
+        const ROUNDS: usize = 100;
+        let env = Env::start();
+        let addr = env.server.addr();
+        let host = env.host();
+        let token = env.server.token().to_string();
+        for round in 0..ROUNDS {
+            let together = Arc::new(Barrier::new(BURST));
+            let asking: Vec<_> = (0..BURST)
+                .map(|_| {
+                    let (together, host, token) = (together.clone(), host.clone(), token.clone());
+                    std::thread::spawn(move || {
+                        together.wait();
+                        ask_as_a_browser(addr, &host, &token, Duration::from_secs(3))
+                    })
+                })
+                .collect();
+            // Whatever a browser would keep open stays open until the whole burst has its verdict.
+            let outcomes: Vec<(bool, Option<TcpStream>)> =
+                asking.into_iter().map(|t| t.join().unwrap()).collect();
+            let unanswered = outcomes.iter().filter(|(answered, _)| !answered).count();
+            assert_eq!(
+                unanswered, 0,
+                "round {round}: {unanswered} of {BURST} connections opened together got no answer"
+            );
+        }
+    }
+
+    fn reply(status: u16, body: &str) -> Reply {
+        Reply {
+            status,
+            content_type: "text/plain; charset=utf-8",
+            headers: vec![("Cache-Control", "no-store".to_string())],
+            body: body.as_bytes().to_vec(),
+        }
+    }
+
+    #[test]
+    fn a_reply_is_written_whole_and_closes_its_connection() {
+        let at = DateTime::parse_from_rfc3339("2026-11-16T09:05:07Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let wire = String::from_utf8(on_the_wire(&reply(200, "hola"), false, at)).unwrap();
+        assert_eq!(
+            wire,
+            "HTTP/1.1 200 OK\r\n\
+             Date: Mon, 16 Nov 2026 09:05:07 GMT\r\n\
+             Content-Type: text/plain; charset=utf-8\r\n\
+             Cache-Control: no-store\r\n\
+             Content-Length: 4\r\n\
+             Connection: close\r\n\
+             \r\n\
+             hola"
+        );
+    }
+
+    #[test]
+    fn the_answer_to_a_head_has_the_length_and_no_body() {
+        let wire = String::from_utf8(on_the_wire(&reply(405, "no"), true, *NOW)).unwrap();
+        assert!(
+            wire.starts_with("HTTP/1.1 405 Method Not Allowed\r\n"),
+            "{wire}"
+        );
+        assert!(wire.contains("\r\nContent-Length: 2\r\n"), "{wire}");
+        assert!(wire.ends_with("Connection: close\r\n\r\n"), "{wire}");
+    }
+
+    #[test]
+    fn a_head_request_is_answered_on_the_socket_with_the_length_and_no_body() {
+        let env = Env::start();
+        let head = send(
+            env.server.addr(),
+            &raw(
+                "HEAD",
+                "/api/snapshot",
+                &env.host(),
+                &[("X-Panel-Token", env.server.token())],
+                "",
+            ),
+        );
+        assert_eq!(head.status, 405, "the panel serves no HEAD");
+        let length: usize = head.header("content-length").unwrap().parse().unwrap();
+        assert!(length > 0, "the length of the body a GET would have got");
+        assert_eq!(head.body, "");
+        assert_eq!(head.header("connection"), Some("close"));
+    }
+
+    #[test]
+    fn a_reply_without_content_carries_no_length_and_no_body() {
+        let wire = String::from_utf8(on_the_wire(&reply(204, ""), false, *NOW)).unwrap();
+        assert!(wire.starts_with("HTTP/1.1 204 No Content\r\n"), "{wire}");
+        assert!(!wire.contains("Content-Length"), "{wire}");
+        assert!(wire.ends_with("Connection: close\r\n\r\n"), "{wire}");
+    }
+
+    #[test]
+    fn a_header_that_would_break_the_response_is_left_out() {
+        let mut broken = reply(200, "x");
+        broken
+            .headers
+            .push(("X-Note", "one\r\nSet-Cookie: stolen=1".to_string()));
+        let wire = String::from_utf8(on_the_wire(&broken, false, *NOW)).unwrap();
+        assert!(!wire.contains("Set-Cookie"), "{wire}");
+        assert!(!wire.contains("X-Note"), "{wire}");
+        assert!(
+            wire.contains("\r\nCache-Control: no-store\r\n"),
+            "the others stay: {wire}"
+        );
+    }
+
     #[test]
     fn the_server_listens_on_loopback_only_with_a_fresh_token() {
         let a = Env::start();
@@ -491,17 +794,7 @@ mod tests {
         assert!(page.header("content-security-policy").is_some());
         let no_token = send(addr, &raw("GET", "/api/snapshot", &env.host(), &[], ""));
         assert_eq!(no_token.status, 401);
-        let token = env.server.token().to_string();
-        let ok = send(
-            addr,
-            &raw(
-                "GET",
-                "/api/snapshot",
-                &env.host(),
-                &[("X-Panel-Token", token.as_str())],
-                "",
-            ),
-        );
+        let ok = env.get("/api/snapshot");
         assert_eq!(ok.status, 200);
         let json: serde_json::Value = serde_json::from_str(&ok.body).unwrap();
         assert_eq!(json["board"].as_array().unwrap().len(), 12);
@@ -687,16 +980,7 @@ mod tests {
             env.host()
         );
         assert_eq!(send(env.server.addr(), &head).status, 413);
-        let after = send(
-            env.server.addr(),
-            &raw(
-                "GET",
-                "/api/snapshot",
-                &env.host(),
-                &[("X-Panel-Token", token.as_str())],
-                "",
-            ),
-        );
+        let after = env.get("/api/snapshot");
         assert_eq!(after.status, 200);
     }
 
@@ -704,6 +988,21 @@ mod tests {
     // thread of its own, so only a bigger declared body can hold the serving thread: these tests
     // declare 5000 bytes (the limit of a route is 16 KiB).
     const DECLARED: usize = 5000;
+
+    /// How many of the `DECLARED` bytes a stalled POST sends before it goes quiet.
+    const SENT_BYTES: usize = 2000;
+
+    /// A POST with the right head and token that declares `DECLARED` bytes of body and sends only
+    /// `SENT_BYTES` of them; the client still owes the other `DECLARED - SENT_BYTES`.
+    fn stalled_post(host: &str, token: &str) -> String {
+        const BODY_START: &str = "{\"key\":\"";
+        format!(
+            "POST /api/approve HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\
+             X-Panel-Token: {token}\r\nContent-Type: application/json\r\n\
+             Content-Length: {DECLARED}\r\n\r\n{BODY_START}{}",
+            "x".repeat(SENT_BYTES - BODY_START.len())
+        )
+    }
 
     /// The status the server answers to `head` alone (it promised a body that never comes), or 0
     /// when it only waits: what a panel that reads the body first would do.
@@ -784,43 +1083,53 @@ mod tests {
     }
 
     #[test]
+    fn a_refused_request_that_never_sends_its_body_nor_hangs_up_does_not_hold_the_panel() {
+        let env = Env::start();
+        let head = format!(
+            "POST /api/approve HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\n\
+             Content-Length: {DECLARED}\r\n\r\n",
+            env.host()
+        );
+        let mut lingering = TcpStream::connect(env.server.addr()).unwrap();
+        lingering
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        lingering.write_all(head.as_bytes()).unwrap();
+        assert_eq!(status_of(&mut lingering), 401, "it has no token");
+
+        // It was told no, and stays: somebody else is served meanwhile, and at once.
+        let started = std::time::Instant::now();
+        let other = env.get("/api/snapshot");
+        assert_eq!(other.status, 200);
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "served after {:?}",
+            started.elapsed()
+        );
+        drop(lingering);
+    }
+
+    #[test]
     fn a_post_that_stops_halfway_does_not_freeze_the_panel_and_is_told_so_when_it_resumes() {
         let env = Env::start_with(BodyPolicy {
             deadline: Duration::from_millis(300),
             max_readers: 4,
         });
-        let token = env.server.token().to_string();
         let mut stalled = TcpStream::connect(env.server.addr()).unwrap();
         stalled
             .set_read_timeout(Some(Duration::from_secs(5)))
             .unwrap();
         // Right head, right token, a body of 5000 bytes of which 2000 arrive.
-        let sent = format!("{{\"key\":\"{}", "x".repeat(1992));
         stalled
-            .write_all(
-                format!(
-                    "POST /api/approve HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\
-                     X-Panel-Token: {token}\r\nContent-Type: application/json\r\n\
-                     Content-Length: {DECLARED}\r\n\r\n{sent}",
-                    env.host()
-                )
-                .as_bytes(),
-            )
+            .write_all(stalled_post(&env.host(), env.server.token()).as_bytes())
             .unwrap();
 
-        // Meanwhile somebody else is served, in a few seconds at most.
+        // Meanwhile somebody else is served, and at once. A panel frozen for good would leave
+        // `get` without a status line; the clock is for the other failure, a panel that only
+        // answers when the stalled body gives up (5 s by default, far from these 4).
         let started = std::time::Instant::now();
         std::thread::sleep(Duration::from_millis(100));
-        let other = send(
-            env.server.addr(),
-            &raw(
-                "GET",
-                "/api/snapshot",
-                &env.host(),
-                &[("X-Panel-Token", token.as_str())],
-                "",
-            ),
-        );
+        let other = env.get("/api/snapshot");
         assert_eq!(other.status, 200);
         assert!(
             started.elapsed() < Duration::from_secs(4),
@@ -831,7 +1140,7 @@ mod tests {
         // It comes back only after the deadline, and finds out: nothing was done for it.
         std::thread::sleep(Duration::from_millis(600).saturating_sub(started.elapsed()));
         stalled
-            .write_all(&vec![b' '; DECLARED - sent.len()])
+            .write_all(&vec![b' '; DECLARED - SENT_BYTES])
             .unwrap();
         assert_eq!(status_of(&mut stalled), 408);
         assert!(!env.approved("test:1") && !env.approved("test:2"));
@@ -843,22 +1152,12 @@ mod tests {
             deadline: Duration::from_millis(200),
             max_readers: 1,
         });
-        let token = env.server.token().to_string();
         let mut stalled = TcpStream::connect(env.server.addr()).unwrap();
         stalled
             .set_read_timeout(Some(Duration::from_secs(5)))
             .unwrap();
         stalled
-            .write_all(
-                format!(
-                    "POST /api/approve HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\
-                     X-Panel-Token: {token}\r\nContent-Type: application/json\r\n\
-                     Content-Length: {DECLARED}\r\n\r\n{{\"key\":\"{}",
-                    env.host(),
-                    "x".repeat(1992)
-                )
-                .as_bytes(),
-            )
+            .write_all(stalled_post(&env.host(), env.server.token()).as_bytes())
             .unwrap();
         // Past its deadline the first one still holds its place: the next POST is turned away
         // at once instead of starting one more thread that could wait for ever.

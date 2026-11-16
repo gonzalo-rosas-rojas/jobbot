@@ -9,71 +9,66 @@
 // D3). The brief's table started aprender on A4, above cola's F#4, which would break that order, so it is a fourth
 // lower here (D4 -> A3); the interval, the register logic and the decay are the table's.
 
-import { burst, filter, jitter, tone, free } from "./envelopes.js";
+import { burst, jitter, latestEnd, note, soft, STOP_TAIL_S, tone, free, warm } from "./envelopes.js";
 
 export const ROOM_IDS = Object.freeze(["hoy", "procesos", "cola", "aprender", "sistema"]);
 
 const HZ = { D3: 146.83, Fs3: 185, A3: 220, D4: 293.66, F4: 349.23, Fs4: 369.99, A4: 440, B4: 493.88, D5: 587.33, A5: 880 };
-// a warm pair of partials at a given level
-const soft = (k) => [["sine", 1, 0.1 * k], ["triangle", 1, 0.06 * k]];
 
-const last = (...ends) => Math.max(...ends);
-
-// A note is a stack of partials sharing pitch and envelope: [type, ratio, peak]. Returns where it ends.
-function note(ctx, dest, f, t, decay, parts, attack) {
-  return last(...parts.map(([type, ratio, peak]) => tone(ctx, dest, { f: f * ratio, t, peak, decay, attack, type })));
-}
+const HUM_HZ = 6;          // the machine room's hum
+const HUM_DEPTH = 0.3;     // how much it moves the level of the note
+const HUM_TAIL_S = 0.005;  // the hum is stopped this long after the note's envelope ends
 
 const MOTIFS = {
   // the first stop: rising fifth, airy, with a breath of high noise (-30 dB) under it
   hoy(ctx, out, t0, j) {
     const parts = [["sine", 1, 0.16], ["sine", 2, 0.025]];
-    return last(
-      note(ctx, out, HZ.D5 * j.pitch, t0, 0.2, parts),
-      note(ctx, out, HZ.A5 * j.pitch, t0 + j.at(0.09), 0.29, parts),
+    return latestEnd(
+      note(ctx, out, { f: HZ.D5 * j.pitch, t: t0, decay: 0.2, parts }),
+      note(ctx, out, { f: HZ.A5 * j.pitch, t: t0 + j.at(0.09), decay: 0.29, parts }),
       burst(ctx, out, { t: t0, dur: 0.12, type: "highpass", f: 5000, peak: 0.005, at: j.r() * 0.8 }),
     );
   },
   // the corridor: the same note twice, an even pulse
   procesos(ctx, out, t0, j) {
     const parts = [["triangle", 1, 0.175]];
-    return last(
-      note(ctx, out, HZ.B4 * j.pitch, t0, 0.12, parts),
-      note(ctx, out, HZ.B4 * j.pitch, t0 + j.at(0.08), 0.12, parts),
+    return latestEnd(
+      note(ctx, out, { f: HZ.B4 * j.pitch, t: t0, decay: 0.12, parts }),
+      note(ctx, out, { f: HZ.B4 * j.pitch, t: t0 + j.at(0.08), decay: 0.12, parts }),
     );
   },
   // the gate: a low-to-high step with a tiny dry latch under the second note
   cola(ctx, out, t0, j) {
     const t2 = t0 + j.at(0.085);
-    return last(
-      note(ctx, out, HZ.Fs4 * j.pitch, t0, 0.16, soft(1.25)),
-      note(ctx, out, HZ.A4 * j.pitch, t2, 0.2, soft(1.25)),
+    return latestEnd(
+      note(ctx, out, { f: HZ.Fs4 * j.pitch, t: t0, decay: 0.16, parts: soft(1.25) }),
+      note(ctx, out, { f: HZ.A4 * j.pitch, t: t2, decay: 0.2, parts: soft(1.25) }),
       burst(ctx, out, { t: t2, dur: 0.003, f: 3000, q: 3, peak: 0.2, attack: 0.001, at: j.r() * 0.8 }),
     );
   },
   // the archive: a falling fourth, warm and slow
   aprender(ctx, out, t0, j) {
-    const lp = filter(ctx, "lowpass", 1200, 0.7, out);
+    const lp = warm(ctx, out, 1200);
     const parts = [["sine", 1, 0.16], ["triangle", 1, 0.05]];
-    return last(
-      note(ctx, lp, HZ.D4 * j.pitch, t0, 0.2, parts),
-      note(ctx, lp, HZ.A3 * j.pitch, t0 + j.at(0.12), 0.26, parts),
+    return latestEnd(
+      note(ctx, lp, { f: HZ.D4 * j.pitch, t: t0, decay: 0.2, parts }),
+      note(ctx, lp, { f: HZ.A3 * j.pitch, t: t0 + j.at(0.12), decay: 0.26, parts }),
     );
   },
   // the machine room: one low note over a sub (half its frequency), with a 6 Hz hum
   sistema(ctx, out, t0, j) {
-    const lp = filter(ctx, "lowpass", 900, 0.7, out);
+    const lp = warm(ctx, out, 900);
     const wob = ctx.createGain();
     wob.gain.value = 0.7;
     wob.connect(lp);
-    const end = note(ctx, wob, HZ.D3 * j.pitch, t0, 0.3, [["sine", 1, 0.21], ["sine", 0.5, 0.035], ["sine", 2, 0.085], ["sine", 3, 0.03]]);
+    const end = note(ctx, wob, { f: HZ.D3 * j.pitch, t: t0, decay: 0.3, parts: [["sine", 1, 0.21], ["sine", 0.5, 0.035], ["sine", 2, 0.085], ["sine", 3, 0.03]] });
     const lfo = ctx.createOscillator();
-    lfo.frequency.value = 6;
+    lfo.frequency.value = HUM_HZ;
     const depth = ctx.createGain();
-    depth.gain.value = 0.3;
+    depth.gain.value = HUM_DEPTH;
     lfo.connect(depth).connect(wob.gain);
     lfo.start(t0);
-    lfo.stop(end + 0.005);
+    lfo.stop(end + HUM_TAIL_S);
     free(lfo, depth, wob);
     return end;
   },
@@ -98,10 +93,10 @@ function tick(ctx, out, t0, opts) {
 // the gate latch opens: a warm rising major third over a soft low thump
 function approve(ctx, out, t0, opts) {
   const j = jitter(opts);
-  return last(
+  return latestEnd(
     tone(ctx, out, { f: 90 * j.pitch, t: t0, peak: 0.18, decay: 0.074 }),
-    note(ctx, out, HZ.D4 * j.pitch, t0, 0.11, soft(1.8)),
-    note(ctx, out, HZ.Fs4 * j.pitch, t0 + j.at(0.07), 0.116, soft(1.8)),
+    note(ctx, out, { f: HZ.D4 * j.pitch, t: t0, decay: 0.11, parts: soft(1.8) }),
+    note(ctx, out, { f: HZ.Fs4 * j.pitch, t: t0 + j.at(0.07), decay: 0.116, parts: soft(1.8) }),
   ) - t0;
 }
 
@@ -109,74 +104,81 @@ function approve(ctx, out, t0, opts) {
 function undo(ctx, out, t0, opts) {
   const j = jitter(opts);
   const parts = [["sine", 1, 0.14], ["triangle", 1, 0.042]];
-  return last(
-    note(ctx, out, HZ.Fs4 * j.pitch, t0, 0.05, parts),
-    note(ctx, out, HZ.F4 * j.pitch, t0 + j.at(0.055), 0.075, parts),
+  return latestEnd(
+    note(ctx, out, { f: HZ.Fs4 * j.pitch, t: t0, decay: 0.05, parts }),
+    note(ctx, out, { f: HZ.F4 * j.pitch, t: t0 + j.at(0.055), decay: 0.075, parts }),
   ) - t0;
 }
 
 // a drawer or the palette: noise sweeps up to open, down to close
-function sweep(from, to, peakOf) {
+function sweep(from, to, peak) {
   return (ctx, out, t0, opts) => {
     const j = jitter(opts);
-    return burst(ctx, out, { t: t0, dur: 0.09, f: from, to, q: 1.4, peak: peakOf, attack: 0.02, at: j.r() * 0.8 }) - t0;
+    return burst(ctx, out, { t: t0, dur: 0.09, f: from, to, q: 1.4, peak, attack: 0.02, at: j.r() * 0.8 }) - t0;
   };
 }
 
 // a switch: two close pitches, up for on, down for off
 function toggle(ctx, out, t0, opts) {
   const j = jitter(opts);
-  const [a, b] = opts.on === false ? [HZ.B4, HZ.A4] : [HZ.A4, HZ.B4];
+  const [first, second] = opts.on === false ? [HZ.B4, HZ.A4] : [HZ.A4, HZ.B4];
   const parts = [["sine", 1, 0.117], ["triangle", 1, 0.052]];
-  return last(
-    note(ctx, out, a * j.pitch, t0, 0.034, parts, 0.004),
-    note(ctx, out, b * j.pitch, t0 + j.at(0.04), 0.034, parts, 0.004),
+  return latestEnd(
+    note(ctx, out, { f: first * j.pitch, t: t0, decay: 0.034, parts, attack: 0.004 }),
+    note(ctx, out, { f: second * j.pitch, t: t0 + j.at(0.04), decay: 0.034, parts, attack: 0.004 }),
   ) - t0;
 }
 
+const MOD_RATIO = 3.5;   // modulator frequency over the carrier's
+const DEV_START = 0.6;   // modulation depth at the start, as a share of the modulator frequency
+const DEV_END = 0.04;    // and where the fade ends
+const TURN_S = 0.196;    // the whole bell, from its first sample to the stop of its oscillators
 // something is waiting for you: one soft FM bell (carrier 880, modulator x3.5, index fading), once
 function turn(ctx, out, t0, opts) {
   const j = jitter(opts);
-  const f = 880 * j.pitch;
-  const lp = filter(ctx, "lowpass", 3500, 0.7, out);
+  const duration = TURN_S;
+  const f = HZ.A5 * j.pitch;
+  const lp = warm(ctx, out, 3500);
   const carrier = ctx.createOscillator();
   const mod = ctx.createOscillator();
   const dev = ctx.createGain();
   const amp = ctx.createGain();
   carrier.frequency.value = f;
-  mod.frequency.value = f * 3.5;
-  dev.gain.setValueAtTime(f * 3.5 * 0.6, t0);
-  dev.gain.exponentialRampToValueAtTime(f * 3.5 * 0.04, t0 + 0.14);
+  mod.frequency.value = f * MOD_RATIO;
+  dev.gain.setValueAtTime(f * MOD_RATIO * DEV_START, t0);
+  dev.gain.exponentialRampToValueAtTime(f * MOD_RATIO * DEV_END, t0 + 0.14);
   mod.connect(dev).connect(carrier.frequency);
   amp.gain.setValueAtTime(0, t0);
   amp.gain.linearRampToValueAtTime(0.28, t0 + 0.004);
-  amp.gain.exponentialRampToValueAtTime(0.001, t0 + 0.194);
-  amp.gain.setValueAtTime(0, t0 + 0.194);
+  const releaseEnd = t0 + (TURN_S - STOP_TAIL_S);
+  amp.gain.exponentialRampToValueAtTime(0.001, releaseEnd);
+  amp.gain.setValueAtTime(0, releaseEnd);
   carrier.connect(amp).connect(lp);
   for (const o of [carrier, mod]) {
     o.start(t0);
-    o.stop(t0 + 0.196);
+    o.stop(t0 + duration);
   }
   free(carrier, amp, lp);
   free(mod, dev);
-  return 0.196;
+  return duration;
 }
 
 // overdue: a low, dull double pulse that falls a third (a different shape and pitch from the machine room's note)
 function late(ctx, out, t0, opts) {
   const j = jitter(opts);
-  const lp = filter(ctx, "lowpass", 800, 0.7, out);
+  const lp = warm(ctx, out, 800);
   const parts = [["sine", 1, 0.12], ["sine", 2, 0.07], ["sine", 3, 0.03]];
-  return last(
-    note(ctx, lp, HZ.A3 * j.pitch, t0, 0.052, parts, 0.008),
-    note(ctx, lp, HZ.Fs3 * j.pitch, t0 + j.at(0.11), 0.052, parts, 0.008),
+  return latestEnd(
+    note(ctx, lp, { f: HZ.A3 * j.pitch, t: t0, decay: 0.052, parts, attack: 0.008 }),
+    note(ctx, lp, { f: HZ.Fs3 * j.pitch, t: t0 + j.at(0.11), decay: 0.052, parts, attack: 0.008 }),
   ) - t0;
 }
 
 // an action failed: a short, low, rounded buzz
 function error(ctx, out, t0, opts) {
   const j = jitter(opts);
-  const lp = filter(ctx, "lowpass", 800, 0.7, out);
+  const duration = 0.12;
+  const lp = warm(ctx, out, 800);
   const o = ctx.createOscillator();
   o.type = "sawtooth";
   o.frequency.value = 110 * j.pitch;
@@ -184,22 +186,22 @@ function error(ctx, out, t0, opts) {
   g.gain.setValueAtTime(0, t0);
   g.gain.linearRampToValueAtTime(0.26, t0 + 0.012);
   g.gain.setValueAtTime(0.26, t0 + 0.07);
-  g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.12);
-  g.gain.setValueAtTime(0, t0 + 0.12);
+  g.gain.exponentialRampToValueAtTime(0.001, t0 + duration);
+  g.gain.setValueAtTime(0, t0 + duration);
   o.connect(g).connect(lp);
   o.start(t0);
-  o.stop(t0 + 0.122);
+  o.stop(t0 + (duration + STOP_TAIL_S));
   free(o, g, lp);
-  return 0.12;
+  return duration;
 }
 
 // a real milestone (first approval, interview, offer): D major arpeggio, 900 ms with a soft tail
 function ceremony(ctx, out, t0, opts) {
   const j = jitter(opts);
   const parts = [["sine", 1, 0.145], ["triangle", 1, 0.065]];
-  return last(
+  return latestEnd(
     ...[[HZ.D4, 0, 0.55], [HZ.Fs4, 0.15, 0.55], [HZ.A4, 0.3, 0.55], [HZ.D5, 0.45, 0.42]].map(([f, at, decay]) =>
-      note(ctx, out, f * j.pitch, t0 + j.at(at), decay, parts, 0.008),
+      note(ctx, out, { f: f * j.pitch, t: t0 + j.at(at), decay, parts, attack: 0.008 }),
     ),
   ) - t0;
 }

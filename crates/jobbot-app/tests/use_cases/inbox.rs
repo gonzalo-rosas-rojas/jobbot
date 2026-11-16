@@ -861,3 +861,49 @@ fn an_application_with_an_offer_is_still_found_by_its_company() {
     assert_eq!(report.unmatched, 0, "{:?}", report.lines);
     assert_eq!(state_of(&t, &key), State::Rejected);
 }
+
+fn imported_at(t: &Tracker) -> Option<String> {
+    t.get_meta(INBOX_IMPORTED_AT).unwrap()
+}
+#[test]
+fn an_import_leaves_the_date_the_mailbox_was_read() {
+    let t = Tracker::in_memory().unwrap();
+    assert_eq!(imported_at(&t), None, "never imported yet");
+    let key = sent(&t, "1", "Acme AI");
+    run(
+        &t,
+        &[with(msg("m1", "rejection"), json!({ "job_key": key }))],
+    );
+    assert_eq!(
+        imported_at(&t).as_deref(),
+        Some("2026-10-01T12:00:00+00:00")
+    );
+}
+#[test]
+fn an_empty_file_and_a_file_of_rejects_still_count_as_a_read_mailbox() {
+    let t = Tracker::in_memory().unwrap();
+    run(&t, &[]);
+    assert_eq!(
+        imported_at(&t).as_deref(),
+        Some("2026-10-01T12:00:00+00:00")
+    );
+
+    let t = Tracker::in_memory().unwrap();
+    let report = run(&t, &[json!({ "message_id": "solo-esto" })]);
+    assert_eq!((report.imported, report.rejected), (0, 1));
+    assert_eq!(
+        imported_at(&t).as_deref(),
+        Some("2026-10-01T12:00:00+00:00")
+    );
+}
+#[test]
+fn a_later_import_replaces_the_date() {
+    let t = Tracker::in_memory().unwrap();
+    run(&t, &[]);
+    let later = *NOW + TimeDelta::days(2);
+    import(&t, &[], later).unwrap();
+    assert_eq!(
+        imported_at(&t).as_deref(),
+        Some("2026-10-03T12:00:00+00:00")
+    );
+}

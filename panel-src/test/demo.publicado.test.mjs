@@ -78,7 +78,7 @@ function insertInto(page, tag, n, text, offset = 0) {
 test("the published demo names its fonts as fonts/<name>, and the build writes the five faces and their licences there, beside the page", () => {
   assert.equal(built.status, 0, `the published build ran (${built.stderr})`);
   assert.deepEqual(urls(html).filter((u) => !u.startsWith("#")).sort(), FONTS.map((f) => `fonts/${f}`).sort(), "every url( of the page that is not a #fragment is one of the five fonts, by a path relative to the page");
-  assert.deepEqual(tree(path.dirname(PUB)).sort(), [...FONTS.map((f) => "fonts/" + f), ...LICENCES.map((l) => "fonts/licenses/" + l), "index.html"].sort(),"the folder holds the page, the five fonts and their licences, and nothing else");
+  assert.deepEqual(tree(path.dirname(PUB)).sort(), [...FONTS.map((f) => "fonts/" + f), ...LICENCES.map((l) => "fonts/licenses/" + l), "favicon.svg", "index.html"].sort(), "the folder holds the page, its icon, the five fonts and their licences, and nothing else");
   for (const f of FONTS) assert.ok(readFileSync(path.join(path.dirname(PUB), "fonts", f)).equals(readFileSync(path.join(FONTS_DIR, f))), `${f} is the verified file of assets/fonts`);
   for (const l of LICENCES) assert.ok(readFileSync(path.join(path.dirname(PUB), "fonts", "licenses", l)).equals(readFileSync(path.join(FONTS_DIR, "licenses", l))), `${l} is the licence of assets/fonts/licenses`);
   const faces = readFileSync(path.join(root, "src", "styles", "fonts.css"), "utf8").replace(/\r\n/g, "\n").split("\n").filter(Boolean);
@@ -98,6 +98,7 @@ test("nothing is left for a server to fill in the published demo, and the demo o
   for (const f of FONTS) assert.ok(devHtml.includes(`url("__ASSETS__/${f}")`), `the dev demo keeps __ASSETS__ for ${f}`);
   assert.ok(devHtml.includes('<script nonce="__NONCE__">') && !devHtml.includes("Content-Security-Policy"), "and its nonces, with no meta");
   assert.deepEqual(tree(path.dirname(DEV)), ["demo.html"], "and it writes no fonts folder");
+  assert.ok(!devHtml.includes("<link"), "and no <link> in its markup: it answers /favicon.ico itself, and the page script makes its own blob icon at run time");
 });
 
 test("the build refuses a published demo that still holds a placeholder, names it, and writes nothing; the same entry without it builds", () => {
@@ -147,7 +148,11 @@ test("publishedProblems reads the file alone: the fresh build passes, an edit na
     "a style added in the head": html.replace("</head>", "<style>p{color:red}</style>\n</head>"),
     "a style with an attribute added": html.replace("</head>", '<style media="all">p{}</style>\n</head>'),
     "a <SCRIPT> in capitals added": html.replace("</body>", "<SCRIPT>document.title = 1</SCRIPT>\n</body>"),
-    "'self' put in script-src": html.replace("script-src ", "script-src 'self' "),
+    "a second <link> added": html.replace("</head>", '<link rel="stylesheet" href="other.css">\n</head>'),
+    "a second <link rel=icon> added": html.replace("</head>", '<link rel="icon" href="other.svg">\n</head>'),
+    "the icon link pointing somewhere else": html.replace('href="favicon.svg"', 'href="other.svg"'),
+    "the icon link taken out": html.replace('<link rel="icon" type="image/svg+xml" href="favicon.svg">', ""),
+    "'self' put in script-src":html.replace("script-src ", "script-src 'self' "),
     "* put in script-src": html.replace("script-src ", "script-src * "),
   };
   for (const p of PLACEHOLDERS) bad[`${p} in the demo script, named again by its hashes`] = rehash(insertInto(html, "script", 1, `/* ${p} */\n`));
@@ -172,6 +177,33 @@ test("publishedProblems reads the file alone: the fresh build passes, an edit na
     assert.ok(found.includes(sha(target.body).slice(1, -1)), `${what}: a problem names it by its hash now (${found})`);
     for (const other of els) if (other !== target && other.start !== target.start) assert.ok(!found.includes(sha(other.body).slice(1, -1)), `${what}: no problem names an untouched <${other.tag}>`);
   }
+});
+
+test("the published folder carries favicon.svg, exactly the file of assets/, and the page declares it by a relative path with the policy unchanged", () => {
+  assert.equal(built.status, 0, `the published build ran (${built.stderr})`);
+  const icon = path.join(path.dirname(PUB), "favicon.svg");
+  assert.ok(existsSync(icon), "favicon.svg is beside index.html");
+  assert.ok(readFileSync(icon).equals(readFileSync(path.join(root, "assets", "favicon.svg"))), "and it is the source file, byte for byte");
+  assert.ok(html.includes('<link rel="icon" type="image/svg+xml" href="favicon.svg">'), "the page links it with a path relative to the page (the folder is published under a subdirectory)");
+  assert.deepEqual(policyOf(html)["img-src"], ["'self'", "blob:"], "img-src already covers a file beside the page: it is not widened");
+  assert.ok(!/data:/.test(metaOf(html)[0][1]), "and the policy names no data: source");
+  assert.deepEqual(G.publishedProblems(html), [], "the page still passes the published-page check");
+});
+
+test("the published page asks for nothing by an absolute path starting with /", () => {
+  assert.equal(built.status, 0, `the published build ran (${built.stderr})`);
+  const markup = html.replace(/<(script|style)(?=[\s>])[\s\S]*?<\/\1\s*>/gi, "");   // the demo's own script names routes of its fake server, which nothing requests
+  const absolute = [...markup.matchAll(/\s(?:href|src|action|poster)\s*=\s*["']?\/[^"'\s>]*/gi)].map((m) => m[0].trim());
+  assert.deepEqual(absolute, [], "no href, src or action begins with /");
+  assert.deepEqual(urls(html).filter((u) => u.startsWith("/")), [], "and no url( of the style does either");
+});
+
+test("a published build that fails leaves no favicon.svg", () => {
+  const out = path.join(tmp, "bad-icon", "index.html");
+  const r = build("demo", "--publish", "--entry", entry("icon-bad.js", 'document.body.dataset.t35 = "__NONCE__";'), "--out", out);
+  assert.notEqual(r.status, 0, "the build is refused");
+  assert.ok(!existsSync(path.join(path.dirname(out), "favicon.svg")), "no icon was written");
+  assert.deepEqual(tree(path.dirname(out)), [], "nor anything else");
 });
 
 test("the build checks the page it writes: buildDemo refuses on publishedProblems(html) after the last change to html and before writing anything", () => {

@@ -20,16 +20,16 @@
 
 import { mailId } from "../core/diff.js";
 import { crossings, horaOf } from "../scene/clock.js";
-import { serverDay } from "../core/time.js";
+import { serverDay, MINUTE_MS } from "../core/time.js";
 
-export const STALE_MS = 20 * 60 * 1000;
-const ERROR_GAP_MS = 5 * 60 * 1000;
+export const STALE_MS = 20 * MINUTE_MS;
+const ERROR_GAP_MS = 5 * MINUTE_MS;
 const GATE_HOUR = 17.5;                          // the gate opens at 18:00; the reminder is half an hour before
-const MAX_TICK_GAP_MS = 5 * 60 * 1000;           // beyond this between two looks at the clock the machine slept: nothing crossed
+const MAX_TICK_GAP_MS = 5 * MINUTE_MS;           // beyond this between two looks at the clock the machine slept: nothing crossed
 // Most important first: the one sound a burst gets.
 export const PRIORITY = Object.freeze(["bg.interview", "bg.reply", "bg.runfail", "bg.stop", "bg.go", "bg.queue", "bg.run"]);
 // What he can cause himself: sounded only when he did not just change something.
-const HIS = new Set(["bg.interview", "bg.reply", "bg.stop", "bg.go", "bg.queue"]);
+const SELF_CAUSED = new Set(["bg.interview", "bg.reply", "bg.stop", "bg.go", "bg.queue"]);
 const MILESTONE_MAIL = new Set(["interview_invite", "technical_test"]);
 const MILESTONE_STATE = new Set(["interview", "technical_test", "offer"]);
 const ANSWER_STATE = new Set(["replied", "rejected"]);
@@ -43,45 +43,59 @@ const statesOf = (snap) => {
 const awaitingKeys = (snap) => new Set(list(snap && snap.awaiting_approval && snap.awaiting_approval.cards).map((c) => c.key));
 const totalAwaiting = (snap) => Number(snap && snap.awaiting_approval && snap.awaiting_approval.total) || 0;
 
-/** The cue ids of what changed between two raw snapshots, in the order of PRIORITY. Pure: it changes neither snapshot. */
-export function detect(prev, next) {
-  const found = new Set();
-  if (!prev || !next) return [];
-
+// A mail that was not there is a reply, or an interview when it asks for one; an application that moved to a state that answers is the same.
+function mailCues(prev, next, found) {
   const seen = new Set(list(prev.today && prev.today.emails).map(mailId));
   for (const mail of list(next.today && next.today.emails)) {
     if (seen.has(mailId(mail))) continue;
     found.add(MILESTONE_MAIL.has(mail.kind) ? "bg.interview" : "bg.reply");
   }
-  const was = statesOf(prev);
+}
+
+function stateCues(prev, next, found) {
+  const statesBefore = statesOf(prev);
   for (const [key, state] of statesOf(next)) {
-    const before = was.get(key);
+    const before = statesBefore.get(key);
     if (!before || before === state) continue;
     if (MILESTONE_STATE.has(state)) found.add("bg.interview");
     else if (ANSWER_STATE.has(state)) found.add("bg.reply");
   }
+}
 
+function queueCue(prev, next, found) {
   const had = awaitingKeys(prev);
   if ([...awaitingKeys(next)].some((key) => !had.has(key)) || totalAwaiting(next) > totalAwaiting(prev)) found.add("bg.queue");
+}
 
-  const a = prev.controls || {};
-  const b = next.controls || {};
-  if (b.last_run_at && b.last_run_at !== a.last_run_at) {
-    const newer = !(Date.parse(a.last_run_at) > Date.parse(b.last_run_at));          // a run that is older than the one we knew is not a run
-    const result = typeof b.last_run_result === "string" ? b.last_run_result.trim() : "";
-    if (newer) {
+// A run of the bot that ended since the last look, and the STOP switch flipped from outside.
+function runCues(prev, next, found) {
+  const oldControls = prev.controls || {};
+  const newControls = next.controls || {};
+  if (newControls.last_run_at && newControls.last_run_at !== oldControls.last_run_at) {
+    const olderThanKnown = Date.parse(oldControls.last_run_at) > Date.parse(newControls.last_run_at);   // a run that is older than the one we knew is not a run (unparseable dates count as newer)
+    const result = typeof newControls.last_run_result === "string" ? newControls.last_run_result.trim() : "";
+    if (!olderThanKnown) {
       if (/^error/i.test(result)) found.add("bg.runfail");
       else if (result === "" || result === "ok") found.add("bg.run");
     }
   }
-  if (a.stopped === false && b.stopped === true) found.add("bg.stop");
-  if (a.stopped === true && b.stopped === false) found.add("bg.go");
+  if (oldControls.stopped === false && newControls.stopped === true) found.add("bg.stop");
+  if (oldControls.stopped === true && newControls.stopped === false) found.add("bg.go");
+}
 
+/** The cue ids of what changed between two raw snapshots, in the order of PRIORITY. Pure: it changes neither snapshot. */
+export function detect(prev, next) {
+  if (!prev || !next) return [];
+  const found = new Set();
+  mailCues(prev, next, found);
+  stateCues(prev, next, found);
+  queueCue(prev, next, found);
+  runCues(prev, next, found);
   return PRIORITY.filter((id) => found.has(id));
 }
 
 /**
- * createBackground({ player, now, hora, serverDayOf }) -> { observe(snapshot), failed(error), tick(), reset() }
+ * createBackground({ player, now, hora, dayOf }) -> { observe(snapshot), failed(error), tick(), reset() }
  *   observe  every snapshot the session accepts (the raw one)       -> the cue id it asked the player for, or null
  *   failed   every failed read, with the session's error            -> the same
  *   tick     every few seconds: the clock, for the gate of 18:00     -> the same
@@ -107,7 +121,7 @@ export function createBackground({ player, now = Date.now, hora = (ms) => horaOf
     const gap = Date.parse(snapshot.generated_at) - Date.parse(prev.generated_at);
     if (Number.isFinite(gap) && gap > STALE_MS) return null;
     const mine = player.ownRecently();
-    const events = detect(prev, snapshot).filter((id) => !(mine && HIS.has(id)));
+    const events = detect(prev, snapshot).filter((id) => !(mine && SELF_CAUSED.has(id)));
     return ask(events[0] || null);
   }
 

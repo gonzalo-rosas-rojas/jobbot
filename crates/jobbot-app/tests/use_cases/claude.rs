@@ -126,6 +126,25 @@ async fn a_paid_answer_survives_a_ledger_that_cannot_be_written() {
     assert_eq!(reply.structured, Some(json!({"a": 1})));
 }
 #[tokio::test]
+async fn a_failed_call_reports_claudes_error_even_when_the_ledger_cannot_be_written() {
+    let tracker = Tracker::in_memory().unwrap();
+    // A cost the ledger cannot store (NaN is NULL to SQLite, and the column is NOT NULL).
+    let fake = FakeClaude::new(vec![Err(ClaudeError::Reported {
+        subtype: "error_max_turns".into(),
+        message: "ran out of turns".into(),
+        cost_usd: f64::NAN,
+    })]);
+    let gate = ClaudeGate::new(&fake, &tracker, 1.0);
+    let err = gate.ask(&request(), *NOW).await.unwrap_err();
+    assert!(
+        matches!(
+            err.downcast_ref::<ClaudeError>(),
+            Some(ClaudeError::Reported { .. })
+        ),
+        "the error is Claude's, not the ledger's: {err:#}"
+    );
+}
+#[tokio::test]
 async fn the_daily_budget_stops_the_call_before_it_is_made() {
     let tracker = Tracker::in_memory().unwrap();
     let fake = FakeClaude::new(vec![

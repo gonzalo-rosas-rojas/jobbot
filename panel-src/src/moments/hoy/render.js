@@ -2,6 +2,7 @@
 // goes through setText (a write only when it differs), the rows are keyed by their id and kept in place (rows.js), the lists are
 // brought to the new order with `sync` (which moves no node that is already where it should be). A refresh that changes nothing
 // writes nothing, and one that changes a number leaves the buttons, the focus and the open fold exactly as they were.
+// The four figures are figures.js and the one click listener is clicks.js; this file draws the rest and joins them.
 //
 //   const hoy = createHoy({ actions, run, more, unsnooze, reduced, raf });
 //   hoy.el                       section.hoy  (host.append(hoy.el))
@@ -10,15 +11,15 @@
 //   hoy.repaint(id)              paints one row again (its armed or pending state changed)
 //   hoy.destroy()
 
-import { h, sv } from "../../core/dom.js";
+import { h, sv, setText } from "../../core/dom.js";
 import { t } from "../../i18n/index.js";
-import { sync, setText, setData, setHidden, setTitle, FRESH_MS } from "../shared/util.js";
-import { createRow } from "./rows.js";
+import { sync, setData, setHidden, setTitle, FRESH_MS } from "../shared/util.js";
+import { createNextRow, createLineRow } from "./rows.js";
+import { createFigures } from "./figures.js";
+import { bindClicks } from "./clicks.js";
 import { actButton } from "../../ui/act.js";
 
-const COUNT_MS = 700;
-let counted = false; // the receipts count up once per session of the page (§5.1 "Anima"), never again and never in gold
-
+const NOT_DRAWN = Symbol("about not drawn"); // never equals a JSON signature, not even the one of an absent `about`
 const SLOT_W = 3;
 const STRIP_H = 40;
 
@@ -42,13 +43,13 @@ export function createHoy({ actions, run, more, unsnooze, reduced = () => false,
   let stripSig = "";
   let sinceSig = "";
   let snoozedSig = "";
-  let aboutSig = "null";
+  let aboutSig = NOT_DRAWN;
 
   const parts = {
     about: h("p", { class: "about label" }),
+    mailWarn: h("p", { class: "mail-warn", role: "status", hidden: "" }),
     eyebrow: h("p", { class: "eyebrow label" }),
     ask: h("p", { class: "ask label gold" }),
-    figs: h("dl", { class: "figs" }),
     stripTitle: h("p", { class: "strip-title label" }),
     stripBox: h("div", { class: "strip-box" }),
     base: h("p", { class: "base label" }),
@@ -59,6 +60,7 @@ export function createHoy({ actions, run, more, unsnooze, reduced = () => false,
     restHint: h("span", { class: "rest-hint label" }),
     list: h("ul", { class: "rows", "data-lenis-prevent": "" }),
     more: h("button", { class: "more label", type: "button", "data-more": "" }),
+    since: h("div", { class: "since" }),
     sinceTitle: h("h2", { class: "since-title label" }),
     sinceList: h("ul", { class: "since-rows" }),
     foot: h("p", { class: "foot-line label" }),
@@ -67,11 +69,8 @@ export function createHoy({ actions, run, more, unsnooze, reduced = () => false,
     snoozedList: h("ul", { class: "snoozed-rows" }),
   };
   parts.h1 = h("h1", { class: "mega cond", id: "hoy-title", tabindex: "-1" });   // one run of the display face: no accent word, no serif
-  const figEls = ["read", "above", "complete", "awaiting"].map((id) => ({
-    id, n: h("dd", { class: "fig-n cond num" }), label: h("dt", { class: "fig-l label" }),
-  }));
-  // dl > div > dt + dd: the label first in the markup (what a screen reader reads first), the number first on the screen (CSS order)
-  figEls.forEach((f) => parts.figs.append(h("div", { class: "fig", "data-fig": f.id }, f.label, f.n)));
+  const figures = createFigures({ reduced, raf });
+  parts.since.append(parts.sinceTitle, parts.sinceList);
   parts.snoozed.append(parts.snoozedTitle, parts.snoozedList);
   parts.rest.append(h("header", { class: "rest-head" }, parts.restLabel, parts.restHint, parts.more), parts.list);
 
@@ -79,73 +78,27 @@ export function createHoy({ actions, run, more, unsnooze, reduced = () => false,
   parts.list.append(skeleton(), skeleton(), skeleton());
 
   const el = h("section", { class: "hoy", "aria-labelledby": "hoy-title", "data-loading": "true" },
+    parts.mailWarn,
     parts.eyebrow,
     h("div", { class: "headline" }, parts.h1, parts.ask),
     // what to do comes before the night's figures (2026-10-24): the squint test kept the headline, the figures and the clock and lost the action
     parts.nextSlot,
     parts.rest,
-    h("div", { class: "receipts" }, parts.figs, h("div", { class: "strip-wrap" }, parts.stripTitle, parts.stripBox, parts.base)),
-    h("div", { class: "since" }, parts.sinceTitle, parts.sinceList),
+    h("div", { class: "receipts" }, figures.el, h("div", { class: "strip-wrap" }, parts.stripTitle, parts.stripBox, parts.base)),
+    parts.since,
     h("footer", { class: "foot" }, parts.foot, parts.snoozed));
 
-  function viewOf(id) {
-    if (nextCtl && nextCtl.view.id === id) return nextCtl.view;
-    const ctl = rowCtls.get(id);
-    return ctl ? ctl.view : null;
-  }
-  const stateOf = (id) => ({ armed: actions.armedOf(id), pending: actions.isPending(id) });
   const ctlOf = (id) => (nextCtl && nextCtl.view.id === id ? nextCtl : rowCtls.get(id) || null);
+  const viewOf = (id) => { const ctl = ctlOf(id); return ctl ? ctl.view : null; };
+  const stateOf = (id) => ({ armed: actions.armedOf(id), pending: actions.isPending(id) });
 
-  // ---- one delegated listener for every button, row and link of the page: nothing is bound per row, so nothing is lost when a row is rebuilt
-  el.addEventListener("click", (e) => {
-    const target = e.target;
-    const button = target.closest("button[data-action]");
-    if (button) {
-      const rowEl = button.closest("[data-row]");
-      const view = rowEl && viewOf(rowEl.dataset.row);
-      if (view) run(button.dataset.action, view);
-      return;
-    }
-    const back = target.closest("button[data-unsnooze]");
-    if (back) { unsnooze(back.dataset.unsnooze); return; }
-    if (target.closest("button[data-more]")) { more(); return; }
-    const rowEl = target.closest("[data-row]");
-    if (rowEl && !target.closest("a, button, summary")) {
-      const view = viewOf(rowEl.dataset.row);
-      if (view) run("open", view);
-    }
-  });
+  bindClicks(el, { viewOf, run, more, unsnooze });
 
   function markFresh(ctl, fresh) {
     if (!fresh.has(ctl.view.mark) || ctl.el.dataset.fresh) return;
     ctl.setFresh(true);
     const id = setTimeout(() => { timers.delete(id); ctl.setFresh(false); }, FRESH_MS);
     timers.add(id);
-  }
-
-  function countUp(node, n) {
-    const start = performance.now();
-    node.dataset.counting = "true";
-    const step = (now) => {
-      const p = Math.min(1, (now - start) / COUNT_MS);
-      node.textContent = String(Math.round(n * (1 - Math.pow(1 - p, 3))));
-      if (p < 1 && node.isConnected) raf(step);
-      else { node.textContent = String(n); delete node.dataset.counting; }
-    };
-    raf(step);
-  }
-
-  function patchFigures(view, first) {
-    const animate = first && !counted && !reduced();
-    view.figures.forEach((fig, i) => {
-      const f = figEls[i];
-      setData(f.n, "gold", fig.gold ? "true" : "false");
-      setText(f.label, fig.label);
-      if (f.n.dataset.counting) return;
-      if (animate && !fig.gold && fig.n > 0) countUp(f.n, fig.n);
-      else setText(f.n, String(fig.n));
-    });
-    if (first) counted = true;
   }
 
   function patchStrip(strip) {
@@ -164,7 +117,7 @@ export function createHoy({ actions, run, more, unsnooze, reduced = () => false,
       return;
     }
     if (!nextCtl || nextCtl.view.id !== view.next.id) {
-      nextCtl = createRow(view.next, "next");
+      nextCtl = createNextRow(view.next);
       parts.nextSlot.replaceChildren(nextCtl.el, parts.after);
     }
     nextCtl.patch(view.next, stateOf(view.next.id));
@@ -178,7 +131,7 @@ export function createHoy({ actions, run, more, unsnooze, reduced = () => false,
     const els = view.rows.map((row) => {
       let ctl = rowCtls.get(row.id);
       if (!ctl) {
-        ctl = createRow(row, "row");
+        ctl = createLineRow(row);
         rowCtls.set(row.id, ctl);
       }
       ctl.patch(row, stateOf(row.id));
@@ -207,7 +160,7 @@ export function createHoy({ actions, run, more, unsnooze, reduced = () => false,
 
   function patchSince(view, fresh) {
     const since = view.since;
-    setHidden(parts.sinceTitle.parentElement, !since);
+    setHidden(parts.since, !since);
     if (!since) return;
     setText(parts.sinceTitle, t("hoy.since.title") + ", " + since.head);
     const sig = JSON.stringify([since.rows.map((r) => [r.mark, r.hour, r.company, r.type, r.line]), since.rows.map((r) => fresh.has(r.mark)), t("hoy.since.none")]);
@@ -239,13 +192,15 @@ export function createHoy({ actions, run, more, unsnooze, reduced = () => false,
     if (el.dataset.loading) { delete el.dataset.loading; parts.list.replaceChildren(); }
     setData(el, "calm", view.calm ? "true" : "false");
     patchAbout(view.about);
+    setText(parts.mailWarn, view.mailWarn || "");
+    setHidden(parts.mailWarn, !view.mailWarn);
     setText(parts.eyebrow, view.eyebrow);
     setText(parts.h1, view.headline);
     // beside the headline only on a calm day: the count of what waits for his approval is already the gold figure below
     const ask = view.calm ? view.calmLine : "";
     setText(parts.ask, ask);
     setHidden(parts.ask, !ask);
-    patchFigures(view, first);
+    figures.patch(view, first);
     patchStrip(view.strip);
     setText(parts.base, view.base || "");
     setHidden(parts.base, !view.base);

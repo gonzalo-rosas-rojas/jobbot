@@ -7,10 +7,15 @@
 
 const MAX_DRAFTS = 20;
 
+/** The state of the picture's fetch for `key` (null: none); the zoom always starts fit. status: idle | loading | ready | failed */
+export function shotState(key, status, serial, url = null) {
+  return { key, url, status, serial, zoom: false };
+}
+
 export const memo = {
   key: null,
   folds: new Map(), // fold id -> open?
-  shot: { key: null, url: null, status: "idle", serial: 0, zoom: false }, // status: idle | loading | ready | failed
+  shot: shotState(null, "idle", 0),
   slot: null, // the element that shows the picture now (a drawing replaces it)
   refusal: null, // { key, text } what the server said to the last mark it refused
   asking: null, // { key, state } the answer he picked in "Registrar una respuesta", waiting for his yes
@@ -19,11 +24,15 @@ export const memo = {
   drafts: new Map(), // key -> the note typed and not sent
 };
 
+/** Gives back the blob URL of the picture, if there is one. */
+export function revokeShot() {
+  if (memo.shot.url) URL.revokeObjectURL(memo.shot.url);
+}
+
 /** Takes everything about the application that was open away; the blob URL is revoked and a late answer is ignored. */
 export function release() {
-  const shot = memo.shot;
-  if (shot.url) URL.revokeObjectURL(shot.url);
-  memo.shot = { key: null, url: null, status: "idle", serial: shot.serial + 1, zoom: false };
+  revokeShot();
+  memo.shot = shotState(null, "idle", memo.shot.serial + 1);
   memo.slot = null;
   memo.key = null;
   memo.folds.clear();
@@ -45,7 +54,8 @@ export function draftOf(key) {
   return memo.drafts.get(key) || "";
 }
 
-export function keepDraft(key, text) {
+/** Keeps the note typed for `key`, the newest last; an empty text forgets it. */
+export function setDraft(key, text) {
   if (!text) {
     memo.drafts.delete(key);
     return;

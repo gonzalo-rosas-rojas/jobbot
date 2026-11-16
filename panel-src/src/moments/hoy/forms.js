@@ -9,9 +9,9 @@
 import { h } from "../../core/dom.js";
 import { t } from "../../i18n/index.js";
 import { markPhrase } from "../../core/format.js";
+import { HOUR_MS } from "../../core/time.js";
 import { clean } from "../shared/util.js";
 
-const HOUR = 3600000;
 
 /** The ways to put an application aside, as the server reads them (`until`: "1d", "3d" ...): [{ key, until, label }]. */
 export const snoozeChoices = () => [
@@ -40,16 +40,18 @@ export const DUE = [
   { id: "3d", hours: 72 },
 ];
 
+const NEWTASK_MAX = 240;
+
 /** RFC 3339 for `/api/task/add` ("2026-10-08T15:00:00Z"), or null for no deadline. */
 export function dueAt(id, nowMs) {
   const due = DUE.find((d) => d.id === id);
   if (!due || due.hours == null) return null;
-  return new Date(nowMs + due.hours * HOUR).toISOString().replace(".000Z", "Z");
+  return new Date(nowMs + due.hours * HOUR_MS).toISOString().replace(".000Z", "Z");
 }
 
 /** The body of `POST /api/task/add`, or null when the text is empty. */
 export function taskBody(text, dueId, nowMs) {
-  const clear = clean(text, 240);
+  const clear = clean(text, NEWTASK_MAX);
   return clear ? { text: clear, due_at: dueAt(dueId, nowMs) } : null;
 }
 
@@ -78,8 +80,12 @@ export function createForms({ menu, session, sound, announce, now, cardOf, rowEl
   }
 
   function newTask(from = null) {
-    const input = h("input", { class: "menu-input", type: "text", maxlength: "240", "aria-label": t("hoy.newtask.text"), placeholder: t("hoy.newtask.placeholder"), autocomplete: "off" });
-    const due = h("select", { class: "menu-select", "aria-label": t("hoy.newtask.due") }, ...DUE.map((d) => h("option", { value: d.id }, t("hoy.newtask.due." + d.id))));
+    const input = h("input", {
+      class: "menu-input", type: "text", maxlength: String(NEWTASK_MAX), autocomplete: "off",
+      "aria-label": t("hoy.newtask.text"), placeholder: t("hoy.newtask.placeholder"),
+    });
+    const dueOptions = DUE.map((d) => h("option", { value: d.id }, t("hoy.newtask.due." + d.id)));
+    const due = h("select", { class: "menu-select", "aria-label": t("hoy.newtask.due") }, ...dueOptions);
     const form = h("form", { class: "menu-form", novalidate: "" }, input, due, h("button", { class: "menu-submit label", type: "submit" }, t("hoy.newtask.add")));
     form.addEventListener("submit", async (e) => {
       e.preventDefault();

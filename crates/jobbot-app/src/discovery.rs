@@ -83,6 +83,7 @@ pub async fn discover(
     // Keys of the postings the sources returned that were already known: a stored row with one of
     // these keys has the data its source reports today, which is what the region prune trusts.
     let mut refreshed_keys = HashSet::new();
+    let repost_cutoff = now - TimeDelta::days(criteria.max_posting_age_days);
     for source in sources {
         let result = source.fetch().await;
         report.rate_limited += result
@@ -94,7 +95,6 @@ pub async fn discover(
         for job in result.jobs {
             report.fetched += 1;
             // The same role posted again once the old posting is stale is a new posting.
-            let repost_cutoff = now - TimeDelta::days(criteria.max_posting_age_days);
             if tracker.has_posting_since(&job, repost_cutoff)? {
                 report.already_seen += 1;
                 if tracker.refresh_posting(&job)? {
@@ -107,7 +107,7 @@ pub async fn discover(
                 report.excluded += 1;
                 continue;
             }
-            if !region_ok_with(&job, &criteria.extra_open_places) {
+            if !region_ok_for(&job, criteria) {
                 report.region_skipped += 1;
                 continue;
             }
@@ -157,7 +157,7 @@ const OUT_OF_REGION_NOTE: &str = "fuera_de_region: no se puede hacer desde Chile
 /// (`handoff::is_sent_by_hand`) are protected the same way: he may have sent one and not yet run
 /// `confirm`, and withdrawn is terminal.
 ///
-/// The panel sorts a waiting card by the same prefixes (`panel::snapshot::reason_kind`), so it can
+/// The panel sorts a waiting card by the same prefixes (`reason_kind` in the panel's `snapshot/cards.rs`), so it can
 /// tell Gonza to look before he applies again.
 pub const MAY_HAVE_BEEN_SENT: [&str; 4] = [
     "unconfirmed_submit",
@@ -220,9 +220,7 @@ pub fn prune_ineligible(
         };
         let (note, counter) = if is_stale_stored(&job, tracker, criteria, now)? {
             (stale_note(criteria), &mut report.stale)
-        } else if refreshed.contains(&row.job_key)
-            && !region_ok_with(&job, &criteria.extra_open_places)
-        {
+        } else if refreshed.contains(&row.job_key) && !region_ok_for(&job, criteria) {
             (OUT_OF_REGION_NOTE.to_string(), &mut report.out_of_region)
         } else {
             continue;
@@ -258,6 +256,11 @@ fn detail_with_floor(scored: &ScoreResult) -> BTreeMap<String, f64> {
     detail
 }
 
+/// True when `job` is in a region Gonza takes: his own, or one of the criteria's extra places.
+fn region_ok_for(job: &Job, criteria: &Criteria) -> bool {
+    region_ok_with(job, &criteria.extra_open_places)
+}
+
 /// Opens the application of a job that reaches the threshold: `Scored`, or `NeedsGonza` with
 /// `BELOW_FLOOR_NOTE` when its pay is below the floor. Shared by `discover` and `rescore`.
 fn place(
@@ -267,20 +270,22 @@ fn place(
     tracker: &dyn Store,
     now: DateTime<Utc>,
 ) -> anyhow::Result<Placement> {
-    // A job in one of the extra places (Australia) gets the extra threshold and is never held back
-    // for its pay: for those Gonza wants the offer, not a filter (2026-10-21), and an Australian
-    // salary is not the dollar figure the floor was set for.
-    let in_extra_place = in_extra_place(job, &criteria.extra_open_places)
+    // A job in one of the extra places (Australia) whose title is also one of the extra title words
+    // gets the extra threshold and is never held back for its pay: for those Gonza wants the
+    // offer, not a filter (2026-10-21), and an Australian salary is not the dollar figure the
+    // floor was set for. The place alone is not enough: such a job with any other title is judged
+    // like every other one.
+    let extra_eligible = in_extra_place(job, &criteria.extra_open_places)
         && title_earns_extra_threshold(job, &criteria.extra_open_title_words);
     let threshold = match criteria.extra_open_apply_threshold {
-        Some(extra) if in_extra_place => extra,
+        Some(extra) if extra_eligible => extra,
         _ => criteria.apply_threshold,
     };
     if scored.total < threshold {
         return Ok(Placement::BelowThreshold);
     }
     tracker.create_application(&job.key(), now)?;
-    if scored.below_floor && !in_extra_place {
+    if scored.below_floor && !extra_eligible {
         tracker.transition(&job.key(), State::NeedsGonza, Some(BELOW_FLOOR_NOTE), now)?;
         Ok(Placement::Flagged)
     } else {
@@ -320,9 +325,7 @@ pub fn rescore(
     for job in tracker.jobs_without_application()? {
         // Too old by now, or not doable from Chile: queueing it would only get it withdrawn. It
         // stays stored, so a later refresh that fixes its data lets a later rescore queue it.
-        if is_stale_stored(&job, tracker, criteria, now)?
-            || !region_ok_with(&job, &criteria.extra_open_places)
-        {
+        if is_stale_stored(&job, tracker, criteria, now)? || !region_ok_for(&job, criteria) {
             continue;
         }
         let scored = score_job(&job, criteria);

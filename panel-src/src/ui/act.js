@@ -2,7 +2,7 @@
 // actButton; styles/actions.css is the only sheet that gives it shape. A button is never underlined at rest (that is what a link looks like), so
 // the drawer's links are outLink: words, underline and the exit icon.
 
-import { h, link } from "../core/dom.js";
+import { h, link, setText } from "../core/dom.js";
 import { icon } from "./icons.js";
 
 /**
@@ -17,6 +17,16 @@ export function actButton({ key, label, primary = false, cls = null, ...attrs })
   return h("button", { ...attrs, type: "button", class: ["act", primary && "primary", cls] },
     key == null ? null : h("kbd", { class: "k" }, key),
     h("span", { class: "act-label" }, label));
+}
+
+/** Rewrites the verb of an actButton in place (written only when it differs); the key cap stays. */
+export function setActLabel(button, text) {
+  setText(button.querySelector(".act-label"), text);
+}
+
+/** Rewrites the key cap of an actButton in place (written only when it differs); a button drawn with no key has nothing to write. */
+export function setActKey(button, key) {
+  setText(button.querySelector(".k"), key);
 }
 
 /** A link to another page, in a new tab, with the exit icon after its words; anything that is not an http(s) address is plain text. */

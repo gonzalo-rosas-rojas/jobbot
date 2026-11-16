@@ -7,12 +7,13 @@
 // a word is a date when it is a day of the calendar (and an hour next to it, or after a "T"). Nothing else is read, changed or removed, and what comes
 // out is a string for `textContent`: no markup is ever made.
 
-import { SERVER_TZ } from "./time.js";
+import { SERVER_TZ, SECOND_MS, MINUTE_MS } from "./time.js";
 
 const SEPARATOR = " — ";
 const MAX_ROLE = 32;                                  // a role longer than this is left out: "Brisa Mobility", not the whole title
 const LEAD = new Set(["(", "[", "{", "\"", "'", "«", "¿", "¡"]);
 const TRAIL = new Set([")", "]", "}", "\"", "'", "»", ",", ".", ";", ":", "!", "?", "…"]);
+const NOON_UTC = 12;                                  // a day with no hour is written from its noon, so no zone moves it to the day before or after
 const LOCALE = { es: "es-CL", en: "en-US" };
 
 /** The cards of a snapshot by key: the board, what needs him, what awaits his approval and what is put aside. One index per snapshot. */
@@ -51,7 +52,8 @@ function split(word) {
 
 // ---- dates
 
-const isDigits = (s, n) => s.length === n && [...s].every((c) => c >= "0" && c <= "9");
+const allDigits = (s) => s !== "" && [...s].every((c) => c >= "0" && c <= "9");
+const isDigits = (s, n) => s.length === n && allDigits(s);
 
 /** "2026-10-12" -> { y, m, d } when it is a real day of the calendar, else null. */
 function parseDay(s) {
@@ -71,8 +73,8 @@ function parseHour(s) {
   if (parts.length < 2 || parts.length > 3) return null;
   const [h, mi, rest = "0"] = parts;
   const sec = rest.split(".");
-  if (!isDigits(h, 2) || !isDigits(mi, 2) || sec.length > 2 || !sec[0] || ![...sec[0]].every((c) => c >= "0" && c <= "9") || sec[0].length > 2) return null;
-  if (sec.length === 2 && (!sec[1] || ![...sec[1]].every((c) => c >= "0" && c <= "9"))) return null;
+  if (!isDigits(h, 2) || !isDigits(mi, 2) || sec.length > 2 || !allDigits(sec[0]) || sec[0].length > 2) return null;
+  if (sec.length === 2 && !allDigits(sec[1])) return null;
   const out = { h: Number(h), mi: Number(mi), s: Number(sec[0]) };
   return out.h < 24 && out.mi < 60 && out.s < 60 ? out : null;
 }
@@ -86,7 +88,7 @@ function parseHourZone(s) {
   if (zone === "Z" || zone === "z") return { time, offset: 0 };
   const sign = zone[0] === "-" ? -1 : 1;
   const digits = zone.slice(1).replace(":", "");
-  if (!(digits.length === 2 || digits.length === 4) || ![...digits].every((c) => c >= "0" && c <= "9")) return undefined;
+  if (!(digits.length === 2 || digits.length === 4) || !allDigits(digits)) return undefined;
   const hours = Number(digits.slice(0, 2));
   const minutes = digits.length === 4 ? Number(digits.slice(2)) : 0;
   return hours < 24 && minutes < 60 ? { time, offset: sign * (hours * 60 + minutes) } : undefined;
@@ -105,24 +107,35 @@ function zoneFormat(tz, locale, options) {
 function offsetAt(ms, tz) {
   const p = Object.fromEntries(zoneFormat(tz, "en-US", { year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric", second: "numeric", hourCycle: "h23" })
     .formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
-  return (Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour), Number(p.minute), Number(p.second)) - Math.floor(ms / 1000) * 1000) / 60000;
+  return (Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour), Number(p.minute), Number(p.second)) - Math.floor(ms / SECOND_MS) * SECOND_MS) / MINUTE_MS;
 }
 
 /** The instant a wall clock of `tz` shows (the offset is looked up twice: it may change between the guess and the answer). */
 function wallToMs(day, time, tz) {
   const guess = Date.UTC(day.y, day.m - 1, day.d, time.h, time.mi, time.s);
-  const first = guess - offsetAt(guess, tz) * 60000;
-  return guess - offsetAt(first, tz) * 60000;
+  const first = guess - offsetAt(guess, tz) * MINUTE_MS;
+  return guess - offsetAt(first, tz) * MINUTE_MS;
 }
 
-/** "lun 12 oct, 18:03" in Spanish, "Mon 12 Oct, 6:03 PM" in English. `hour: false` is only the day. */
-function write(ms, lang, tz, hour) {
+/** The parts of a date written by `Intl` in the language and zone asked, by name, with the dot of an abbreviation taken off. */
+function fieldsOf(ms, lang, tz, options) {
+  const locale = LOCALE[lang === "en" ? "en" : "es"];
+  return Object.fromEntries(zoneFormat(tz, locale, options).formatToParts(new Date(ms)).map((x) => [x.type, x.value.replace(/\.$/, "")]));
+}
+
+const DAY_FIELDS = { weekday: "short", day: "numeric", month: "short" };
+
+/** "lun 12 oct" in Spanish, "Mon 12 Oct" in English: only the day. */
+function writeDay(ms, lang, tz) {
+  const p = fieldsOf(ms, lang, tz, DAY_FIELDS);
+  return `${p.weekday} ${p.day} ${p.month}`;
+}
+
+/** "lun 12 oct, 18:03" in Spanish, "Mon 12 Oct, 6:03 PM" in English. */
+function writeDayHour(ms, lang, tz) {
   const english = lang === "en";
-  const options = { weekday: "short", day: "numeric", month: "short" };
-  if (hour) Object.assign(options, { hour: "numeric", minute: "2-digit", hourCycle: english ? "h12" : "h23" });
-  const p = Object.fromEntries(zoneFormat(tz, LOCALE[english ? "en" : "es"], options).formatToParts(new Date(ms)).map((x) => [x.type, x.value.replace(/\.$/, "")]));
+  const p = fieldsOf(ms, lang, tz, { ...DAY_FIELDS, hour: "numeric", minute: "2-digit", hourCycle: english ? "h12" : "h23" });
   const day = `${p.weekday} ${p.day} ${p.month}`;
-  if (!hour) return day;
   return english ? `${day}, ${p.hour}:${p.minute} ${p.dayPeriod}` : `${day}, ${p.hour.padStart(2, "0")}:${p.minute}`;
 }
 
@@ -130,7 +143,7 @@ function write(ms, lang, tz, hour) {
  * The date that starts at word `i` of `parts` (words at even places, spaces at odd ones): { text, used } where `used` is how many parts it took, or null.
  * "2026-10-12T21:03:00Z" and "2026-10-12 18:03" (the server's own, a day and an hour) are dates; so is a day alone.
  */
-function dateAt(parts, i, lang, tz, serverTz) {
+function dateAt(parts, i, { lang, tz, serverTz }) {
   const [lead, core, trail] = split(parts[i]);
   const cut = core.indexOf("T");
   const dayText = cut < 0 ? core : core.slice(0, cut);
@@ -139,8 +152,8 @@ function dateAt(parts, i, lang, tz, serverTz) {
   if (cut >= 0) {
     const read = parseHourZone(core.slice(cut + 1));
     if (!read || !read.time) return null;
-    const ms = read.offset == null ? wallToMs(day, read.time, serverTz) : Date.UTC(day.y, day.m - 1, day.d, read.time.h, read.time.mi, read.time.s) - read.offset * 60000;
-    return { text: lead + write(ms, lang, tz, true) + trail, used: 1 };
+    const ms = read.offset == null ? wallToMs(day, read.time, serverTz) : Date.UTC(day.y, day.m - 1, day.d, read.time.h, read.time.mi, read.time.s) - read.offset * MINUTE_MS;
+    return { text: lead + writeDayHour(ms, lang, tz) + trail, used: 1 };
   }
   // a day, then one space and an hour: the server's wall clock
   const space = parts[i + 1];
@@ -148,9 +161,9 @@ function dateAt(parts, i, lang, tz, serverTz) {
   if (trail === "" && space && space.length === 1 && next) {
     const [, hourText, after] = split(next);
     const time = parseHour(hourText);
-    if (time) return { text: lead + write(wallToMs(day, time, serverTz), lang, tz, true) + after, used: 3 };
+    if (time) return { text: lead + writeDayHour(wallToMs(day, time, serverTz), lang, tz) + after, used: 3 };
   }
-  return { text: lead + write(Date.UTC(day.y, day.m - 1, day.d, 12), lang, "UTC", false) + trail, used: 1 };
+  return { text: lead + writeDay(Date.UTC(day.y, day.m - 1, day.d, NOON_UTC), lang, "UTC") + trail, used: 1 };
 }
 
 /**
@@ -167,7 +180,7 @@ export function humanize(text, cards, { lang = "es", tz, serverTz = SERVER_TZ } 
   for (let i = 0; i < parts.length; i++) {
     const word = parts[i];
     if (i % 2 === 1 || word === "") { out += word; continue; }
-    const date = dateAt(parts, i, lang, tz, serverTz);
+    const date = dateAt(parts, i, { lang, tz, serverTz });
     if (date) { out += date.text; i += date.used - 1; continue; }
     const [lead, core, trail] = split(word);
     const label = core ? labelOf(find(core)) : null;

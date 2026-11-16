@@ -10,7 +10,6 @@ use serde::Serialize;
 use super::Panel;
 use super::snapshot::{Card, card, card_context};
 use jobbot_app::ports::store::ApplicationRow;
-use jobbot_app::profile::load_criteria;
 use jobbot_domain::outbound::clean;
 use jobbot_domain::state::State;
 
@@ -18,6 +17,8 @@ use jobbot_domain::state::State;
 pub const PAGE_SIZE: usize = 50;
 /// The longest search or source name taken, in characters.
 const TEXT_MAX_CHARS: usize = 100;
+/// The longest piece of a rejected value quoted back in an error message, in characters.
+const ERROR_ECHO_CHARS: usize = 40;
 /// The last page number taken (a typo should not ask for the millionth).
 const PAGE_MAX: usize = 100_000;
 const PARAMS: [&str; 5] = ["state", "min_score", "source", "q", "page"];
@@ -42,7 +43,10 @@ impl JobsQuery {
     /// The query from its decoded `name=value` pairs, or the Spanish reason it is not valid.
     pub fn from_pairs(pairs: &BTreeMap<String, String>) -> std::result::Result<JobsQuery, String> {
         if let Some(unknown) = pairs.keys().find(|name| !PARAMS.contains(&name.as_str())) {
-            return Err(format!("Parámetro desconocido: {}", clean(unknown, 40)));
+            return Err(format!(
+                "Parámetro desconocido: {}",
+                clean(unknown, ERROR_ECHO_CHARS)
+            ));
         }
         let given = |name: &str| {
             pairs
@@ -50,13 +54,13 @@ impl JobsQuery {
                 .map(|value| value.trim())
                 .filter(|value| !value.is_empty())
         };
-        let state = match given("state") {
-            None => None,
-            Some(text) => Some(
-                State::parse(text)
-                    .ok_or_else(|| format!("Estado desconocido: {}", clean(text, 40)))?,
-            ),
-        };
+        let state =
+            match given("state") {
+                None => None,
+                Some(text) => Some(State::parse(text).ok_or_else(|| {
+                    format!("Estado desconocido: {}", clean(text, ERROR_ECHO_CHARS))
+                })?),
+            };
         let min_score = match given("min_score") {
             None => None,
             Some(text) => match text.parse::<f64>() {
@@ -152,7 +156,7 @@ pub fn build_jobs_page(panel: &Panel, query: &JobsQuery) -> Result<JobsPage> {
     let total = rows.len();
     let dossiers = panel.paths.data_dir.join("dossiers");
     let handoffs = panel.paths.data_dir.join("handoff");
-    let criteria = load_criteria(&panel.paths.profile_dir.join("criteria.toml")).ok();
+    let criteria = panel.criteria();
     let ctx = card_context(panel, panel.now(), &dossiers, &handoffs, criteria.as_ref())?;
     Ok(JobsPage {
         page: query.page,
@@ -185,27 +189,54 @@ mod tests {
             .collect()
     }
 
-    /// Adds a job and walks its application to `state`; returns the key.
-    fn put(
-        p: &Panel,
-        id: &str,
-        company: &str,
-        title: &str,
-        source: &str,
+    /// A job the tests put in the tracker: what a test names, with the rest at a plain default.
+    struct Posting<'a> {
+        id: &'a str,
+        company: &'a str,
+        title: &'a str,
+        source: &'a str,
         score: f64,
         state: State,
-    ) -> String {
+    }
+
+    impl<'a> Posting<'a> {
+        fn new(id: &'a str, company: &'a str, title: &'a str) -> Posting<'a> {
+            Posting {
+                id,
+                company,
+                title,
+                source: "test",
+                score: 50.0,
+                state: State::Scored,
+            }
+        }
+
+        fn source(self, source: &'a str) -> Posting<'a> {
+            Posting { source, ..self }
+        }
+
+        fn score(self, score: f64) -> Posting<'a> {
+            Posting { score, ..self }
+        }
+
+        fn state(self, state: State) -> Posting<'a> {
+            Posting { state, ..self }
+        }
+    }
+
+    /// Adds a job and walks its application to its state; returns the key.
+    fn put(p: &Panel, posting: Posting) -> String {
         let job = make_job_with(|j| {
-            j.source = source.into();
-            j.external_id = id.into();
-            j.company = company.into();
-            j.title = title.into();
+            j.source = posting.source.into();
+            j.external_id = posting.id.into();
+            j.company = posting.company.into();
+            j.title = posting.title.into();
         });
         p.tracker
-            .add_job(&job, score, &BTreeMap::new(), *NOW)
+            .add_job(&job, posting.score, &BTreeMap::new(), *NOW)
             .unwrap();
         p.tracker.create_application(&job.key(), *NOW).unwrap();
-        let path: &[State] = match state {
+        let path: &[State] = match posting.state {
             State::Scored => &[],
             State::Prepared => &[State::Prepared],
             State::NeedsGonza => &[State::Prepared, State::NeedsGonza],
@@ -291,12 +322,8 @@ mod tests {
             // 20 distinct scores, so the key breaks the ties.
             put(
                 &p,
-                &format!("{n:03}"),
-                &format!("Co {n}"),
-                "Role",
-                "test",
-                50.0 + f64::from(n % 20),
-                State::Scored,
+                Posting::new(&format!("{n:03}"), &format!("Co {n}"), "Role")
+                    .score(50.0 + f64::from(n % 20)),
             );
         }
         let first = page_of(&p, &[]);
@@ -336,39 +363,30 @@ mod tests {
         let (p, _d) = panel();
         let a = put(
             &p,
-            "1",
-            "Acme Robotics",
-            "Senior Engineer",
-            "ashby",
-            90.0,
-            State::Submitted,
+            Posting::new("1", "Acme Robotics", "Senior Engineer")
+                .source("ashby")
+                .score(90.0)
+                .state(State::Submitted),
         );
         let b = put(
             &p,
-            "2",
-            "Acme Robotics",
-            "Junior Engineer",
-            "lever",
-            65.0,
-            State::Rejected,
+            Posting::new("2", "Acme Robotics", "Junior Engineer")
+                .source("lever")
+                .score(65.0)
+                .state(State::Rejected),
         );
         let c = put(
             &p,
-            "3",
-            "Über Cloud",
-            "Staff Engineer",
-            "ashby",
-            80.0,
-            State::Rejected,
+            Posting::new("3", "Über Cloud", "Staff Engineer")
+                .source("ashby")
+                .score(80.0)
+                .state(State::Rejected),
         );
         let d = put(
             &p,
-            "4",
-            "Zeta",
-            "Data Scientist",
-            "greenhouse",
-            70.0,
-            State::Scored,
+            Posting::new("4", "Zeta", "Data Scientist")
+                .source("greenhouse")
+                .score(70.0),
         );
 
         assert_eq!(page_of(&p, &[]).total, 4);
@@ -428,7 +446,13 @@ mod tests {
     #[test]
     fn a_card_is_the_same_one_the_snapshot_serves() {
         let (p, _d) = panel();
-        let key = put(&p, "1", "Acme", "Role", "ashby", 88.0, State::NeedsGonza);
+        let key = put(
+            &p,
+            Posting::new("1", "Acme", "Role")
+                .source("ashby")
+                .score(88.0)
+                .state(State::NeedsGonza),
+        );
         p.tracker
             .set_snoozed_until(&key, Some(*NOW + chrono::TimeDelta::days(2)))
             .unwrap();

@@ -6,12 +6,13 @@ use async_trait::async_trait;
 use serde_json::Value;
 
 use super::Source;
-use super::base::{failure, get_json, id_string, join_places, parse_iso, skipped_error, str_field};
+use super::base::{
+    GREENHOUSE_API_URL, get_json, id_string, join_places, or_if_empty, parse_all, parse_iso,
+    record, str_field,
+};
 use jobbot_domain::models::{FetchResult, Job};
 use jobbot_domain::scoring::parse_salary_monthly_usd;
 use jobbot_domain::text::{host_of, html_to_text};
-
-const DEFAULT_BASE_URL: &str = "https://boards-api.greenhouse.io";
 
 pub struct GreenhouseSource {
     boards: Vec<String>,
@@ -28,7 +29,7 @@ impl GreenhouseSource {
         Self {
             boards: boards.into_iter().map(Into::into).collect(),
             http: http.into(),
-            base_url: DEFAULT_BASE_URL.to_string(),
+            base_url: GREENHOUSE_API_URL.to_string(),
         }
     }
 
@@ -45,15 +46,7 @@ impl GreenhouseSource {
         let postings = body["jobs"]
             .as_array()
             .context("response has no `jobs` array")?;
-        let mut jobs = Vec::new();
-        let mut skipped = 0;
-        for posting in postings {
-            match parse_posting(board, posting) {
-                Some(job) => jobs.push(job),
-                None => skipped += 1,
-            }
-        }
-        Ok((jobs, skipped))
+        Ok(parse_all(postings, |posting| parse_posting(board, posting)))
     }
 }
 
@@ -66,17 +59,12 @@ impl Source for GreenhouseSource {
     async fn fetch(&self) -> FetchResult {
         let mut result = FetchResult::default();
         for board in &self.boards {
-            match self.fetch_board(board).await {
-                Ok((jobs, skipped)) => {
-                    result.jobs.extend(jobs);
-                    if skipped > 0 {
-                        result
-                            .errors
-                            .push(skipped_error("greenhouse", board, skipped));
-                    }
-                }
-                Err(error) => result.errors.push(failure("greenhouse", board, &error)),
-            }
+            record(
+                &mut result,
+                "greenhouse",
+                board,
+                self.fetch_board(board).await,
+            );
         }
         result
     }
@@ -107,7 +95,8 @@ fn location_text(posting: &Value) -> String {
     join_places(std::iter::once(public).chain(remote_offices))
 }
 
-/// Whether the location and title say the job is not tied to an office. Many boards never use the
+/// Whether a text (the location, or the title through `title_says_remote`) says the job is not
+/// tied to an office. Many boards never use the
 /// word "remote": Canonical's read "Home based - Worldwide" or "Home Based - Americas". Those are
 /// remote; whether Chile is included is the region filter's call, not this flag's.
 fn says_remote(text: &str) -> bool {
@@ -124,10 +113,22 @@ fn says_remote(text: &str) -> bool {
     .any(|word| text.contains(word))
 }
 
-/// Greenhouse sends `content` HTML-escaped (`&lt;p&gt;`): decode the entities first, then strip the tags.
-///
-/// `posted_at` is `first_published`, not `updated_at`: the latter moves with every edit, which
-/// made every posting of a board look recent to the staleness rule.
+/// Whether the title says the job is not tied to an office: the words of `says_remote`, read as
+/// in the location, once the phrases in which "remote" is not about where the work is done are
+/// taken out ("Remote Sensing Engineer" names a field, "Non-Remote" says the opposite). A doubt
+/// counts as remote: a job wrongly taken as remote is still judged by its place, while one wrongly
+/// taken as on site is dropped without anyone seeing it.
+fn title_says_remote(title: &str) -> bool {
+    const NOT_ABOUT_THE_PLACE: [&str; 3] = ["remote sensing", "non-remote", "non remote"];
+    let title = NOT_ABOUT_THE_PLACE
+        .iter()
+        .fold(title.to_lowercase(), |title, phrase| {
+            title.replace(phrase, " ")
+        });
+    says_remote(&title)
+}
+
+/// One posting as a job, or `None` when it lacks an id, a title or a link.
 fn parse_posting(board: &str, posting: &Value) -> Option<Job> {
     let external_id = id_string(&posting["id"])?;
     let title = str_field(posting, "title");
@@ -137,10 +138,9 @@ fn parse_posting(board: &str, posting: &Value) -> Option<Job> {
     }
     let location = location_text(posting);
     let location = location.as_str();
-    let company = match str_field(posting, "company_name") {
-        "" => board,
-        name => name,
-    };
+    let company = or_if_empty(str_field(posting, "company_name"), board);
+    // Greenhouse sends `content` HTML-escaped (`&lt;p&gt;`): decode the entities first, then strip
+    // the tags.
     let description = html_to_text(&html_escape::decode_html_entities(str_field(
         posting, "content",
     )));
@@ -154,10 +154,12 @@ fn parse_posting(board: &str, posting: &Value) -> Option<Job> {
         url: url.to_string(),
         apply_url,
         location: location.to_string(),
-        remote: says_remote(&format!("{location} {title}")),
+        remote: says_remote(location) || title_says_remote(title),
         description,
         salary_min_monthly_usd: salary_min,
         salary_max_monthly_usd: salary_max,
+        // `first_published`, not `updated_at`: the latter moves with every edit, which made every
+        // posting of a board look recent to the staleness rule.
         posted_at: parse_iso(str_field(posting, "first_published"))
             .or_else(|| parse_iso(str_field(posting, "updated_at"))),
     })
@@ -180,6 +182,45 @@ mod tests {
             "content": "",
             "first_published": "2026-10-01T00:00:00-04:00"
         })
+    }
+
+    fn posting_titled(title: &str, location: &str) -> Value {
+        let mut posting = posting_at(location);
+        posting["title"] = json!(title);
+        posting
+    }
+
+    #[test]
+    fn a_title_says_remote_as_a_place_does_except_where_remote_is_not_about_the_place() {
+        for (title, location, remote) in [
+            // "remote" that names a field, or its opposite, is not about where the job is done
+            ("Remote Sensing Engineer", "Boulder, CO", false),
+            ("Senior Engineer - Remote Sensing", "Boulder, CO", false),
+            ("Non-Remote Engineer", "London", false),
+            ("Remote Sensing Engineer (Remote)", "Boulder, CO", true),
+            // a remote job says so in every shape, with or without a label
+            ("Remote Engineer", "Santiago", true),
+            ("Senior Remote Engineer", "Buenos Aires", true),
+            ("Fully Remote Backend Engineer", "Mexico City", true),
+            ("Remote \u{2013} Backend Engineer", "Santiago", true),
+            ("Home Based Support Engineer", "London", true),
+            // a doubt counts as remote, as it always did: the place decides the rest
+            ("Worldwide Account Manager", "London", true),
+            ("Senior Engineer (Remote)", "Santiago", true),
+            ("Staff Engineer [Remote, US]", "Austin", true),
+            ("Backend Engineer - Remote, LATAM", "Santiago", true),
+            ("Backend Engineer | Remote", "Santiago", true),
+            ("Backend Engineer, Remote", "Santiago", true),
+            ("Backend Engineer / Remote", "Santiago", true),
+            ("Backend Engineer: Remote", "Santiago", true),
+            ("Remote - Backend Engineer", "Santiago", true),
+            ("Remote: Backend Engineer", "Santiago", true),
+            ("Engineer", "Remote - LATAM", true),
+            ("Engineer", "Home based - Worldwide", true),
+        ] {
+            let job = parse_posting("acme", &posting_titled(title, location)).unwrap();
+            assert_eq!(job.remote, remote, "{title} / {location}");
+        }
     }
 
     #[test]
@@ -455,6 +496,6 @@ mod tests {
                 .to_string()
                 .starts_with("greenhouse:acme: ")
         );
-        assert!(result.errors[0].to_string().contains("jobs"));
+        assert!(result.errors[0].to_string().contains("`jobs` array"));
     }
 }

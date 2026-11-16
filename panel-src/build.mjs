@@ -11,18 +11,19 @@
 //                                                                   tools/serve.mjs can serve it under the real CSP)
 //   node build.mjs demo --publish     -> ../docs/demo/index.html   (same, nonces removed, English by default; opens from disk)
 //                                                                   and, beside the page, fonts/ with the five faces and fonts/licenses/
-//                                                                   with their licences: a static host serves the folder as it is
+//                                                                   with their licences, and favicon.svg (from assets/, declared by a relative
+//                                                                   <link rel="icon">): a static host serves the folder as it is
 //   add --out dist/<name>.html to a page or demo build to write to a file of your own (parallel agents)
 //   add --entry <file> to a page or demo build to bundle another entry than src/main.js (tests use a tiny one)
 //   The real page also prints its script by area (tools/budgets.mjs) and is refused when an area, or the whole script, grew past its margin over
 //   budgets.json; --update-budgets accepts the sizes as they are (commit the file with the reason), --budgets <file> reads another baseline.
 
 import { build, transform } from "esbuild";
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, statSync } from "node:fs";
+import { readFileSync, writeFileSync, copyFileSync, mkdirSync, readdirSync, existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { guard, publishedProblems } from "./guard.mjs";
+import { guard, publishedProblems, PUBLISHED_ICON_LINK } from "./guard.mjs";
 import { syncFonts } from "./tools/assets-sync.mjs";
 import { measure, compare, table, readBaseline, writeBaseline } from "./tools/budgets.mjs";
 
@@ -39,6 +40,7 @@ const entryArg = val("--entry") || "src/main.js";
 const outArg = val("--out");
 const outPath = (fallback) => (outArg ? path.resolve(here, outArg) : fallback);
 
+const ICON_FILE = "favicon.svg";   // the published demo's icon: assets/<ICON_FILE>, copied beside the page and named by PUBLISHED_ICON_LINK (guard.mjs)
 const kb = (n) => (n / 1024).toFixed(1) + " KB";
 const read = (p) => readFileSync(path.join(here, p), "utf8").replace(/\r\n/g, "\n");
 
@@ -214,11 +216,13 @@ async function buildDemo() {
   if (publish) {
     html = html.replaceAll(' nonce="__NONCE__"', "").replaceAll('url("__ASSETS__/', 'url("fonts/');
     html = put(html, '<meta charset="utf-8">', `<meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="${demoPolicy(html, runtimeStyles(demo))}">`);
+<meta http-equiv="Content-Security-Policy" content="${demoPolicy(html, runtimeStyles(demo))}">
+${PUBLISHED_ICON_LINK}`);
     refuse(publishedProblems(html), "published demo");
     refuse(syncFonts({ to: path.join(path.dirname(target), "fonts"), licenses: true }).problems, "font copy");
   }
   mkdirSync(path.dirname(target), { recursive: true });
+  if (publish) copyFileSync(path.join(here, "assets", ICON_FILE), path.join(path.dirname(target), ICON_FILE));   // after every check above: a refused build leaves no icon
   writeFileSync(target, html);
   console.log(`demo ${kb(html.length)} -> ${path.relative(process.cwd(), target)}`);
 }

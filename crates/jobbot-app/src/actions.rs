@@ -76,6 +76,23 @@ pub fn marks_from(state: State) -> Vec<State> {
         .collect()
 }
 
+/// The refusal for a key no application or posting has.
+fn not_found(key: &str) -> Outcome {
+    Outcome::refused(format!("No existe: {key}"))
+}
+
+/// What a failed move of the state machine becomes: a real database failure is an error, the rest
+/// is a refusal that names the `verb` ("resolver", "confirmar", "marcar") and the key.
+fn refusal_or_error(verb: &str, key: &str, error: StoreError) -> Result<Outcome> {
+    match error {
+        StoreError::Backend(_) => Err(error.into()),
+        other => Ok(Outcome::refused(format!(
+            "No se pudo {verb} {key}: {}",
+            explain(&other)
+        ))),
+    }
+}
+
 /// Spanish text for a refusal of the tracker. An application in `needs_gonza` gets a hint: it
 /// cannot be marked directly, the way out is `confirm` (it was sent) or `resolve` (back to the queue).
 pub fn explain(error: &StoreError) -> String {
@@ -110,7 +127,7 @@ pub fn explain(error: &StoreError) -> String {
 #[tracing::instrument(skip_all, fields(ok = Empty))]
 pub fn approve(tracker: &dyn Store, key: &str) -> Result<Outcome> {
     let Some(row) = tracker.get_application(key)? else {
-        return Ok(Outcome::refused(format!("No existe: {key}")));
+        return Ok(not_found(key));
     };
     if row.state == State::Prepared && row.screenshot_path.is_none() {
         return Ok(Outcome::refused(format!(
@@ -127,7 +144,7 @@ pub fn approve(tracker: &dyn Store, key: &str) -> Result<Outcome> {
 #[tracing::instrument(skip_all, fields(ok = Empty))]
 pub fn resolve(tracker: &dyn Store, key: &str, now: DateTime<Utc>) -> Result<Outcome> {
     let Some(row) = tracker.get_application(key)? else {
-        return Ok(Outcome::refused(format!("No existe: {key}")));
+        return Ok(not_found(key));
     };
     let (target, message) = if row.cv_path.is_some() {
         (State::Prepared, "De vuelta a la cola")
@@ -145,11 +162,7 @@ pub fn resolve(tracker: &dyn Store, key: &str, now: DateTime<Utc>) -> Result<Out
             Ok(Outcome::done(format!("{message}: {key}")))
         }
         // A database failure is a real error; the other variants are just "cannot resolve this one".
-        Err(e @ StoreError::Backend(_)) => Err(e.into()),
-        Err(e) => Ok(Outcome::refused(format!(
-            "No se pudo resolver {key}: {}",
-            explain(&e)
-        ))),
+        Err(e) => refusal_or_error("resolver", key, e),
     }
 }
 
@@ -158,7 +171,7 @@ pub fn resolve(tracker: &dyn Store, key: &str, now: DateTime<Utc>) -> Result<Out
 #[tracing::instrument(skip_all, fields(ok = Empty))]
 pub fn confirm(tracker: &dyn Store, key: &str, now: DateTime<Utc>) -> Result<Outcome> {
     let Some(row) = tracker.get_application(key)? else {
-        return Ok(Outcome::refused(format!("No existe: {key}")));
+        return Ok(not_found(key));
     };
     let sent_by_hand = row.needs_reason.as_deref().is_some_and(is_sent_by_hand);
     match tracker.transition(key, State::Submitted, Some("confirmada por Gonza"), now) {
@@ -171,11 +184,7 @@ pub fn confirm(tracker: &dyn Store, key: &str, now: DateTime<Utc>) -> Result<Out
             }
             Ok(Outcome::done(format!("Confirmada como enviada: {key}")))
         }
-        Err(e @ StoreError::Backend(_)) => Err(e.into()),
-        Err(e) => Ok(Outcome::refused(format!(
-            "No se pudo confirmar {key}: {}",
-            explain(&e)
-        ))),
+        Err(e) => refusal_or_error("confirmar", key, e),
     }
 }
 
@@ -214,7 +223,7 @@ pub fn parse_snooze_until(text: &str, now: DateTime<Utc>) -> Option<DateTime<Utc
 #[tracing::instrument(skip_all, fields(ok = Empty))]
 pub fn snooze(tracker: &dyn Store, key: &str, until: &str, now: DateTime<Utc>) -> Result<Outcome> {
     if tracker.get_application(key)?.is_none() {
-        return Ok(Outcome::refused(format!("No existe: {key}")));
+        return Ok(not_found(key));
     }
     let Some(at) = parse_snooze_until(until, now) else {
         return Ok(Outcome::refused(format!(
@@ -243,7 +252,7 @@ pub fn snooze(tracker: &dyn Store, key: &str, until: &str, now: DateTime<Utc>) -
 #[tracing::instrument(skip_all, fields(ok = Empty))]
 pub fn unsnooze(tracker: &dyn Store, key: &str) -> Result<Outcome> {
     let Some(row) = tracker.get_application(key)? else {
-        return Ok(Outcome::refused(format!("No existe: {key}")));
+        return Ok(not_found(key));
     };
     if row.snoozed_until.is_none() {
         return Ok(Outcome::refused(format!("No estaba pospuesta: {key}")));
@@ -266,7 +275,7 @@ pub fn mark(
     note: Option<&str>,
     now: DateTime<Utc>,
 ) -> Result<Outcome> {
-    record_mark(tracker, key, state_text, note, now, true)
+    record_mark(tracker, key, state_text, note, now, MarkSource::ByHand)
 }
 
 /// `mark` for an answer read from an email (`inbox`): Gonza did not make it, so there is nothing
@@ -278,7 +287,14 @@ pub(crate) fn mark_from_email(
     note: Option<&str>,
     at: DateTime<Utc>,
 ) -> Result<Outcome> {
-    record_mark(tracker, key, state_text, note, at, false)
+    record_mark(tracker, key, state_text, note, at, MarkSource::Email)
+}
+
+/// Who is recording an answer: Gonza (`mark`, which can be undone) or the inbox importer.
+#[derive(Clone, Copy)]
+enum MarkSource {
+    ByHand,
+    Email,
 }
 
 fn record_mark(
@@ -287,7 +303,7 @@ fn record_mark(
     state_text: &str,
     note: Option<&str>,
     now: DateTime<Utc>,
-    by_hand: bool,
+    source: MarkSource,
 ) -> Result<Outcome> {
     let Some(state) = State::parse(state_text).filter(|s| MARKABLE.contains(s)) else {
         let names: Vec<&str> = MARKABLE.iter().map(State::as_str).collect();
@@ -299,18 +315,13 @@ fn record_mark(
     let note = note
         .map(|text| clean(text, NOTE_MAX_CHARS))
         .filter(|text| !text.is_empty());
-    let moved = if by_hand {
-        tracker.mark_transition(key, state, note.as_deref(), now)
-    } else {
-        tracker.transition(key, state, note.as_deref(), now)
+    let moved = match source {
+        MarkSource::ByHand => tracker.mark_transition(key, state, note.as_deref(), now),
+        MarkSource::Email => tracker.transition(key, state, note.as_deref(), now),
     };
     match moved {
         Ok(()) => Ok(Outcome::done(format!("{key} → {state}"))),
-        Err(e @ StoreError::Backend(_)) => Err(e.into()),
-        Err(e) => Ok(Outcome::refused(format!(
-            "No se pudo marcar {key}: {}",
-            explain(&e)
-        ))),
+        Err(e) => refusal_or_error("marcar", key, e),
     }
 }
 
@@ -365,7 +376,7 @@ pub fn record(tracker: &dyn Store, spec: &RecordSpec, now: DateTime<Utc>) -> Res
     let key = match &spec.key {
         Some(key) => {
             if tracker.get_job(key)?.is_none() {
-                return Ok(Outcome::refused(format!("No existe: {key}")));
+                return Ok(not_found(key));
             }
             key.clone()
         }
@@ -381,9 +392,7 @@ pub fn record(tracker: &dyn Store, spec: &RecordSpec, now: DateTime<Utc>) -> Res
                 ));
             }
             let Some(url) = clean_link(&raw_url, RECORD_LINK_MAX_CHARS) else {
-                return Ok(Outcome::refused(format!(
-                    "El enlace no sirve: debe ser una dirección http:// o https://, sin espacios, de hasta {RECORD_LINK_MAX_CHARS} caracteres"
-                )));
+                return Ok(bad_link(RECORD_LINK_MAX_CHARS));
             };
             let base = link_base(&url);
             let id_source = if base.is_empty() { url.clone() } else { base };
@@ -417,7 +426,7 @@ pub fn record(tracker: &dyn Store, spec: &RecordSpec, now: DateTime<Utc>) -> Res
     };
     tracker.create_application(&key, now)?;
     let Some(row) = tracker.get_application(&key)? else {
-        return Ok(Outcome::refused(format!("No existe: {key}")));
+        return Ok(not_found(&key));
     };
     match row.state {
         State::Scored | State::Prepared | State::NeedsGonza => {}
@@ -495,6 +504,13 @@ fn clean_link(text: &str, max: usize) -> Option<String> {
     (matches!(url.scheme(), "http" | "https") && url.host_str().is_some()).then_some(link)
 }
 
+/// The refusal for an address `clean_link` rejected, with the limit it was held to.
+fn bad_link(max_chars: usize) -> Outcome {
+    Outcome::refused(format!(
+        "El enlace no sirve: debe ser una dirección http:// o https://, sin espacios, de hasta {max_chars} caracteres"
+    ))
+}
+
 /// Puts a task on Gonza's list (`jobbot task add`): the text is cleaned and cut at 300, the
 /// deadline must be a date the importer would accept, the posting must exist, and the same text
 /// for the same posting is not added while one like it is still open. Refusals change nothing.
@@ -531,9 +547,7 @@ pub fn task_add(tracker: &dyn Store, spec: &TaskSpec, now: DateTime<Utc>) -> Res
         Some(raw) => match clean_link(&raw, TASK_LINK_MAX_CHARS) {
             Some(link) => Some(link),
             None => {
-                return Ok(Outcome::refused(format!(
-                    "El enlace no sirve: debe ser una dirección http:// o https://, sin espacios, de hasta {TASK_LINK_MAX_CHARS} caracteres"
-                )));
+                return Ok(bad_link(TASK_LINK_MAX_CHARS));
             }
         },
         None => None,
@@ -568,6 +582,9 @@ pub fn task_done(tracker: &dyn Store, id: i64) -> Result<Outcome> {
     })
 }
 
+/// The best grade a drill card can get.
+const MAX_GRADE: u8 = 5;
+
 /// Records Gonza's grade (0 to 5) for a card of the drill. Anything else changes nothing.
 #[tracing::instrument(skip_all, fields(ok = Empty))]
 pub fn grade_card(
@@ -577,8 +594,10 @@ pub fn grade_card(
     grade: u8,
     now: DateTime<Utc>,
 ) -> Result<Outcome> {
-    if grade > 5 {
-        return Ok(Outcome::refused(format!("La nota va de 0 a 5, no {grade}")));
+    if grade > MAX_GRADE {
+        return Ok(Outcome::refused(format!(
+            "La nota va de 0 a {MAX_GRADE}, no {grade}"
+        )));
     }
     let Some(question) = questions.iter().find(|q| q.id == id) else {
         return Ok(Outcome::refused(format!("Pregunta desconocida: {id}")));

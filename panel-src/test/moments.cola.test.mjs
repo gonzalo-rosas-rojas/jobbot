@@ -1,15 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { setLang, setTimeZone, has } from "../src/i18n/index.js";
+import { setLang, setTimeZone, has, t } from "../src/i18n/index.js";
 import esCola from "../src/i18n/es/cola.js";
 import enCola from "../src/i18n/en/cola.js";
 import { model, nightFigures } from "../src/core/model.js";
 import {
-  colaView, engineOf, factorsOf, funnelOf, trustOf, pathOf, orderedProposals, keyShown,
+  colaView, engineOf, factorsOf, funnelOf, trustOf, pathOf, orderedProposals, batchNamesOf, batchQuestionOf,
   FACTOR_WEIGHTS, DEFAULT_BATCH_MIN, PENDING_SHOWN, MIN_BASE, ANSWER_KEY,
 } from "../src/moments/cola/view.js";
-import { KEYS } from "../src/ui/keys.js";
+import { KEYS, keyShown } from "../src/ui/keys.js";
 import { STOPS_META } from "../src/moments/registry.js";
 
 const fixture = (name) => JSON.parse(readFileSync(new URL(`./fixtures/snapshot.${name}.json`, import.meta.url), "utf8"));
@@ -38,21 +38,20 @@ test("A16: every figure of COLA is the snapshot's, so changing the snapshot chan
     const snap = fixture(name);
     const v = view(snap);
     const night = nightFigures(snap);
-    assert.equal(v.head.total || night.awaiting, night.awaiting, name);
+    if (!v.empty) assert.equal(v.head.of, "de " + Math.max(night.awaiting, orderedProposals(snap).length), name);
     assert.deepEqual(v.funnel.figs.map((f) => f.n), [snap.pipeline.seen, snap.pipeline.above, snap.pipeline.with_cv, snap.pipeline.complete, snap.pipeline.sent], name);
     if (snap.trust) assert.deepEqual([v.trust.reviewed, v.trust.total, v.trust.sent, v.trust.cap], [snap.trust.reviewed, snap.trust.first_n, snap.trust.sent_24h, snap.trust.cap], name);
     else assert.equal(v.trust, null, "without `trust` the band is not drawn");
   }
   const snap = withProposals(fixture("rich"), [proposal(1), proposal(2), proposal(3)]);
   const before = view(snap);
-  assert.equal(before.head.total, 3);
+  assert.equal(before.head.of, "de 3");
   snap.awaiting_approval.total += 4;
   snap.pipeline.seen += 40;
   snap.trust.reviewed += 1;
   snap.trust.sent_24h += 3;
   const after = view(snap);
-  assert.equal(after.head.total, 7, "a listing cut short still says how many wait");
-  assert.equal(after.head.of, "de 7");
+  assert.equal(after.head.of, "de 7", "a listing cut short still says how many wait");
   assert.equal(after.funnel.figs[0].n, before.funnel.figs[0].n + 40);
   assert.equal(after.trust.reviewed, before.trust.reviewed + 1);
   assert.equal(after.trust.sent, before.trust.sent + 3);
@@ -140,8 +139,8 @@ test("the lote: the picks are what reaches the threshold and can be approved, wi
   assert.equal(DEFAULT_BATCH_MIN, 85);
   assert.deepEqual(v.batch.picks, [{ key: "p:20", company: "Company 20", score: 92 }, { key: "p:19", company: "Company 19", score: 89 }], "a proposal with no approve action is not in the lote");
   assert.equal(v.batch.label, "Aprobar las de 85 o más (2)");
-  assert.equal(v.batch.names, "Company 20 92 · Company 19 89");
-  assert.equal(v.batch.ask, "¿aprobar 2?");
+  assert.equal(batchNamesOf(v.batch.picks), "Company 20 92 · Company 19 89", "the names the confirmation draws from the picks");
+  assert.equal(batchQuestionOf(v.batch.picks), "¿aprobar 2?", "the question the confirmation draws from the picks");
   assert.equal(v.batch.note, "al llegar a 5 aprobadas, jobbot envía solo", "he has 3 reviewed and the lote adds 2: it ends the review phase, and says so");
   const high = view(snap, { batchMin: 90 });
   assert.deepEqual(high.batch.picks.map((p) => p.key), ["p:20"]);
@@ -152,7 +151,7 @@ test("the lote: the picks are what reaches the threshold and can be approved, wi
   const more = withProposals(fixture("rich"), Array.from({ length: 7 }, (_, i) => proposal(i + 1, { score: 90 + (i % 5) })));
   const big = view(more);
   assert.equal(big.batch.count, 7);
-  assert.match(big.batch.names, / y 3 más$/, "the confirmation names four and counts the rest");
+  assert.match(batchNamesOf(big.batch.picks), / y 3 más$/, "the confirmation names four and counts the rest");
   assert.equal(big.batch.note, "al llegar a 5 aprobadas, jobbot envía solo", "the lote crosses the end of the review phase: it says so");
 });
 

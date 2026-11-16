@@ -88,7 +88,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn seed_bank_is_complete_and_unique() {
+    fn seed_bank_covers_the_expected_topics() {
         let seed = parse_questions("questions.toml", QUESTIONS).unwrap();
         assert_eq!(seed.len(), 18);
         let topics: HashSet<&str> = seed.iter().map(|q| q.topic.as_str()).collect();
@@ -108,7 +108,10 @@ mod tests {
             seed.iter()
                 .all(|q| !q.question.is_empty() && !q.answer.is_empty())
         );
+    }
 
+    #[test]
+    fn ids_are_unique_across_the_bank() {
         let all = load_questions().unwrap();
         let ids: HashSet<&str> = all.iter().map(|q| q.id.as_str()).collect();
         assert_eq!(ids.len(), all.len(), "ids are unique across both files");

@@ -1,16 +1,23 @@
 //! SM-2 spaced repetition (SuperMemo 2), the scheduling rule behind the interview drill.
-//! The artifact panel runs the same rule in JavaScript; both read `tests/fixtures/sm2_vectors.json`.
+//! `tests/sm2_vectors.rs` checks it against `tests/fixtures/sm2_vectors.json`; any other
+//! implementation of the rule (the panel has none today) must read the same file.
 
 /// The longest interval a card is ever given: ten years. Without a cap a card graded well over and
 /// over multiplies its interval into a number of days no date can hold.
 pub const MAX_INTERVAL_DAYS: i64 = 3650;
+
+/// Ease factor of a card that has never been graded (SM-2's starting value).
+pub const INITIAL_EASE: f64 = 2.5;
+
+/// The ease factor never drops below this (SM-2's floor).
+const MIN_EASE: f64 = 1.3;
 
 /// One SM-2 step. Takes the card's ease factor, interval in days and number of successful
 /// repetitions in a row, plus the grade Gonza gave himself (0 to 5), and returns the new
 /// `(ease, interval, reps)`.
 ///
 /// - A grade below 3 is a lapse: the card comes back tomorrow, the streak restarts, the ease stays.
-/// - Otherwise the ease moves with the grade (never below 1.3) and the interval is 1 day after the
+/// - Otherwise the ease moves with the grade (never below `MIN_EASE`, 1.3) and the interval is 1 day after the
 ///   first success, 6 after the second, and `interval * ease` rounded half up after that.
 ///
 /// The interval never exceeds `MAX_INTERVAL_DAYS`.
@@ -21,7 +28,8 @@ pub fn sm2(ease: f64, interval: i64, reps: i64, grade: u8) -> (f64, i64, i64) {
         return (ease, 1, 0);
     }
     let miss = f64::from(5u8.saturating_sub(grade));
-    let ease = (ease + 0.1 - miss * (0.08 + miss * 0.02)).max(1.3);
+    // SuperMemo 2: EF' = EF + (0.1 - m * (0.08 + m * 0.02)), with m = 5 - grade.
+    let ease = (ease + 0.1 - miss * (0.08 + miss * 0.02)).max(MIN_EASE);
     let reps = reps + 1;
     let interval = match reps {
         1 => 1,
@@ -39,14 +47,17 @@ mod tests {
 
     #[test]
     fn sm2_intervals_and_reset() {
-        let (ease, interval, reps) = sm2(2.5, 0, 0, 5);
+        let (ease, interval, reps) = sm2(INITIAL_EASE, 0, 0, 5);
         assert_eq!((interval, reps), (1, 1));
         let (ease, interval, reps) = sm2(ease, interval, reps, 5);
         assert_eq!((interval, reps), (6, 2));
         let (kept_ease, interval, reps) = sm2(ease, interval, reps, 2);
         assert_eq!((interval, reps), (1, 0));
         assert_eq!(kept_ease, ease, "a lapse keeps the ease");
-        assert!(sm2(1.3, 1, 1, 3).0 >= 1.3, "the ease never drops below 1.3");
+        assert!(
+            sm2(MIN_EASE, 1, 1, 3).0 >= MIN_EASE,
+            "the ease never drops below the floor"
+        );
     }
 
     #[test]

@@ -13,15 +13,17 @@ import { t } from "../i18n/index.js";
 import { KEYS } from "./keys.js";
 
 const EDGE = 12;
+const GAP = 6; // between the box and what it sits beside
+const NO_ANCHOR = { left: 80, bottom: 140, top: 100 }; // where the box goes when it has nothing to sit beside: near the top left of the sheet
 
 const ESC = KEYS.find((k) => k.id === "close").display;
 
 export function createMenu({ sound, root = () => document.body }) {
   let el = null;
   let origin = null;
-  let done = null;
+  let onClose = null; // what the opener wants to hear when the box closes: onClose(why)
   let items = [];
-  let items$ = [];
+  let itemButtons = [];
 
   const isOpen = () => el !== null;
 
@@ -29,16 +31,16 @@ export function createMenu({ sound, root = () => document.body }) {
     if (!el) return;
     const box = el;
     const back = origin;
-    const finish = done;
+    const heard = onClose;
     el = null;
     origin = null;
-    done = null;
+    onClose = null;
     items = [];
-    items$ = [];
+    itemButtons = [];
     document.removeEventListener("pointerdown", outside, true);
     box.remove();
     if (back && back.isConnected) back.focus({ preventScroll: true });
-    if (finish) finish(why);
+    if (heard) heard(why);
   }
 
   function outside(e) {
@@ -52,10 +54,11 @@ export function createMenu({ sound, root = () => document.body }) {
   }
 
   function move(step) {
-    if (items$.length === 0) return;
-    const at = items$.findIndex((b) => b === document.activeElement);
-    const next = (at + step + items$.length) % items$.length;
-    items$[next].focus({ preventScroll: true });
+    if (itemButtons.length === 0) return;
+    const at = itemButtons.findIndex((b) => b === document.activeElement);
+    const last = itemButtons.length - 1;
+    const next = at < 0 ? (step > 0 ? 0 : last) : (at + step + itemButtons.length) % itemButtons.length; // with no item focused, down is the first and up the last
+    itemButtons[next].focus({ preventScroll: true });
     sound.play("step");
   }
 
@@ -83,28 +86,30 @@ export function createMenu({ sound, root = () => document.body }) {
 
   /** Puts the box beside `from` (below it, left aligned, or above it when there is no room), always inside the window, even when `from` is not; with no `from`, near the top left of the sheet. */
   function place(box, from) {
-    const r = from ? from.getBoundingClientRect() : { left: 80, bottom: 140, top: 100 };
+    const r = from ? from.getBoundingClientRect() : NO_ANCHOR;
     const w = box.offsetWidth;
     const hh = box.offsetHeight;
     const left = Math.min(Math.max(EDGE, r.left), window.innerWidth - w - EDGE);
-    let top = r.bottom + 6;
-    if (top + hh > window.innerHeight - EDGE) top = r.top - hh - 6;
+    let top = r.bottom + GAP;
+    if (top + hh > window.innerHeight - EDGE) top = r.top - hh - GAP;
     top = Math.min(Math.max(EDGE, top), Math.max(EDGE, window.innerHeight - hh - EDGE)); // a row below the fold must not take the box with it
     box.style.left = Math.round(left) + "px";
     box.style.top = Math.round(top) + "px";
   }
 
-  function open({ title, items: list = [], body = null, from = null, onClose = null }) {
+  function open({ title, items: list = [], body = null, from = null, onClose: whenClosed = null }) {
     if (el) close("cancel");
     origin = from;
-    done = onClose;
+    onClose = whenClosed;
     items = list;
     const buttons = list.map((item) => h("button", { class: "menu-item", type: "button", role: "menuitem", "data-key": item.key, onclick: () => pick(item) },
       h("kbd", { class: "k" }, item.key), h("span", { class: "menu-label" }, item.label), item.hint ? h("span", { class: "menu-hint label" }, item.hint) : null));
-    items$ = buttons;
-    const box = h("div", { class: "menu", role: body ? "dialog" : "menu", "aria-label": title, "data-local-keys": "" },
+    itemButtons = buttons;
+    // The box holds a title and a foot besides the items, which a `menu` may not: the box is a labelled group (a dialog with a form), the
+    // list is the menu and its <li> are `none`, so each item is a direct child of the menu for a screen reader.
+    const box = h("div", { class: "menu", role: body ? "dialog" : "group", "aria-label": title, "data-local-keys": "" },
       h("p", { class: "menu-title label" }, title),
-      body || h("ul", { class: "menu-items" }, ...buttons.map((b) => h("li", {}, b))),
+      body || h("ul", { class: "menu-items", role: "menu", "aria-label": title }, ...buttons.map((b) => h("li", { role: "none" }, b))),
       h("p", { class: "menu-foot label" }, h("kbd", { class: "k" }, ESC), " ", t("menu.close")));
     box.addEventListener("keydown", onKey);
     el = box;

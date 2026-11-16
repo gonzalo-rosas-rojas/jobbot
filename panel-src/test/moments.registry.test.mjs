@@ -30,6 +30,9 @@ test("the registry has one moment for each of the six stops, in stop order, with
   }
   assert.equal(momentOf("nope"), null);
   assert.equal(momentOf(undefined), null);
+  assert.equal(momentOf("toString"), null, "a name of Object.prototype is not a moment");
+  assert.equal(momentOf("constructor"), null);
+  assert.equal(momentOf("__proto__"), null);
   assert.equal(typeof momentOf("hoy").onKey, "function", "HOY takes the row keys");
 });
 

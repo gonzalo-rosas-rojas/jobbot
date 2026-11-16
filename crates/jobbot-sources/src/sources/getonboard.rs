@@ -6,6 +6,7 @@
 use crate::http::Http;
 use anyhow::Context;
 use async_trait::async_trait;
+use serde::Deserialize;
 use serde_json::Value;
 
 use super::Source;
@@ -24,6 +25,25 @@ const DESCRIPTION_KEYS: [&str; 6] = [
     "benefits",
     "perks",
 ];
+
+/// The `[getonboard]` table of `profile/sources.toml`.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct GetOnBoardConfig {
+    pub categories: Vec<String>,
+    pub max_pages: u32,
+    pub per_page: u32,
+}
+
+impl Default for GetOnBoardConfig {
+    fn default() -> Self {
+        Self {
+            categories: vec!["programming".to_string()],
+            max_pages: 3,
+            per_page: 50,
+        }
+    }
+}
 
 pub struct GetOnBoardSource {
     http: Http,
@@ -211,17 +231,23 @@ mod tests {
         })
     }
 
+    /// The `page` query parameter of a request, when it has one.
+    fn page_param(request: &Request) -> Option<String> {
+        request
+            .url
+            .query_pairs()
+            .find(|(key, _)| key == "page")
+            .map(|(_, value)| value.into_owned())
+    }
+
     /// Answers every request for `JOBS_PATH` with the page body that matches its `page` parameter.
     async fn serve_pages(total_pages: u32) -> MockServer {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path(JOBS_PATH))
             .respond_with(move |request: &Request| {
-                let page = request
-                    .url
-                    .query_pairs()
-                    .find(|(key, _)| key == "page")
-                    .and_then(|(_, value)| value.parse().ok())
+                let page = page_param(request)
+                    .and_then(|value| value.parse().ok())
                     .unwrap_or(1);
                 ResponseTemplate::new(200).set_body_json(page_body(page, total_pages))
             })
@@ -236,13 +262,7 @@ mod tests {
             .await
             .unwrap()
             .iter()
-            .filter_map(|request| {
-                request
-                    .url
-                    .query_pairs()
-                    .find(|(key, _)| key == "page")
-                    .map(|(_, value)| value.into_owned())
-            })
+            .filter_map(page_param)
             .collect()
     }
 

@@ -1,5 +1,5 @@
 // test/helpers/sistema-core.mjs: the snapshots SISTEMA is tested and photographed on, built from the three fixtures that are handed in (no file is
-// read here, so the browser lab can use it too). They set what the Rust writes (crates/jobbot-panel/src/snapshot.rs, src/cli.rs `StepLog`) and the fixtures do
+// read here, so the browser lab can use it too). They set what the Rust writes (crates/jobbot-panel/src/snapshot/controls.rs, and `StepLog` of crates/jobbot-app/src/reporting/status.rs) and the fixtures do
 // not carry: `controls.last_run_result` and `controls.last_run_steps`, the three values of `engine`, a scheduled task that is null / absent /
 // registered, an account that is ok or is not.
 //

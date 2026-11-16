@@ -4,7 +4,8 @@
 // Moving the cursor may scroll the LIST the row is in (an element with data-lenis-prevent), never the page: scrolling the page
 // would move the camera, and the camera belongs to the scene engine alone.
 
-const rowKey = (el) => (el.dataset.card ? "c:" + el.dataset.card : "t:" + el.dataset.task);
+const keyOfJob = (job) => "c:" + job;
+const rowKey = (el) => (el.dataset.card ? keyOfJob(el.dataset.card) : "t:" + el.dataset.task);
 
 /** createCursor({ view, sound, reduced, root }) -> { key, set(key), follow(job, origin), clear(), move(step), apply(), rows(), current(), jobOf(row), reveal(row) } */
 export function createCursor({ view, sound, reduced = () => false, root = () => document.getElementById("app") }) {
@@ -19,6 +20,7 @@ export function createCursor({ view, sound, reduced = () => false, root = () => 
     });
   }
 
+  /** Marks the row `view.cursor` names; a key whose row is not drawn any more is dropped, so the cursor never points at nothing. */
   function apply() {
     const host = root();
     if (!host) return;
@@ -61,11 +63,17 @@ export function createCursor({ view, sound, reduced = () => false, root = () => 
    * id a moment gives its row in `data-row`): when that is the row the cursor is on, the cursor stays, because a task's row stands for its
    * application without carrying the application's key.
    */
+  function openerOf(origin) {
+    if (origin == null) return null;
+    if (typeof origin === "string") return rows().find((row) => row.dataset.row === origin) || null;
+    return origin;
+  }
+
   function follow(job, origin = null) {
     const here = current();
-    const opener = origin == null ? null : typeof origin === "string" ? rows().find((row) => row.dataset.row === origin) || null : origin;
+    const opener = openerOf(origin);
     const fromHere = !!here && !!opener && (opener === here || (typeof here.contains === "function" && here.contains(opener)));
-    if (!fromHere) { view.cursor = "c:" + job; apply(); }
+    if (!fromHere) { view.cursor = keyOfJob(job); apply(); }
     const row = current();
     if (row) reveal(row);
   }

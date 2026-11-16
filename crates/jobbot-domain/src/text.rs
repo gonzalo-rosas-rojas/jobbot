@@ -25,6 +25,9 @@ const BLOCK_TAGS: &[&str] = &[
 /// Tags whose content is code or styling, never visible text.
 const SKIPPED_TAGS: &[&str] = &["script", "style"];
 
+/// The full-width forms U+FF01..U+FF5E sit this far above their ASCII twins.
+const FULLWIDTH_OFFSET: u32 = 0xFEE0;
+
 /// `text` as a person reads it, for matching: without the invisible format characters (a soft
 /// hyphen or a zero-width space inside a word does not split it) and with full-width letters,
 /// digits and spaces as their ASCII forms.
@@ -32,7 +35,7 @@ pub fn as_read(text: &str) -> String {
     crate::outbound::strip_invisible(text)
         .chars()
         .map(|c| match c {
-            '\u{FF01}'..='\u{FF5E}' => char::from_u32(c as u32 - 0xFEE0).unwrap_or(c),
+            '\u{FF01}'..='\u{FF5E}' => char::from_u32(c as u32 - FULLWIDTH_OFFSET).unwrap_or(c),
             '\u{3000}' => ' ',
             other => other,
         })
@@ -176,8 +179,9 @@ fn is_word_char(c: char) -> bool {
     c.is_ascii_lowercase() || c.is_ascii_digit()
 }
 
-/// Whole-word search. `text` and `term` must already be lowercase. A match needs a
-/// non-alphanumeric character (or an edge) on both sides.
+/// Whole-word search. `text` and `term` must already be lowercase. A match needs a character
+/// that is not an ASCII lowercase letter or digit (or an edge) on both sides, so a letter outside
+/// ASCII (an accented one) counts as a boundary.
 pub fn contains_word_lc(text: &str, term: &str) -> bool {
     if term.is_empty() {
         return false;
