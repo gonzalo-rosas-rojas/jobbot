@@ -1,15 +1,10 @@
 //! Tests of the GET routes that `route` answers with what another module builds: the explorer of
 //! postings (`jobs.rs`) and the snapshot.
 
-use super::support_tests::{guard, json_of, request};
+use super::support_tests::{api_get, guard, json_of, request};
 use super::*;
-use crate::fixtures::{add, panel};
+use crate::fixtures::{add, panel, task};
 use jobbot_domain::state::State;
-
-/// An authenticated `GET` of an API route.
-fn api_get(p: &Panel, target: &str) -> Reply {
-    handle(p, &guard(), &request("GET", target, ""))
-}
 
 #[test]
 fn the_explorer_pages_and_filters_the_jobs() {
@@ -67,19 +62,7 @@ fn the_explorer_refuses_queries_it_does_not_understand() {
 #[test]
 fn the_snapshot_carries_today_and_unknown_task_routes_are_404() {
     let (p, _d) = panel();
-    p.tracker
-        .add_task(
-            &jobbot_app::ports::store::NewTask {
-                job_key: None,
-                kind: "action_required".into(),
-                text: "Responder".into(),
-                due_at: None,
-                source_message_id: None,
-                link: None,
-            },
-            *jobbot_testkit::NOW,
-        )
-        .unwrap();
+    task(&p, "Responder", None, None);
     let snapshot = json_of(&handle(&p, &guard(), &request("GET", "/api/snapshot", "")));
     assert_eq!(snapshot["today"]["tasks"][0]["text"], "Responder");
     assert_eq!(snapshot["today"]["emails_total"], 0);

@@ -99,15 +99,15 @@ pub(crate) mod fixtures {
 
     use super::*;
     use jobbot_domain::state::State;
-    use jobbot_testkit::{NOW, PrepStore, Tracker, make_job_with, real_paths};
+    use jobbot_testkit::{NOW, PrepStore, Tracker, make_job_with};
 
-    /// A panel over in-memory databases with the clock stopped at `NOW`. Its `data/` and `STOP`
-    /// live in the returned temp folder; its `profile/` is the shipped one (`schedule.toml`,
-    /// `claude.toml`).
+    /// A panel over in-memory databases with the clock stopped at `NOW`. Its `data/`, `STOP` and
+    /// `profile/` live in the returned temp folder, and `profile/` starts empty: a test that needs
+    /// a criteria, a schedule or a Claude setup writes its own file there (see `profile_with` in
+    /// `snapshot/support_tests.rs`), so it never reads the user's own files.
     pub fn panel() -> (Panel, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
-        let mut paths = Paths::new(dir.path());
-        paths.profile_dir = real_paths().profile_dir;
+        let paths = jobbot_testkit::paths_with_empty_profile(dir.path());
         let panel = Panel::new(
             paths,
             Tracker::in_memory().unwrap(),
@@ -146,6 +146,29 @@ pub(crate) mod fixtures {
                 .unwrap();
         }
         job.key()
+    }
+
+    /// Adds an open "action required" task, optionally due at `due` and about the job `job_key`.
+    pub fn task(
+        panel: &Panel,
+        text: &str,
+        due: Option<chrono::DateTime<chrono::Utc>>,
+        job_key: Option<&str>,
+    ) {
+        panel
+            .tracker
+            .add_task(
+                &jobbot_app::ports::store::NewTask {
+                    job_key: job_key.map(str::to_string),
+                    kind: "action_required".into(),
+                    text: text.into(),
+                    due_at: due,
+                    source_message_id: None,
+                    link: None,
+                },
+                *NOW,
+            )
+            .unwrap();
     }
 
     /// Gives application `key` a saved capture of its filled form: a real file under `data/`, so

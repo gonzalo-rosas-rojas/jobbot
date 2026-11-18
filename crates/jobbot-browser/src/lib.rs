@@ -37,6 +37,12 @@ mod test_support {
             .join("fixtures")
     }
 
+    /// The answer bank the repo ships (`profile/answers.toml`), read like the application reads it.
+    pub fn shipped_bank() -> AnswerBank {
+        load_bank(&workspace_root().join("profile").join("answers.toml"))
+            .expect("the shipped answer bank loads")
+    }
+
     /// An answer bank file, read like the application reads `profile/answers.toml`.
     pub fn load_bank(path: &Path) -> anyhow::Result<AnswerBank> {
         Ok(parse_answers(&std::fs::read_to_string(path)?)?)

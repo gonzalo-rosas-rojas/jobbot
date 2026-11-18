@@ -1,8 +1,7 @@
-//! What the HTTP client remembers between runs (resting hosts, kept pages) and the `meta`
-//! key/value table the run settings live in.
+//! What the HTTP client remembers between runs: resting hosts and kept pages.
 
 use chrono::{DateTime, TimeDelta, Utc};
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use super::{Result, StoredPage, Tracker, from_text, to_text};
 
@@ -10,33 +9,6 @@ use super::{Result, StoredPage, Tracker, from_text, to_text};
 const PAGE_KEEP: TimeDelta = TimeDelta::days(30);
 
 impl Tracker {
-    /// A small setting of the run itself, for example `last_discover_at`.
-    pub fn get_meta(&self, key: &str) -> Result<Option<String>> {
-        let conn = self.lock();
-        Ok(conn
-            .query_row("SELECT value FROM meta WHERE key = ?1", [key], |row| {
-                row.get(0)
-            })
-            .optional()?)
-    }
-
-    pub fn set_meta(&self, key: &str, value: &str) -> Result<()> {
-        let conn = self.lock();
-        conn.execute(
-            "INSERT INTO meta (key, value) VALUES (?1, ?2) \
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            params![key, value],
-        )?;
-        Ok(())
-    }
-
-    /// Removes `key` from `meta`; one that is not there is fine.
-    pub fn delete_meta(&self, key: &str) -> Result<()> {
-        let conn = self.lock();
-        conn.execute("DELETE FROM meta WHERE key = ?1", params![key])?;
-        Ok(())
-    }
-
     // ---- what the job boards' GETs leave for the next run
 
     /// The hosts whose rest ends after `now`, with the end of each, by host. The rests that are
@@ -96,12 +68,18 @@ impl Tracker {
              used_at = excluded.used_at",
             params![url, page.etag, page.last_modified, page.body, to_text(now)],
         )?;
-        conn.execute(
-            "DELETE FROM http_pages WHERE used_at < ?1",
-            [to_text(now - PAGE_KEEP)],
-        )?;
+        forget_stale_pages(&conn, now)?;
         Ok(())
     }
+}
+
+/// Drops the pages nobody asked for in `PAGE_KEEP`.
+fn forget_stale_pages(conn: &Connection, now: DateTime<Utc>) -> rusqlite::Result<()> {
+    conn.execute(
+        "DELETE FROM http_pages WHERE used_at < ?1",
+        [to_text(now - PAGE_KEEP)],
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -214,31 +192,5 @@ mod tests {
                 .unwrap()
                 .is_some()
         );
-    }
-
-    #[test]
-    fn meta_round_trip() {
-        let t = Tracker::in_memory().unwrap();
-        assert_eq!(t.get_meta("last_discover_at").unwrap(), None);
-        t.set_meta("last_discover_at", "2026-10-01T12:00:00Z")
-            .unwrap();
-        t.set_meta("last_discover_at", "2026-10-01T13:00:00Z")
-            .unwrap();
-        assert_eq!(
-            t.get_meta("last_discover_at").unwrap().as_deref(),
-            Some("2026-10-01T13:00:00Z")
-        );
-    }
-
-    #[test]
-    fn a_meta_value_can_be_deleted_and_deleting_what_is_not_there_is_fine() {
-        let t = Tracker::in_memory().unwrap();
-        t.set_meta("auto_approve_min", "90").unwrap();
-        t.set_meta("last_run_at", "x").unwrap();
-        t.delete_meta("auto_approve_min").unwrap();
-        assert_eq!(t.get_meta("auto_approve_min").unwrap(), None);
-        assert_eq!(t.get_meta("last_run_at").unwrap().as_deref(), Some("x"));
-        t.delete_meta("auto_approve_min").unwrap();
-        t.delete_meta("never_there").unwrap();
     }
 }

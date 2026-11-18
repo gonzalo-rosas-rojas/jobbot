@@ -1,5 +1,5 @@
-//! The `pipeline` use cases against the real SQLite stores, the fake Claude and the shipped
-//! profile (moved from the root crate's `src/pipeline.rs`).
+//! The `pipeline` use cases against the real SQLite stores and the fake Claude, with made-up
+//! rules (moved from the root crate's `src/pipeline.rs`).
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -218,7 +218,8 @@ async fn refresh_renders_waiting_cvs_again_keeps_the_old_ones_and_never_touches_
             places: &places,
             to: Some("Australia"),
         },
-        *NOW,
+        // A fraction of a second that must not reach the name of the copy, nor round it up.
+        *NOW + TimeDelta::nanoseconds(999_999_999),
     )
     .await
     .unwrap();
@@ -246,6 +247,12 @@ async fn refresh_renders_waiting_cvs_again_keeps_the_old_ones_and_never_touches_
     assert!(
         kept.iter()
             .all(|name| name.ends_with(".pdf") && name.contains('T'))
+    );
+    // The copy is named with the UTC second, `YYYYMMDDTHHMMSSZ`, the fraction cut and not rounded.
+    assert!(
+        kept.iter()
+            .all(|name| name.ends_with(".20261001T120000Z.pdf")),
+        "{kept:?}"
     );
     // No state moved.
     assert_eq!(env.state(&sydney.key()), State::Prepared);
@@ -292,7 +299,6 @@ async fn only_scored_jobs_are_prepared_and_a_second_run_finds_nothing() {
 // ---- submit_all ----
 
 use chrono::TimeDelta;
-use jobbot_app::profile::{load_criteria, load_exclusions};
 use jobbot_domain::form::{SubmitMode, SubmitResult};
 
 /// Test double for `FormFiller`: records `(job key, mode)` for every call and answers with a
@@ -346,16 +352,10 @@ impl FormFiller for FakeFiller {
     }
 }
 fn criteria() -> Criteria {
-    let path = jobbot_testkit::real_paths()
-        .profile_dir
-        .join("criteria.toml");
-    load_criteria(&path).unwrap()
+    jobbot_testkit::profile::sample_criteria()
 }
 fn exclusions() -> Exclusions {
-    let path = jobbot_testkit::real_paths()
-        .profile_dir
-        .join("exclusions.toml");
-    load_exclusions(&path).unwrap()
+    jobbot_testkit::profile::sample_exclusions()
 }
 /// Job number `n`: key `test:n`, its own company, so the 90-day company cooldown never applies.
 fn numbered(n: u32) -> Job {
@@ -662,7 +662,7 @@ async fn manual_only_platform_goes_to_gonza() {
 #[tokio::test]
 async fn excluded_company_is_withdrawn() {
     let env = Env::new();
-    let job = make_job_with(|j| j.company = "Tidewater Systems".into());
+    let job = make_job_with(|j| j.company = exclusions().names[0].clone());
     env.prepared(&job, 90.0);
     let filler = FakeFiller::new();
     let crit = Criteria {

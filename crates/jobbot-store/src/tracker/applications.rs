@@ -3,12 +3,20 @@
 use std::path::Path;
 
 use chrono::{DateTime, TimeDelta, Utc};
-use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params};
+use rusqlite::types::Value;
+use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params, params_from_iter};
 
 use super::{
     ApplicationRow, Result, State, Tracker, TrackerError, from_text, optional_from_text,
-    state_from_text, to_text,
+    placeholders, state_from_text, to_text,
 };
+
+/// The states of an application that is not finished and was never sent: the ones
+/// `unsent_applications` reads.
+const UNSENT_STATES: [State; 3] = [State::Scored, State::Prepared, State::NeedsGonza];
+
+/// The states of an application waiting in the queue: the ones `top_scored` reads.
+const QUEUED_STATES: [State; 2] = [State::Scored, State::Prepared];
 
 /// `state_since` is the latest event into the row's current state: an application that went to
 /// `needs_gonza`, back to the queue and to `needs_gonza` again has waited since the second time.
@@ -100,16 +108,30 @@ impl Tracker {
         Ok(rows.pop())
     }
 
-    fn update_column(&self, column: &str, value: Option<String>, job_key: &str) -> Result<()> {
+    /// `UPDATE applications SET <set> WHERE job_key = <job_key>`, where `<set>` uses `?1..` for
+    /// `params` and the key is bound as the parameter after them; no such application is an error.
+    fn update_application(
+        &self,
+        set: &str,
+        params: &[&dyn rusqlite::ToSql],
+        job_key: &str,
+    ) -> Result<()> {
+        let key_slot = params.len() + 1;
+        let mut all = params.to_vec();
+        all.push(&job_key);
         let conn = self.lock();
         let changed = conn.execute(
-            &format!("UPDATE applications SET {column} = ?1 WHERE job_key = ?2"),
-            params![value, job_key],
+            &format!("UPDATE applications SET {set} WHERE job_key = ?{key_slot}"),
+            all.as_slice(),
         )?;
         if changed == 0 {
             return Err(TrackerError::UnknownKey(job_key.to_string()));
         }
         Ok(())
+    }
+
+    fn update_column(&self, column: &str, value: Option<String>, job_key: &str) -> Result<()> {
+        self.update_application(&format!("{column} = ?1"), &[&value], job_key)
     }
 
     pub fn set_cv_path(&self, job_key: &str, path: &Path) -> Result<()> {
@@ -138,15 +160,7 @@ impl Tracker {
     /// For `resolve`: Gonza decided the form must be filled and sent again, so the screenshot of
     /// the earlier try (the next run takes a fresh one) and the attempt stamp are forgotten.
     pub fn clear_for_retry(&self, job_key: &str) -> Result<()> {
-        let conn = self.lock();
-        let changed = conn.execute(
-            "UPDATE applications SET screenshot_path = NULL, attempted_at = NULL WHERE job_key = ?1",
-            [job_key],
-        )?;
-        if changed == 0 {
-            return Err(TrackerError::UnknownKey(job_key.to_string()));
-        }
-        Ok(())
+        self.update_application("screenshot_path = NULL, attempted_at = NULL", &[], job_key)
     }
 
     /// Puts an application off until `until` (`None` brings it back). The row keeps its state:
@@ -157,15 +171,7 @@ impl Tracker {
 
     /// Marks an application as reviewed and approved by Gonza.
     pub fn approve(&self, job_key: &str) -> Result<()> {
-        let conn = self.lock();
-        let changed = conn.execute(
-            "UPDATE applications SET approved = 1 WHERE job_key = ?1",
-            [job_key],
-        )?;
-        if changed == 0 {
-            return Err(TrackerError::UnknownKey(job_key.to_string()));
-        }
-        Ok(())
+        self.update_application("approved = 1", &[], job_key)
     }
 
     // ---- queries
@@ -210,9 +216,12 @@ impl Tracker {
         let conn = self.lock();
         Ok(query_applications(
             &conn,
-            "WHERE a.state IN ('scored', 'prepared', 'needs_gonza') \
-             AND a.submitted_at IS NULL AND a.attempted_at IS NULL ORDER BY a.job_key",
-            [],
+            &format!(
+                "WHERE a.state IN ({}) \
+                 AND a.submitted_at IS NULL AND a.attempted_at IS NULL ORDER BY a.job_key",
+                placeholders(UNSENT_STATES.len())
+            ),
+            params_from_iter(UNSENT_STATES.iter().map(State::as_str)),
         )?)
     }
 
@@ -222,8 +231,16 @@ impl Tracker {
         let limit = i64::try_from(n).unwrap_or(i64::MAX);
         Ok(query_applications(
             &conn,
-            "WHERE a.state IN ('scored', 'prepared') ORDER BY j.score DESC, a.job_key LIMIT ?1",
-            [limit],
+            &format!(
+                "WHERE a.state IN ({}) ORDER BY j.score DESC, a.job_key LIMIT ?",
+                placeholders(QUEUED_STATES.len())
+            ),
+            params_from_iter(
+                QUEUED_STATES
+                    .iter()
+                    .map(|state| Value::from(state.as_str().to_string()))
+                    .chain(std::iter::once(Value::from(limit))),
+            ),
         )?)
     }
 
@@ -359,16 +376,23 @@ mod tests {
     }
 
     #[test]
-    fn daily_count_and_company_cooldown() {
+    fn submitted_on_counts_the_utc_day() {
         let now = *NOW;
         let t = Tracker::in_memory().unwrap();
-        submit(&t, &make_job(), false);
+        submit(&t, &make_job());
         assert_eq!(t.submitted_on(now.date_naive()).unwrap(), 1);
         assert_eq!(
             t.submitted_on(now.date_naive() + TimeDelta::days(1))
                 .unwrap(),
             0
         );
+    }
+
+    #[test]
+    fn company_cooldown_lasts_the_window() {
+        let now = *NOW;
+        let t = Tracker::in_memory().unwrap();
+        submit(&t, &make_job());
         assert!(
             t.company_in_cooldown("acme ai", 90, now + TimeDelta::days(89))
                 .unwrap()
@@ -392,6 +416,31 @@ mod tests {
             .map(|row| row.score)
             .collect();
         assert_eq!(scores, vec![90.0, 70.0]);
+    }
+
+    #[test]
+    fn top_scored_reads_only_the_scored_and_prepared_queue() {
+        let t = Tracker::in_memory().unwrap();
+        let add = |id: &str, score: f64, walk: &[State]| {
+            let job = make_job_with(|j| j.external_id = id.into());
+            t.add_job(&job, score, &BTreeMap::new(), *NOW).unwrap();
+            t.create_application(&job.key(), *NOW).unwrap();
+            for state in walk {
+                t.transition(&job.key(), *state, None, *NOW).unwrap();
+            }
+        };
+        add("scored", 60.0, &[]);
+        add("prepared", 70.0, &[State::Prepared]);
+        add("needs", 95.0, &[State::NeedsGonza]);
+        add("sent", 99.0, &[State::Prepared, State::Submitted]);
+        let keys: Vec<String> = t
+            .top_scored(10)
+            .unwrap()
+            .into_iter()
+            .map(|row| row.job_key)
+            .collect();
+        assert_eq!(keys, ["test:prepared", "test:scored"]);
+        assert_eq!(t.top_scored(1).unwrap().len(), 1);
     }
 
     #[test]
@@ -433,7 +482,7 @@ mod tests {
     }
 
     #[test]
-    fn an_attempted_click_counts_for_the_cap_and_the_company_cooldown_but_not_as_sent() {
+    fn an_attempted_click_counts_for_the_cap_and_the_company_cooldown() {
         let t = Tracker::in_memory().unwrap();
         let job = make_job();
         click_without_confirmation(&t, &job);
@@ -443,15 +492,30 @@ mod tests {
             t.company_in_cooldown(&normalize(&job.company), 90, *NOW)
                 .unwrap()
         );
-        // The digest and the review-phase counter only know about confirmed submissions.
-        assert_eq!(t.submitted_since(*NOW - day).unwrap(), 0);
-        assert_eq!(t.approved_submitted_total().unwrap(), 0);
         // Outside the window the attempt no longer counts.
         assert_eq!(t.clicked_since(*NOW + TimeDelta::hours(1)).unwrap(), 0);
         assert!(
             !t.company_in_cooldown(&normalize(&job.company), 90, *NOW + TimeDelta::days(91))
                 .unwrap()
         );
+    }
+
+    #[test]
+    fn an_attempted_click_is_not_counted_as_sent() {
+        let t = Tracker::in_memory().unwrap();
+        click_without_confirmation(&t, &make_job());
+        // The digest and the review-phase counter only know about confirmed submissions.
+        assert_eq!(t.submitted_since(*NOW - TimeDelta::hours(24)).unwrap(), 0);
+        assert_eq!(t.approved_submitted_total().unwrap(), 0);
+    }
+
+    #[test]
+    fn retrying_forgets_the_attempted_click() {
+        let t = Tracker::in_memory().unwrap();
+        let job = make_job();
+        click_without_confirmation(&t, &job);
+        let day = TimeDelta::hours(24);
+        assert_eq!(t.clicked_since(*NOW - day).unwrap(), 1);
         // Gonza sends it again (`resolve`): the attempt is forgotten.
         t.clear_for_retry(&job.key()).unwrap();
         assert_eq!(t.clicked_since(*NOW - day).unwrap(), 0);

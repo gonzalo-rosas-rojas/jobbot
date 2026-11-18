@@ -15,7 +15,7 @@
 //! - `shots` and `retry`: screenshots, and the one retry of a call a busy browser failed.
 
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -135,6 +135,14 @@ fn landing_refusal(page: &Page, nav: NavPolicy) -> Option<String> {
     navigation::check(&page.url(), nav).err().map(|refusal| {
         format!("unsafe_url: the browser landed on a page it may not fill ({refusal})")
     })
+}
+
+/// Why the page the browser is on now may not be filled in: its address breaks the navigation
+/// rules (`landing_refusal`), or it belongs to a platform the program does not fill in
+/// (`landing_wall`). Both are asked together, after the first load and again once the form has
+/// been read, so that a check added to one is never missing from the other.
+fn landing_problem(page: &Page, nav: NavPolicy, mode: SubmitMode) -> Option<String> {
+    landing_refusal(page, nav).or_else(|| landing_wall(page, mode).map(str::to_string))
 }
 
 /// Opens the application page in `page`, fills what the bank can answer and acts according to
@@ -322,10 +330,7 @@ async fn fill_steps(
         )
         .await;
     }
-    if let Some(reason) = landing_refusal(page, nav) {
-        return stop_for_gonza(page, shot, reason).await;
-    }
-    if let Some(reason) = landing_wall(page, mode) {
+    if let Some(reason) = landing_problem(page, nav, mode) {
         return stop_for_gonza(page, shot, reason).await;
     }
     if let Some(reason) = detect_blocker(page).await? {
@@ -333,10 +338,7 @@ async fn fill_steps(
     }
 
     let fields = scan_fields(page).await?;
-    if let Some(reason) = landing_refusal(page, nav) {
-        return stop_for_gonza(page, shot, reason).await;
-    }
-    if let Some(reason) = landing_wall(page, mode) {
+    if let Some(reason) = landing_problem(page, nav, mode) {
         return stop_for_gonza(page, shot, reason).await;
     }
     if fields.is_empty() {
@@ -456,12 +458,37 @@ async fn fill_steps(
     };
 
     let after = shots_dir.join(format!("{}-after.png", safe_key(&job.key())));
-    let screenshot = take_shot(page, &after)
-        .await
-        .ok()
-        .map(|()| after)
-        .or(Some(shot));
-    Ok(match outcome {
+    let screenshot = match take_shot(page, &after).await {
+        Ok(()) => Some(after),
+        // The shot before the click stands in for it; the failure is logged so that it can be told
+        // from a shot that really was taken after the click.
+        Err(err) => {
+            tracing::warn!(
+                "the screenshot after the click failed ({err:#}); the one before it is kept"
+            );
+            Some(shot)
+        }
+    };
+    Ok(submit_result(
+        outcome,
+        mode,
+        leftover.as_deref(),
+        click_error,
+        screenshot,
+    ))
+}
+
+/// What the application ends as, from what the page did after the click. `leftover` is what was
+/// still pending for Gonza, `click_error` the error the click call itself returned (it proves
+/// nothing about whether the form went out) and `screenshot` the shot he looks at.
+fn submit_result(
+    outcome: Confirmation,
+    mode: SubmitMode,
+    leftover: Option<&str>,
+    click_error: Option<String>,
+    screenshot: Option<PathBuf>,
+) -> SubmitResult {
+    match outcome {
         Confirmation::Confirmed => SubmitResult {
             status: SubmitStatus::Submitted,
             reason: None,
@@ -476,18 +503,18 @@ async fn fill_steps(
             needs_gonza(format!("unconfirmed_submit: {reason}"), screenshot)
         }
         Confirmation::Silent if mode == SubmitMode::Assist => needs_gonza(
-            assist_timeout_reason(ASSIST_TIMEOUT_MS / 60_000, leftover.as_deref()),
+            assist_timeout_reason(ASSIST_TIMEOUT_MS / 60_000, leftover),
             screenshot,
         ),
         Confirmation::Closed if mode == SubmitMode::Assist => {
-            needs_gonza(assist_closed_reason(leftover.as_deref()), screenshot)
+            needs_gonza(assist_closed_reason(leftover), screenshot)
         }
         // A tab that closes after the program's own click is as silent as a page that said nothing.
         Confirmation::Silent | Confirmation::Closed => needs_gonza(
             click_error.unwrap_or_else(|| "unconfirmed_submit: sin confirmación visible".into()),
             screenshot,
         ),
-    })
+    }
 }
 
 /// Closes `page`, waiting at most `CLOSE_STUCK_PAGE_MS` for it: a tab that stopped answering must
@@ -600,7 +627,6 @@ mod support_tests;
 mod tests {
     use super::*;
     use jobbot_domain::fixtures::make_job_with;
-    use std::path::PathBuf;
 
     #[test]
     fn the_first_load_has_its_own_longer_deadline_than_a_field_action() {
@@ -717,6 +743,120 @@ mod tests {
         assert!(checked_link(&fine, NavPolicy::STRICT).is_ok());
     }
 
+    fn the_shot() -> Option<PathBuf> {
+        Some(PathBuf::from("shots/acme-after.png"))
+    }
+
+    #[test]
+    fn a_confirmed_page_is_a_submitted_application_with_its_shot() {
+        for mode in [SubmitMode::Live, SubmitMode::Assist] {
+            let result = submit_result(
+                Confirmation::Confirmed,
+                mode,
+                Some("left"),
+                None,
+                the_shot(),
+            );
+            assert_eq!(result.status, SubmitStatus::Submitted, "{mode:?}");
+            assert_eq!(result.reason, None, "{mode:?}");
+            assert_eq!(result.screenshot, the_shot(), "{mode:?}");
+        }
+    }
+
+    #[test]
+    fn a_page_that_rejected_or_walled_the_click_goes_back_with_what_it_said() {
+        let rejected = submit_result(
+            Confirmation::Rejected("Phone number is invalid.".into()),
+            SubmitMode::Live,
+            None,
+            None,
+            the_shot(),
+        );
+        assert_eq!(rejected.status, SubmitStatus::NeedsGonza);
+        assert_eq!(
+            rejected.reason.as_deref(),
+            Some("unconfirmed_submit: Phone number is invalid.")
+        );
+        assert_eq!(rejected.screenshot, the_shot());
+        let blocked = submit_result(
+            Confirmation::Blocked("captcha"),
+            SubmitMode::Live,
+            None,
+            None,
+            the_shot(),
+        );
+        assert_eq!(blocked.status, SubmitStatus::NeedsGonza);
+        assert_eq!(
+            blocked.reason.as_deref(),
+            Some("unconfirmed_submit: captcha")
+        );
+    }
+
+    #[test]
+    fn silence_in_assist_mode_is_a_timeout_that_says_what_was_pending() {
+        let result = submit_result(
+            Confirmation::Silent,
+            SubmitMode::Assist,
+            Some("faltan respuestas: Email *"),
+            Some("the click error is not used in Assist".into()),
+            the_shot(),
+        );
+        assert_eq!(result.status, SubmitStatus::NeedsGonza);
+        assert_eq!(
+            result.reason.as_deref(),
+            Some(
+                "assist_timeout: sin confirmación en 10 minutos. Quedaba pendiente: faltan respuestas: Email *"
+            )
+        );
+        assert_eq!(result.screenshot, the_shot());
+    }
+
+    #[test]
+    fn a_tab_closed_in_assist_mode_is_the_way_to_skip_the_form() {
+        let result = submit_result(
+            Confirmation::Closed,
+            SubmitMode::Assist,
+            None,
+            None,
+            the_shot(),
+        );
+        assert_eq!(result.status, SubmitStatus::NeedsGonza);
+        assert!(
+            result
+                .reason
+                .as_deref()
+                .unwrap()
+                .starts_with("assist_closed: "),
+            "{:?}",
+            result.reason
+        );
+    }
+
+    #[test]
+    fn a_silent_or_closed_page_after_the_programs_own_click_is_an_unconfirmed_submit() {
+        for outcome in [Confirmation::Silent, Confirmation::Closed] {
+            let plain = submit_result(outcome, SubmitMode::Live, Some("left"), None, the_shot());
+            assert_eq!(plain.status, SubmitStatus::NeedsGonza);
+            assert_eq!(
+                plain.reason.as_deref(),
+                Some("unconfirmed_submit: sin confirmación visible")
+            );
+            assert_eq!(plain.screenshot, the_shot());
+        }
+        // The click call's own error is the reason when there is one.
+        let failed = submit_result(
+            Confirmation::Silent,
+            SubmitMode::Live,
+            None,
+            Some("unconfirmed_submit: el clic de envío devolvió un error: boom".into()),
+            the_shot(),
+        );
+        assert_eq!(
+            failed.reason.as_deref(),
+            Some("unconfirmed_submit: el clic de envío devolvió un error: boom")
+        );
+    }
+
     /// The `.rs` files under `dir`, at any depth.
     fn rust_files(dir: &Path) -> Vec<PathBuf> {
         let mut files = Vec::new();
@@ -745,8 +885,28 @@ mod tests {
             let text = std::fs::read_to_string(&path)
                 .unwrap()
                 .replace("\r\n", "\n");
-            // Each file's test modules sit at its end, after its first `#[cfg(test)]`.
-            let shipped = text.split("\n#[cfg(test)]\n").next().unwrap();
+            // Each file's test modules sit at its end, after its first `#[cfg(test)]`. The count
+            // below only reads what comes before it, so nothing but test modules may follow it: an
+            // item there (shipped code gated by an early `#[cfg(test)]`) would hide its `goto`.
+            let mut parts = text.split("\n#[cfg(test)]\n");
+            let shipped = parts.next().unwrap();
+            for tail in parts {
+                let hidden: Vec<&str> = tail
+                    .lines()
+                    .filter(|line| {
+                        !line.is_empty()
+                            && !line.starts_with(char::is_whitespace)
+                            && !["mod ", "use ", "#[", "}", "//"]
+                                .iter()
+                                .any(|allowed| line.starts_with(allowed))
+                    })
+                    .collect();
+                assert!(
+                    hidden.is_empty(),
+                    "{}: code after a `#[cfg(test)]` is not counted: {hidden:?}",
+                    path.display()
+                );
+            }
             gotos.extend(
                 shipped
                     .lines()

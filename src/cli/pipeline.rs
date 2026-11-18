@@ -109,6 +109,16 @@ fn cv_not_ready(out: &mut dyn Write) -> Result<i32> {
     Ok(EXIT_CV_NOT_READY)
 }
 
+/// What a CV command got: `None` when the master CV still has marks to fill (the command says so
+/// with `cv_not_ready`), the value when it worked, an error for anything else.
+fn cv_ready<T>(result: Result<T, CvError>) -> Result<Option<T>> {
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(CvError::NotReady) => Ok(None),
+        Err(other) => Err(other.into()),
+    }
+}
+
 pub(super) async fn cmd_prepare(
     paths: &Paths,
     deps: &Deps,
@@ -118,7 +128,7 @@ pub(super) async fn cmd_prepare(
     let criteria = load_criteria(&paths.profile_dir.join("criteria.toml"))?;
     let tracker = open_tracker(paths)?;
     let cv_dir = paths.data_dir.join("cv");
-    match prepare_report_relocating(
+    let result = prepare_report_relocating(
         &tracker,
         &paths.cv_master,
         &cv_dir,
@@ -126,18 +136,15 @@ pub(super) async fn cmd_prepare(
         Relocation::from_criteria(&criteria),
         now,
     )
-    .await
-    {
-        Ok(report) => {
-            writeln!(out, "{} postulaciones preparadas", report.prepared.len())?;
-            for skip in &report.skipped {
-                writeln!(out, "{}", skip.line())?;
-            }
-            Ok(EXIT_OK)
-        }
-        Err(CvError::NotReady) => cv_not_ready(out),
-        Err(other) => Err(other.into()),
+    .await;
+    let Some(report) = cv_ready(result)? else {
+        return cv_not_ready(out);
+    };
+    writeln!(out, "{} postulaciones preparadas", report.prepared.len())?;
+    for skip in &report.skipped {
+        writeln!(out, "{}", skip.line())?;
     }
+    Ok(EXIT_OK)
 }
 
 /// `prepare --refresh`: the CVs of the prepared and waiting applications, rendered again from
@@ -150,26 +157,23 @@ pub(super) async fn cmd_prepare_refresh(
 ) -> Result<i32> {
     let criteria = load_criteria(&paths.profile_dir.join("criteria.toml"))?;
     let tracker = open_tracker(paths)?;
-    match refresh_cvs(
+    let result = refresh_cvs(
         &tracker,
         &paths.cv_master,
         deps.renderer.as_ref(),
         Relocation::from_criteria(&criteria),
         now,
     )
-    .await
-    {
-        Ok(keys) => {
-            writeln!(
-                out,
-                "{} CV generados de nuevo desde el CV maestro (los anteriores quedan en data/cv/{REPLACED_CV_DIR})",
-                keys.len()
-            )?;
-            Ok(EXIT_OK)
-        }
-        Err(CvError::NotReady) => cv_not_ready(out),
-        Err(other) => Err(other.into()),
-    }
+    .await;
+    let Some(keys) = cv_ready(result)? else {
+        return cv_not_ready(out);
+    };
+    writeln!(
+        out,
+        "{} CV generados de nuevo desde el CV maestro (los anteriores quedan en data/cv/{REPLACED_CV_DIR})",
+        keys.len()
+    )?;
+    Ok(EXIT_OK)
 }
 
 /// The auto-approval threshold (see `actions::set_auto_approve_min`): shown with no argument, set
@@ -223,8 +227,8 @@ mod tests {
 
     use super::*;
     use crate::cli::test_support::{
-        FakeSource, acme, busy_now, cli, fake_deps, open_now, plain, seed, temp_root, tracker_of,
-        write_cv_master,
+        FakeSource, acme, busy_now, cli, fake_deps, open_now, plain, seed, strong_job, temp_root,
+        tracker_of, write_cv_master,
     };
     use crate::models::{FetchError, FetchResult};
     use crate::testing::{make_job, make_job_with};
@@ -407,6 +411,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_discovery_stamp_is_the_clock_with_a_plus_zero_offset_and_the_digits_of_its_fraction()
+     {
+        for (nanos, expected) in [
+            (0, "2026-10-14T22:00:00+00:00"),
+            (500_000_000, "2026-10-14T22:00:00.500+00:00"),
+            (123_456_000, "2026-10-14T22:00:00.123456+00:00"),
+            (123_456_789, "2026-10-14T22:00:00.123456789+00:00"),
+        ] {
+            let root = temp_root();
+            let (deps, _) = fake_deps(vec![make_job()]);
+            let now = open_now() + TimeDelta::nanoseconds(nanos);
+            cli(root.path(), now, deps, &["discover"]).await;
+            assert_eq!(
+                tracker_of(root.path())
+                    .get_meta("last_discover_at")
+                    .unwrap()
+                    .as_deref(),
+                Some(expected)
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn a_discover_with_one_good_source_is_done_even_if_another_failed() {
         let root = temp_root();
         // A run that fetched something is done even when one source had an error.
@@ -427,14 +454,8 @@ mod tests {
         let root = temp_root();
         // A job stored with a low score and no application, as an earlier criteria file left it.
         // `make_job()`'s one-line description scores under the shipped threshold, so this one
-        // carries a description that reaches it (the same text the discovery tests use).
-        let strong = make_job_with(|j| {
-            j.description = "Build LLM agents with python, typescript, react, rag and mcp. \
-                             Applied AI and generative AI work on agentic workflows, with an \
-                             engineering culture and open source time. \
-                             Full-time position with mentorship and a take-home exercise."
-                .into();
-        });
+        // carries a description that reaches it.
+        let strong = strong_job();
         tracker_of(root.path())
             .add_job(&strong, 10.0, &BTreeMap::new(), open_now())
             .unwrap();

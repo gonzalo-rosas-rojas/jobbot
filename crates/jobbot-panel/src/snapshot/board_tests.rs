@@ -1,8 +1,6 @@
 //! Tests of the board, of the two queues of what needs Gonza and of the snoozing that takes cards
 //! off them: each builds the whole snapshot and reads its lists.
 
-use std::path::Path;
-
 use chrono::TimeDelta;
 
 use super::support_tests::{column, task};
@@ -120,15 +118,24 @@ fn every_application_in_progress_is_listed_however_many_there_are() {
 
 #[test]
 fn a_snoozed_application_leaves_the_queues_and_today_until_its_time() {
-    let (panel, _dir) = panel();
+    let (panel, dir) = panel();
     let t = &panel.tracker;
     let waiting = add(&panel, "1", 80.0, &[State::NeedsGonza]);
     let other = add(&panel, "2", 70.0, &[State::NeedsGonza]);
     let proposed = add(&panel, "3", 90.0, &[State::Prepared]);
-    t.set_screenshot(&proposed, Path::new("shot.png")).unwrap();
+    // The shot has to be on disk: only then does the card await approval (and the snooze filter
+    // has something to take out).
+    let shot = dir.path().join("shot.png");
+    std::fs::write(&shot, b"png").unwrap();
+    t.set_screenshot(&proposed, &shot).unwrap();
     task(&panel, "Postular", None, Some(&waiting));
     task(&panel, "Otra", None, Some(&other));
     task(&panel, "Suelta", None, None);
+    assert_eq!(
+        build_snapshot(&panel).unwrap().awaiting_approval.total,
+        1,
+        "before the snooze the proposal is waiting for approval"
+    );
     t.set_snoozed_until(&waiting, Some(*NOW + TimeDelta::days(1)))
         .unwrap();
     t.set_snoozed_until(&proposed, Some(*NOW + TimeDelta::days(3)))

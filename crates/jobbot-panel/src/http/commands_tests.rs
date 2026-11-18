@@ -2,9 +2,9 @@
 //! the settings, tasks, records and imports they change.
 
 use super::commands::MAX_BATCH;
-use super::support_tests::{approved, encode, guard, json_of, request, text, without};
+use super::support_tests::{api_post, approved, encode, guard, json_of, request, text, without};
 use super::*;
-use crate::fixtures::{add, capture, panel};
+use crate::fixtures::{add, capture, panel, task};
 use jobbot_domain::state::State;
 
 #[test]
@@ -280,12 +280,7 @@ fn an_application_sent_by_hand_can_be_recorded_from_the_page() {
 
 /// An authenticated `POST` of a JSON value to an API route.
 fn post_value(p: &Panel, route: &str, body: Value) -> Reply {
-    post_text(p, route, &body.to_string())
-}
-
-/// An authenticated `POST` of a body as text (for the ones that are not valid JSON on purpose).
-fn post_text(p: &Panel, route: &str, body: &str) -> Reply {
-    handle(p, &guard(), &request("POST", route, body))
+    api_post(p, route, &body.to_string())
 }
 
 /// Two prepared applications with a captured form, the keys a batch test works on.
@@ -574,7 +569,7 @@ fn the_inbox_import_takes_a_bigger_body_and_reports_like_the_command() {
             "job_key": key,
         })
     };
-    let post = |body: &str| post_text(&p, "/api/inbox/import", body);
+    let post = |body: &str| api_post(&p, "/api/inbox/import", body);
 
     // 40 messages with long summaries: well past MAX_BODY, inside this route's own limit.
     let many: Vec<Value> = (0..40).map(|n| message(&format!("m{n}"), "ack")).collect();
@@ -644,19 +639,7 @@ fn the_inbox_import_takes_a_bigger_body_and_reports_like_the_command() {
 fn a_task_can_be_closed_from_the_page_once_and_only_with_the_token() {
     let (p, _d) = panel();
     for task_text in ["Responder a Clara", "Grabar el video"] {
-        p.tracker
-            .add_task(
-                &jobbot_app::ports::store::NewTask {
-                    job_key: None,
-                    kind: "action_required".into(),
-                    text: task_text.into(),
-                    due_at: None,
-                    source_message_id: None,
-                    link: None,
-                },
-                *jobbot_testkit::NOW,
-            )
-            .unwrap();
+        task(&p, task_text, None, None);
     }
     let id = p.tracker.open_tasks().unwrap()[0].id;
     let body = format!(r#"{{"id":{id}}}"#);
@@ -706,10 +689,33 @@ fn a_task_can_be_closed_from_the_page_once_and_only_with_the_token() {
     assert_eq!(p.tracker.open_tasks().unwrap().len(), 1);
 }
 
+/// The smallest `criteria.toml` the panel accepts, with the threshold from which it queues.
+const CRITERIA_QUEUING_FROM_60: &str = r#"
+floor_monthly_usd = 1
+target_monthly_usd = [2, 3]
+apply_threshold = 60
+daily_cap = 1
+daily_cap_until_reviewed = 1
+company_cooldown_days = 1
+first_n_reviewed = 1
+
+[weights]
+fit = 50
+compensation = 10
+stability = 10
+learning = 10
+interview_style = 10
+other = 10
+"#;
+
 #[test]
 fn settings_keep_the_auto_approval_threshold_and_refuse_what_is_not_valid() {
-    // The shipped profile queues from 60.
-    let (p, _d) = panel();
+    // The profile this test writes queues from 60: its own number, not the repo's.
+    let (mut p, d) = panel();
+    let profile = d.path().join("profile-under-test");
+    std::fs::create_dir_all(&profile).unwrap();
+    std::fs::write(profile.join("criteria.toml"), CRITERIA_QUEUING_FROM_60).unwrap();
+    p.paths.profile_dir = profile;
     let snapshot_value = || {
         json_of(&handle(&p, &guard(), &request("GET", "/api/snapshot", "")))["controls"]
             ["auto_approve_min"]
@@ -717,7 +723,7 @@ fn settings_keep_the_auto_approval_threshold_and_refuse_what_is_not_valid() {
     };
     assert!(snapshot_value().is_null());
 
-    let ok = post_text(&p, "/api/settings", r#"{"auto_approve_min": 90}"#);
+    let ok = api_post(&p, "/api/settings", r#"{"auto_approve_min": 90}"#);
     assert_eq!(ok.status, 200);
     let body = json_of(&ok);
     assert_eq!(body["ok"], true);
@@ -727,7 +733,7 @@ fn settings_keep_the_auto_approval_threshold_and_refuse_what_is_not_valid() {
 
     // Out of range is a refusal of the action: 409, nothing changes, and it says the range.
     for value in ["59", "101", "0", "-1"] {
-        let refused = post_text(
+        let refused = api_post(
             &p,
             "/api/settings",
             &format!(r#"{{"auto_approve_min": {value}}}"#),
@@ -756,7 +762,7 @@ fn settings_keep_the_auto_approval_threshold_and_refuse_what_is_not_valid() {
         r#"90"#,
         "not json",
     ] {
-        let reply = post_text(&p, "/api/settings", bad);
+        let reply = api_post(&p, "/api/settings", bad);
         assert_eq!(reply.status, 400, "{bad}");
         assert_eq!(json_of(&reply)["ok"], false, "{bad}");
     }
@@ -764,13 +770,13 @@ fn settings_keep_the_auto_approval_threshold_and_refuse_what_is_not_valid() {
 
     // null turns it off, twice is fine, and the whole range edge is accepted.
     for _ in 0..2 {
-        let off = post_text(&p, "/api/settings", r#"{"auto_approve_min": null}"#);
+        let off = api_post(&p, "/api/settings", r#"{"auto_approve_min": null}"#);
         assert_eq!(off.status, 200);
         assert!(json_of(&off)["auto_approve_min"].is_null());
     }
     assert!(snapshot_value().is_null());
     for edge in [60, 100] {
-        let reply = post_text(
+        let reply = api_post(
             &p,
             "/api/settings",
             &format!(r#"{{"auto_approve_min": {edge}}}"#),
@@ -783,7 +789,7 @@ fn settings_keep_the_auto_approval_threshold_and_refuse_what_is_not_valid() {
 fn settings_without_a_readable_profile_keep_no_number() {
     let (mut p, dir) = panel();
     p.paths.profile_dir = dir.path().join("no-profile-here");
-    let refused = post_text(&p, "/api/settings", r#"{"auto_approve_min": 90}"#);
+    let refused = api_post(&p, "/api/settings", r#"{"auto_approve_min": 90}"#);
     assert_eq!(refused.status, 409);
     assert!(
         json_of(&refused)["message"]
@@ -792,7 +798,89 @@ fn settings_without_a_readable_profile_keep_no_number() {
             .contains("criteria.toml")
     );
     assert_eq!(
-        post_text(&p, "/api/settings", r#"{"auto_approve_min": null}"#).status,
+        api_post(&p, "/api/settings", r#"{"auto_approve_min": null}"#).status,
         200
+    );
+}
+
+#[test]
+fn the_date_the_page_sends_is_read_in_any_rfc_3339_shape_and_stored_as_the_same_utc_second() {
+    let sent_at = jobbot_testkit::utc_at(2026, 10, 1, 9, 0, 0);
+    for text_sent in [
+        "2026-10-01T09:00:00Z",
+        "2026-10-01T09:00:00+00:00",
+        "2026-10-01T06:00:00-03:00",
+        "2026-10-01T14:30:00+05:30",
+        " 2026-10-01T09:00:00Z\n",
+        "2026-10-01T09:00:00.987654321Z",
+    ] {
+        // A panel for each text: the one application it holds is the one this text recorded.
+        let (p, _d) = panel();
+        let reply = post_value(
+            &p,
+            "/api/record",
+            serde_json::json!({
+                "company": "Acme",
+                "title": "Backend Engineer",
+                "url": "https://jobs.example.com/acme/1",
+                "at": text_sent,
+            }),
+        );
+        assert_eq!(reply.status, 200, "{text_sent:?}: {}", text(&reply));
+        let submitted = p.tracker.list_by_state(State::Submitted).unwrap();
+        assert_eq!(submitted.len(), 1, "{text_sent:?}");
+        assert_eq!(
+            submitted[0].submitted_at,
+            Some(sent_at),
+            "{text_sent:?} is stored to the second"
+        );
+    }
+}
+
+#[test]
+fn a_date_in_the_future_is_refused_with_the_moment_written_as_utc_with_a_plus_zero_offset() {
+    let (p, _d) = panel();
+    let refused = |at: &str| {
+        let reply = post_value(
+            &p,
+            "/api/record",
+            serde_json::json!({
+                "company": "Acme", "title": "Backend", "url": "https://jobs.example.com/a", "at": at,
+            }),
+        );
+        assert_eq!(reply.status, 409, "{at}");
+        json_of(&reply)["message"].as_str().unwrap().to_string()
+    };
+    // The clock is 2026-10-01T12:00:00Z and the page may be five minutes ahead of it.
+    assert_eq!(
+        refused("2026-10-01T13:00:00Z"),
+        "La fecha de envío está en el futuro (2026-10-01T13:00:00+00:00): una postulación no se registra antes de enviarse"
+    );
+    assert_eq!(
+        refused("2026-10-01T10:00:00.5-04:00"),
+        "La fecha de envío está en el futuro (2026-10-01T14:00:00.500+00:00): una postulación no se registra antes de enviarse",
+        "the offset is gone and a fraction shows its three digits"
+    );
+}
+
+#[test]
+fn a_snooze_to_monday_ends_at_midnight_in_santiago_and_the_page_gets_it_in_utc() {
+    let (p, _d) = panel();
+    let key = add(&p, "1", 80.0, &[State::Prepared]);
+    let reply = post_value(
+        &p,
+        "/api/snooze",
+        serde_json::json!({ "key": key, "until": "monday" }),
+    );
+    assert_eq!(reply.status, 200, "{}", text(&reply));
+    // NOW is Thursday 2026-10-01 12:00Z; the next Monday starts at 00:00 Santiago, UTC-3 in October.
+    assert_eq!(
+        json_of(&reply)["message"],
+        format!("Pospuesta hasta 2026-10-05 00:00: {key}")
+    );
+    let snapshot = json_of(&handle(&p, &guard(), &request("GET", "/api/snapshot", "")));
+    assert_eq!(
+        snapshot["snoozed"]["cards"][0]["snoozed_until"],
+        "2026-10-05T03:00:00Z"
     );
 }

@@ -18,32 +18,34 @@ pub(super) const STOP_MESSAGE: &str =
 
 /// The two switches in front of every mutating command. STOP is checked first and nothing
 /// overrides it; the execution window comes second and `--ignore-window` skips only that.
-/// Returns the exit code to stop with, or `None` when the command may go on.
+/// `Err(code)` is the exit code to stop with; `Ok` carries the schedule that was read for the
+/// window check (none with `--ignore-window`), so the run watches the same one it was admitted by.
 fn blocked(
     paths: &Paths,
     now: DateTime<Utc>,
     ignore_window: bool,
     out: &mut dyn Write,
-) -> Result<Option<i32>> {
+) -> Result<std::result::Result<Option<Schedule>, i32>> {
     if paths.stop_file.exists() {
         writeln!(out, "{STOP_MESSAGE}")?;
-        return Ok(Some(EXIT_STOP));
+        return Ok(Err(EXIT_STOP));
     }
-    if !ignore_window {
-        // A missing or broken schedule is an error (exit 1), not a free pass: fail closed.
-        let schedule = load_schedule(&paths.profile_dir.join("schedule.toml"))?;
-        if !in_run_window(&schedule, now) {
-            let next = next_window_start(&schedule, now).with_timezone(&Santiago);
-            writeln!(
-                out,
-                "Fuera de la ventana de ejecución (horario laboral de Gonza): no se ejecuta nada. \
-                 Próxima ventana: {} (hora de Santiago). Usa --ignore-window para forzar.",
-                next.format("%Y-%m-%d %H:%M")
-            )?;
-            return Ok(Some(EXIT_OUTSIDE_WINDOW));
-        }
+    if ignore_window {
+        return Ok(Ok(None));
     }
-    Ok(None)
+    // A missing or broken schedule is an error (exit 1), not a free pass: fail closed.
+    let schedule = load_schedule(&paths.profile_dir.join("schedule.toml"))?;
+    if !in_run_window(&schedule, now) {
+        let next = next_window_start(&schedule, now).with_timezone(&Santiago);
+        writeln!(
+            out,
+            "Fuera de la ventana de ejecución (horario laboral de Gonza): no se ejecuta nada. \
+             Próxima ventana: {} (hora de Santiago). Usa --ignore-window para forzar.",
+            next.format("%Y-%m-%d %H:%M")
+        )?;
+        return Ok(Err(EXIT_OUTSIDE_WINDOW));
+    }
+    Ok(Ok(Some(schedule)))
 }
 
 const LOCK_MESSAGE: &str = "Otra ejecución de jobbot está en curso (data/jobbot.lock): no se ejecuta nada. Espera a que termine.";
@@ -106,17 +108,13 @@ pub(super) fn start_run(
     ignore_window: bool,
     out: &mut dyn Write,
 ) -> Result<std::result::Result<RunGuard, i32>> {
-    if let Some(code) = blocked(paths, now, ignore_window, out)? {
-        return Ok(Err(code));
-    }
+    let schedule = match blocked(paths, now, ignore_window, out)? {
+        Ok(schedule) => schedule,
+        Err(code) => return Ok(Err(code)),
+    };
     let Some(lock) = run_lock(paths)? else {
         writeln!(out, "{LOCK_MESSAGE}")?;
         return Ok(Err(EXIT_ERROR));
-    };
-    let schedule = if ignore_window {
-        None
-    } else {
-        Some(load_schedule(&paths.profile_dir.join("schedule.toml"))?)
     };
     Ok(Ok(RunGuard {
         _lock: lock,

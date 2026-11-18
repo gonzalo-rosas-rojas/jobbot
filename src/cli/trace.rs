@@ -233,6 +233,13 @@ mod tests {
         UserPaths::new(Some(r"C:\Users\ana"), None, None)
     }
 
+    /// True when `text` still has a path part that starts like Ana's folder, after either slash; the trace
+    /// doubles the backslash, and `\\ana` holds `\ana`. A bare "ana" would also be found in
+    /// "ventana" or "semana".
+    fn names_the_user_folder(text: &str) -> bool {
+        [r"\ana", "/ana"].iter().any(|part| text.contains(part))
+    }
+
     fn text_of(written: &Written) -> String {
         String::from_utf8(written.0.lock().unwrap().clone()).unwrap()
     }
@@ -271,7 +278,7 @@ mod tests {
         let text = text_of(&written);
         assert_eq!(code, EXIT_ERROR, "{text}");
         assert!(
-            text.contains(r"%USERPROFILE%\Desktop\correos.json") && !text.contains("ana"),
+            text.contains(r"%USERPROFILE%\Desktop\correos.json") && !names_the_user_folder(&text),
             "{text}"
         );
     }
@@ -288,7 +295,7 @@ mod tests {
         // The trace prints a text field escaped (`C:\\Users\\...`); the filter knows that form too.
         let text = text_of(&written);
         assert!(
-            text.contains("%USERPROFILE%") && !text.contains("ana"),
+            text.contains("%USERPROFILE%") && !names_the_user_folder(&text),
             "{text}"
         );
     }

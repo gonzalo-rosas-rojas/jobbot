@@ -56,6 +56,10 @@ const SELECT_OPTIONS_JS: &str = r#"(el) => Array.from(el.options).map((o) => (o.
 
 /// How long a combobox that was just opened gets to show its whole list before it is typed into.
 const PEEK_MS: u64 = 400;
+/// How often a combobox that was just opened is asked for its list while it may still be empty.
+const PEEK_POLL_MS: u64 = POLL_MS / 8;
+/// How often a list that may still be changing is read while the filler waits for it to settle.
+const SETTLE_POLL_MS: u64 = POLL_MS / 3;
 
 /// Gives `candidates` (the bank value, then its alternatives) to the control in `locator`.
 pub(super) async fn choose(
@@ -94,7 +98,7 @@ async fn peek_options(page: &Page, controls: &str) -> anyhow::Result<Vec<String>
         if !options.is_empty() || tokio::time::Instant::now() >= deadline {
             return Ok(options);
         }
-        tokio::time::sleep(Duration::from_millis(POLL_MS / 8)).await;
+        tokio::time::sleep(Duration::from_millis(PEEK_POLL_MS)).await;
     }
 }
 
@@ -201,7 +205,7 @@ async fn settled_match(
         {
             return Ok(judged(best_option(&last, wanted)));
         }
-        tokio::time::sleep(Duration::from_millis(POLL_MS / 3)).await;
+        tokio::time::sleep(Duration::from_millis(SETTLE_POLL_MS)).await;
     }
 }
 

@@ -12,6 +12,7 @@ mod http_memory;
 mod inbox;
 mod intents;
 mod jobs;
+mod meta;
 mod metrics;
 mod moves;
 mod schema;
@@ -112,24 +113,29 @@ fn optional_from_text(
     text.map(|t| from_text(column, &t)).transpose()
 }
 
-fn state_from_text(column: usize, text: &str) -> rusqlite::Result<State> {
-    State::parse(text).ok_or_else(|| {
+/// A stored name read back as its enum; a name no variant has is a conversion failure of
+/// `column`, worded "unknown `what` ...".
+fn parse_column<T>(
+    column: usize,
+    text: &str,
+    what: &str,
+    parse: fn(&str) -> Option<T>,
+) -> rusqlite::Result<T> {
+    parse(text).ok_or_else(|| {
         rusqlite::Error::FromSqlConversionFailure(
             column,
             Type::Text,
-            format!("unknown state {text:?}").into(),
+            format!("unknown {what} {text:?}").into(),
         )
     })
 }
 
+fn state_from_text(column: usize, text: &str) -> rusqlite::Result<State> {
+    parse_column(column, text, "state", State::parse)
+}
+
 fn email_kind_from_text(column: usize, text: &str) -> rusqlite::Result<EmailKind> {
-    EmailKind::parse(text).ok_or_else(|| {
-        rusqlite::Error::FromSqlConversionFailure(
-            column,
-            Type::Text,
-            format!("unknown email kind {text:?}").into(),
-        )
-    })
+    parse_column(column, text, "email kind", EmailKind::parse)
 }
 
 /// The application database. The connection sits behind a `Mutex`, so a `Tracker`

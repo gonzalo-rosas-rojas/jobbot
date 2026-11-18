@@ -10,9 +10,9 @@ use jobbot_app::actions::approve;
 use jobbot_app::discovery::discover;
 use jobbot_app::inbox::import;
 use jobbot_app::ports::Source;
-use jobbot_app::profile::{load_criteria, load_exclusions};
 use jobbot_app::reporting::digest::build_digest;
 use jobbot_domain::models::{FetchError, FetchResult};
+use jobbot_testkit::profile::{sample_criteria, sample_exclusions};
 use jobbot_testkit::spans::Spans;
 use jobbot_testkit::{NOW, Tracker, make_job};
 
@@ -43,9 +43,8 @@ fn some(value: &str) -> Option<String> {
 
 #[tokio::test]
 async fn discovery_runs_in_a_span_that_counts_what_happened() {
-    let paths = jobbot_testkit::real_paths();
-    let criteria = load_criteria(&paths.profile_dir.join("criteria.toml")).unwrap();
-    let exclusions = load_exclusions(&paths.profile_dir.join("exclusions.toml")).unwrap();
+    let criteria = sample_criteria();
+    let exclusions = sample_exclusions();
     let tracker = Tracker::in_memory().unwrap();
     let sources: [Box<dyn Source>; 1] = [Box::new(Paused)];
 

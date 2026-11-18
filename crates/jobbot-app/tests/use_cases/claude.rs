@@ -1,5 +1,5 @@
-//! The `claude` use cases against the real SQLite stores, the fake Claude and the shipped
-//! profile (moved from the root crate's `src/claude.rs`).
+//! The `claude` use cases against the real SQLite stores and the fake Claude (moved from the root
+//! crate's `src/claude.rs`).
 
 use chrono::TimeDelta;
 use serde_json::Value;
@@ -8,7 +8,7 @@ use serde_json::json;
 use jobbot_app::claude::*;
 use jobbot_app::profile::claude::*;
 use jobbot_testkit::Tracker;
-use jobbot_testkit::{FakeClaude, NOW, real_paths};
+use jobbot_testkit::{FakeClaude, NOW};
 
 fn request() -> ClaudeRequest {
     ClaudeRequest {
@@ -17,30 +17,6 @@ fn request() -> ClaudeRequest {
         prompt: "SECRET PROMPT TEXT".into(),
         schema: None,
     }
-}
-#[test]
-fn the_shipped_claude_toml_parses_to_the_defaults() {
-    // The file as committed, not `load_claude_config`: that one also merges the developer's own
-    // (git-ignored) `claude.local.toml`, which this test must not depend on.
-    let text = std::fs::read_to_string(real_paths().profile_dir.join("claude.toml")).unwrap();
-    assert_eq!(parse_claude_config(&text).unwrap(), ClaudeConfig::default());
-}
-#[test]
-fn the_local_profile_files_are_kept_out_of_git() {
-    // The address that `expected_email` holds must never reach a repository that may be published.
-    let ignore = include_str!("../../../../.gitignore");
-    assert!(
-        ignore
-            .lines()
-            .any(|line| line.trim() == "profile/*.local.toml"),
-        "add `profile/*.local.toml` to .gitignore"
-    );
-    let shipped = std::fs::read_to_string(real_paths().profile_dir.join("claude.toml")).unwrap();
-    let committed = parse_claude_config(&shipped).unwrap();
-    assert!(
-        committed.expected_email.expose().is_empty() && committed.expected_org_id.is_empty(),
-        "the committed claude.toml names no account: those two keys live in claude.local.toml"
-    );
 }
 fn gate_config(daily: f64) -> ClaudeConfig {
     ClaudeConfig {

@@ -3,7 +3,7 @@
 
 use chrono::TimeDelta;
 
-use super::support_tests::{email, seen_at, task};
+use super::support_tests::{email, seen_at, task, use_sample_criteria};
 use super::*;
 use crate::fixtures::{add, panel};
 use jobbot_app::ports::store::EmailKind;
@@ -83,10 +83,10 @@ fn an_empty_snapshot_has_every_key_the_front_relies_on() {
     let (panel, _dir) = panel();
     let json = serde_json::to_value(build_snapshot(&panel).unwrap()).unwrap();
     assert_eq!(missing_contract_paths(&json, false), Vec::<String>::new());
-    // The walk can fail: a key the snapshot does not have is reported, with and without a list.
+    // The walk can fail: a key the snapshot does not have is reported. (Through a list it is
+    // checked in the test with cards: every column here is empty, so any path through one fails.)
     assert!(!has_path(&json, &["controls", "no_such_key"]));
     assert!(!has_path(&json, &["board", "no_such_key"]));
-    assert!(!has_path(&json, &["board[]", "cards[]", "key"]));
     // The two keys that say nothing until the engine and Windows have spoken are there, empty.
     for path in [
         "controls.claude_account",
@@ -136,6 +136,9 @@ fn a_snapshot_with_data_has_every_key_the_front_relies_on_down_to_the_cards() {
     let json = serde_json::to_value(build_snapshot(&panel).unwrap()).unwrap();
 
     assert_eq!(missing_contract_paths(&json, true), Vec::<String>::new());
+    // The walk through a list finds a key the cards have and reports one they do not.
+    assert!(has_path(&json, &["board[]", "cards[]", "key"]));
+    assert!(!has_path(&json, &["board[]", "cards[]", "no_such_key"]));
     // The sub-keys the front checks on the account and on the task (`ACCOUNT_KEYS`, `TASK_KEYS`
     // of `panel-src/test/helpers/contract.mjs`); null in an empty snapshot, so only here.
     assert_eq!(
@@ -164,7 +167,8 @@ fn a_snapshot_with_data_has_every_key_the_front_relies_on_down_to_the_cards() {
 
 #[test]
 fn the_new_fields_are_named_the_way_the_page_reads_them() {
-    let (panel, _dir) = panel();
+    let (mut panel, dir) = panel();
+    use_sample_criteria(&mut panel, dir.path());
     seen_at(&panel, "1", 80.0, *NOW, Some(&[]));
 
     let json = serde_json::to_value(build_snapshot(&panel).unwrap()).unwrap();

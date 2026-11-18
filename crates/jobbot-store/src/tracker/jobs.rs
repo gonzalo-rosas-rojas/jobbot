@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, Utc};
 use jobbot_domain::models::Job;
 use jobbot_domain::text::{link_base, normalize};
-use rusqlite::{OptionalExtension, Row, TransactionBehavior, params, params_from_iter};
+use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params, params_from_iter};
 
 use super::{
     Result, State, Tracker, TrackerError, from_text, optional_from_text, placeholders, to_text,
@@ -52,21 +52,65 @@ fn job_from_row(row: &Row<'_>) -> rusqlite::Result<Job> {
     })
 }
 
+/// The key of the stored posting that points to the same link as `job` (`link_base`), by key
+/// order, if any.
+fn find_by_link(conn: &Connection, job: &Job) -> Result<Option<String>> {
+    let base = link_base(&job.url);
+    if base.is_empty() {
+        return Ok(None);
+    }
+    let mut stmt = conn.prepare(
+        "SELECT key, url, apply_url FROM jobs \
+         WHERE instr(lower(url), ?1) > 0 OR instr(lower(apply_url), ?1) > 0 ORDER BY key",
+    )?;
+    let rows = stmt.query_map([&base], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+            row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+        ))
+    })?;
+    for row in rows {
+        let (key, url, apply_url) = row?;
+        if link_base(&url) == base || link_base(&apply_url) == base {
+            return Ok(Some(key));
+        }
+    }
+    Ok(None)
+}
+
+/// The four columns `refresh_posting` may rewrite, as stored.
+#[derive(Debug, PartialEq)]
+struct RefreshedFields {
+    apply_url: String,
+    posted_at: Option<String>,
+    location: String,
+    remote: bool,
+}
+
+impl RefreshedFields {
+    /// What these columns become after a fetch reports `job`: a blank (an empty link or location,
+    /// a missing date) never replaces a good value.
+    fn refreshed_by(&self, job: &Job) -> RefreshedFields {
+        let keep_if_blank =
+            |fresh: &str, old: &str| if fresh.is_empty() { old } else { fresh }.to_string();
+        RefreshedFields {
+            apply_url: keep_if_blank(&job.apply_url, &self.apply_url),
+            posted_at: job
+                .posted_at
+                .map(to_text)
+                .or_else(|| self.posted_at.clone()),
+            location: keep_if_blank(&job.location, &self.location),
+            remote: job.remote,
+        }
+    }
+}
+
 impl Tracker {
     /// True when this exact posting, or the same title at the same company, is known.
     /// Postings with an empty company or title only match by key.
     pub fn has_posting(&self, job: &Job) -> Result<bool> {
-        let (company_norm, title_lc) = posting_identity(job);
-        let conn = self.lock();
-        let found = conn
-            .query_row(
-                "SELECT 1 FROM jobs WHERE key = ?1 \
-                 OR (?2 <> '' AND ?3 <> '' AND company_norm = ?2 AND title_lc = ?3) LIMIT 1",
-                params![job.key(), company_norm, title_lc],
-                |_| Ok(()),
-            )
-            .optional()?;
-        Ok(found.is_some())
+        self.posting_known(job, None)
     }
 
     /// The key of the stored posting that `job` stands for, or `None` when it is new. In order: the
@@ -82,25 +126,8 @@ impl Tracker {
         if by_key.is_some() {
             return Ok(by_key);
         }
-        let base = link_base(&job.url);
-        if !base.is_empty() {
-            let mut stmt = conn.prepare(
-                "SELECT key, url, apply_url FROM jobs \
-                 WHERE instr(lower(url), ?1) > 0 OR instr(lower(apply_url), ?1) > 0 ORDER BY key",
-            )?;
-            let rows = stmt.query_map([&base], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-                    row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-                ))
-            })?;
-            for row in rows {
-                let (key, url, apply_url) = row?;
-                if link_base(&url) == base || link_base(&apply_url) == base {
-                    return Ok(Some(key));
-                }
-            }
+        if let Some(key) = find_by_link(&conn, job)? {
+            return Ok(Some(key));
         }
         let (company_norm, title_lc) = posting_identity(job);
         if company_norm.is_empty() || title_lc.is_empty() {
@@ -121,14 +148,21 @@ impl Tracker {
     /// after `repost_cutoff`. A role the company posts again after the old one went stale or was
     /// withdrawn is a new posting. The same key is always the same posting.
     pub fn has_posting_since(&self, job: &Job, repost_cutoff: DateTime<Utc>) -> Result<bool> {
+        self.posting_known(job, Some(repost_cutoff))
+    }
+
+    /// The question behind `has_posting` and `has_posting_since`: the same key, or the same title
+    /// at the same company (only when `live_since` is given, one dated or first seen at or after
+    /// it).
+    fn posting_known(&self, job: &Job, live_since: Option<DateTime<Utc>>) -> Result<bool> {
         let (company_norm, title_lc) = posting_identity(job);
         let conn = self.lock();
         let found = conn
             .query_row(
                 "SELECT 1 FROM jobs WHERE key = ?1 \
                  OR (?2 <> '' AND ?3 <> '' AND company_norm = ?2 AND title_lc = ?3 \
-                     AND COALESCE(posted_at, first_seen) >= ?4) LIMIT 1",
-                params![job.key(), company_norm, title_lc, to_text(repost_cutoff)],
+                     AND (?4 IS NULL OR COALESCE(posted_at, first_seen) >= ?4)) LIMIT 1",
+                params![job.key(), company_norm, title_lc, live_since.map(to_text)],
                 |_| Ok(()),
             )
             .optional()?;
@@ -177,56 +211,69 @@ impl Tracker {
     /// Brings a stored posting up to date with what its source reports today: apply link, posting
     /// date, location and remote flag (a source may fix how it reads them after the posting was
     /// stored, and a posting's own data changes). The score, its detail, the pay and every other
-    /// field stay as they were scored. Returns whether anything changed; one UPDATE.
+    /// field stay as they were scored. Returns whether the posting changed. One UPDATE on the
+    /// posting; when its link changed, the review of the old form is reset in the same
+    /// transaction.
     ///
     /// A blank never replaces a good value: not an empty apply link, not an empty location, not a
     /// missing date (a fetch that lacks them says nothing about them). A posting that is not
     /// stored is not created.
     pub fn refresh_posting(&self, job: &Job) -> Result<bool> {
-        let mut conn = self.lock();
+        let mut guard = self.lock();
         // One transaction: the new link and the dropped approval land together or not at all (a
         // link changed with the old form's approval still standing would be sent unreviewed).
-        let conn = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let old_apply_url: Option<String> = conn
+        let tx = guard.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let old: Option<RefreshedFields> = tx
             .query_row(
-                "SELECT apply_url FROM jobs WHERE key = ?1",
+                "SELECT apply_url, posted_at, location, remote FROM jobs WHERE key = ?1",
                 [job.key()],
-                |row| row.get(0),
+                |row| {
+                    Ok(RefreshedFields {
+                        apply_url: row.get(0)?,
+                        posted_at: row.get(1)?,
+                        location: row.get(2)?,
+                        remote: row.get(3)?,
+                    })
+                },
             )
             .optional()?;
-        let changed = conn.execute(
-            "UPDATE jobs SET \
-               apply_url = CASE WHEN ?1 <> '' THEN ?1 ELSE apply_url END, \
-               posted_at = COALESCE(?2, posted_at), \
-               location = CASE WHEN ?3 <> '' THEN ?3 ELSE location END, \
-               remote = ?4 \
-             WHERE key = ?5 AND ( \
-               (?1 <> '' AND apply_url <> ?1) \
-               OR (?2 IS NOT NULL AND posted_at IS NOT ?2) \
-               OR (?3 <> '' AND location <> ?3) \
-               OR remote <> ?4)",
+        let Some(old) = old else {
+            return Ok(false);
+        };
+        let new = old.refreshed_by(job);
+        if new == old {
+            return Ok(false);
+        }
+        tx.execute(
+            "UPDATE jobs SET apply_url = ?1, posted_at = ?2, location = ?3, remote = ?4 \
+             WHERE key = ?5",
             params![
-                job.apply_url,
-                job.posted_at.map(to_text),
-                job.location,
-                job.remote,
+                new.apply_url,
+                new.posted_at,
+                new.location,
+                new.remote,
                 job.key()
             ],
         )?;
         // The review (the approval and the dry-run screenshot) belongs to the form at the OLD link.
         // A posting that now points to another form must be looked at again before anything is
         // sent; what was already sent or finished keeps its history.
-        let relinked =
-            !job.apply_url.is_empty() && old_apply_url.is_some_and(|old| old != job.apply_url);
-        if changed > 0 && relinked {
-            conn.execute(
-                "UPDATE applications SET approved = 0, screenshot_path = NULL \
-                 WHERE job_key = ?1 AND state IN ('prepared', 'needs_gonza')",
-                [job.key()],
+        if new.apply_url != old.apply_url {
+            let reviewed = [State::Prepared, State::NeedsGonza];
+            tx.execute(
+                &format!(
+                    "UPDATE applications SET approved = 0, screenshot_path = NULL \
+                     WHERE job_key = ? AND state IN ({})",
+                    placeholders(reviewed.len())
+                ),
+                params_from_iter(
+                    std::iter::once(job.key())
+                        .chain(reviewed.iter().map(|s| s.as_str().to_string())),
+                ),
             )?;
         }
-        conn.commit()?;
-        Ok(changed > 0)
+        tx.commit()?;
+        Ok(true)
     }
 
     pub fn get_job(&self, key: &str) -> Result<Option<Job>> {

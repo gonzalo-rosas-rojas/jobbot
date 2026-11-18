@@ -3,10 +3,10 @@
 
 use std::io::Write;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use chrono::{DateTime, Utc};
 
-use super::claude::{claude_gate, claude_runner, print_account_warnings};
+use super::claude::{ClaudeSetup, print_account_warnings, read_cv_master};
 use super::prep::open_prep_store;
 use super::run_guard::WindowWatch;
 use super::{Deps, EXIT_ERROR, EXIT_OK, open_tracker};
@@ -23,16 +23,16 @@ pub(super) async fn cmd_dossier(
     keys: &[String],
     out: &mut dyn Write,
 ) -> Result<i32> {
-    let config = load_claude_config(&paths.profile_dir.join("claude.toml"))?;
-    let tracker = open_tracker(paths)?;
-    let runner = claude_runner(paths, deps, &config)?;
+    let setup = ClaudeSetup::open(paths, deps)?;
+    let tracker = &setup.tracker;
     let store = open_prep_store(paths)?;
-    let cv_md = std::fs::read_to_string(&paths.cv_master)
-        .with_context(|| format!("leyendo {}", paths.cv_master.display()))?;
+    let cv_md = read_cv_master(paths)?;
     let exclusions = load_exclusions(&paths.profile_dir.join("exclusions.toml"))?;
-    let gate = claude_gate(runner.as_ref(), &tracker, &config);
-    // Before any prompt: a wrong login stops the whole command, not one dossier.
-    gate.check_account(now).await?;
+    let gate = setup.gate();
+    // Before any prompt: a wrong login stops the whole command, not one dossier. A managed
+    // policy on the account is shown, as in `run-daily`.
+    let seen = gate.check_account(now).await?;
+    print_account_warnings(&seen, out)?;
     let dir = paths.data_dir.join("dossiers");
     let mut code = EXIT_OK;
     for key in keys {
@@ -81,12 +81,12 @@ pub(super) async fn run_dossier_step(
     }
     let config = load_claude_config(&paths.profile_dir.join("claude.toml"))?;
     due.truncate(config.max_dossiers_per_run);
-    let cv_md = std::fs::read_to_string(&paths.cv_master)
-        .with_context(|| format!("leyendo {}", paths.cv_master.display()))?;
-    let runner = claude_runner(paths, deps, &config)?;
+    let cv_md = read_cv_master(paths)?;
+    let setup = ClaudeSetup::with(paths, deps, config, tracker)?;
+    let tracker = &setup.tracker;
     let store = open_prep_store(paths)?;
     let exclusions = load_exclusions(&paths.profile_dir.join("exclusions.toml"))?;
-    let gate = claude_gate(runner.as_ref(), &tracker, &config);
+    let gate = setup.gate();
     // A wrong login is an account error: `run_daily_steps` turns it into exit 1.
     let seen = gate.check_account(now).await?;
     print_account_warnings(&seen, out)?;
@@ -129,7 +129,6 @@ mod tests {
         temp_root, tracker_of, with_claude, write_claude_toml, write_cv_master,
     };
     use crate::models::Job;
-    use crate::prep::PrepStore;
     use crate::testing::{FakeClaude, SAMPLE_CV, make_job, make_job_with, sample_dossier_json};
 
     #[tokio::test]
@@ -149,31 +148,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn prep_next_serves_the_cards_that_dossiers_add() {
+    async fn dossier_shows_the_managed_policy_warning_of_the_account() {
         let root = temp_root();
-        std::fs::create_dir_all(root.path().join("data")).unwrap();
-        let store = PrepStore::open(&root.path().join("data").join("prep.db")).unwrap();
-        let card = crate::prep::Question {
-            id: "gap-x-1".into(),
-            topic: "kubernetes".into(),
-            question: "What does a Deployment do?".into(),
-            answer: "It manages ReplicaSets.".into(),
-        };
-        store.add_cards(&[card], "test:1", open_now()).unwrap();
-        drop(store);
-        let (code, out) = plain(
-            root.path(),
-            open_now(),
-            &["prep", "next", "--topic", "kubernetes"],
-        )
-        .await;
-        assert_eq!(code, 0);
-        assert!(
-            out.contains("gap-x-1 [kubernetes]") && out.contains("What does a Deployment do?"),
-            "{out}"
+        write_cv_master(root.path(), SAMPLE_CV);
+        seed_replied(root.path(), &make_job());
+        let note = "hay una política administrada de prueba";
+        let fake = Arc::new(
+            FakeClaude::new(vec![FakeClaude::structured(sample_dossier_json(), 0.05)])
+                .warning_about(note),
         );
-        let (_, out) = plain(root.path(), open_now(), &["prep", "reveal", "gap-x-1"]).await;
-        assert!(out.contains("It manages ReplicaSets."), "{out}");
+        let deps = with_claude(fake_deps(vec![]).0, &fake);
+        let (code, out) = cli(root.path(), open_now(), deps, &["dossier", "test:1"]).await;
+        assert_eq!(code, 0, "{out}");
+        assert!(out.contains(&format!("Aviso: {note}")), "{out}");
     }
 
     /// A Claude that takes its time, so a run lasts long enough to cross the edge of the window.

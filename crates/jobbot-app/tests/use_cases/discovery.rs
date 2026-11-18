@@ -1,5 +1,5 @@
-//! The `discovery` use cases against the real SQLite stores, the fake Claude and the shipped
-//! profile (moved from the root crate's `src/discovery.rs`).
+//! The `discovery` use cases against the real SQLite stores and the fake Claude, with
+//! made-up rules (moved from the root crate's `src/discovery.rs`).
 
 use async_trait::async_trait;
 use chrono::TimeDelta;
@@ -7,11 +7,11 @@ use chrono::TimeDelta;
 use jobbot_app::discovery::*;
 use jobbot_app::ports::Source;
 use jobbot_app::ports::store::INTENT_SUBMIT;
-use jobbot_app::profile::{load_criteria, load_exclusions};
 use jobbot_domain::models::{FetchError, FetchResult, Job};
 use jobbot_domain::rules::{Criteria, Exclusions};
 use jobbot_domain::state::State;
 use jobbot_testkit::Tracker;
+use jobbot_testkit::profile::{sample_criteria, sample_exclusions};
 use jobbot_testkit::{NOW, make_job_with};
 
 const GOOD_DESC: &str = "Build LLM agents with python, typescript, react, rag and mcp. \
@@ -52,11 +52,7 @@ fn lines(errors: &[FetchError]) -> Vec<String> {
     errors.iter().map(ToString::to_string).collect()
 }
 fn rules() -> (Criteria, Exclusions) {
-    let paths = jobbot_testkit::real_paths();
-    (
-        load_criteria(&paths.profile_dir.join("criteria.toml")).unwrap(),
-        load_exclusions(&paths.profile_dir.join("exclusions.toml")).unwrap(),
-    )
+    (sample_criteria(), sample_exclusions())
 }
 fn good(id: &str, company: &str) -> Job {
     make_job_with(|job| {
@@ -69,7 +65,7 @@ fn good(id: &str, company: &str) -> Job {
         job.salary_max_monthly_usd = Some(7000.0);
     })
 }
-/// The shipped rules with the numbers of the extra-place tests pinned: Australia open, a
+/// The sample rules with the numbers of the extra-place tests pinned: Australia open, a
 /// threshold nothing in Chile reaches and one that everything in Australia reaches.
 fn australia_rules() -> (Criteria, Exclusions) {
     let (criteria, exclusions) = rules();
@@ -251,7 +247,7 @@ fn jobs() -> Vec<Job> {
     low_pay.salary_max_monthly_usd = Some(2200.0);
     vec![
         good("1", "Acme AI"),
-        good("2", "Tidewater Systems"),
+        good("2", &sample_exclusions().names[0]),
         us_only,
         sales,
         low_pay,
@@ -348,7 +344,7 @@ async fn a_posting_seen_before_gets_its_current_apply_link() {
         moved.apply_url
     );
 }
-/// The rules a discovery run uses in the refresh and prune tests: the shipped ones with the
+/// The rules a discovery run uses in the refresh and prune tests: the sample ones with the
 /// 45-day limit pinned.
 fn pruning_rules() -> (Criteria, Exclusions) {
     let (criteria, exclusions) = rules();

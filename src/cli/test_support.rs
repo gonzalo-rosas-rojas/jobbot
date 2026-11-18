@@ -19,8 +19,8 @@ use crate::testing::{FakeClaude, make_job_with};
 use crate::tracker::{State, Tracker};
 
 // Two instants chosen with the window tests (the same schedule file is used):
-// Wednesday 2026-10-14 15:00 UTC is 11:00 in New York, a busy hour; 22:00 UTC is 18:00 there
-// and 19:00 in Santiago, so the execution window is open.
+// Wednesday 2026-10-14 15:00 UTC is 12:00 in Santiago, a busy hour; 22:00 UTC is 19:00 there,
+// so the execution window is open (it opens at 18:00).
 pub(super) fn busy_now() -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 10, 14, 15, 0, 0).unwrap()
 }

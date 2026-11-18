@@ -550,6 +550,35 @@ async fn dispatch(
     }
 }
 
+/// How much of a flag's refused value is shown back.
+const SHOWN_FLAG_CHARS: usize = 40;
+
+/// Reads the date given to `flag` (RFC 3339). A text that is not one is refused on `out` with the
+/// same sentence for every flag, naming `example` and showing what was received as one plain
+/// line of at most `SHOWN_FLAG_CHARS` characters; `None` then means the command stops with
+/// `EXIT_ERROR`.
+fn parse_flag_time(
+    flag: &str,
+    text: &str,
+    example: &str,
+    out: &mut dyn Write,
+) -> Result<Option<DateTime<Utc>>> {
+    match DateTime::parse_from_rfc3339(text.trim()) {
+        Ok(time) => Ok(Some(time.with_timezone(&Utc))),
+        Err(_) => {
+            let received: String = crate::outbound::plain_line(text)
+                .chars()
+                .take(SHOWN_FLAG_CHARS)
+                .collect();
+            writeln!(
+                out,
+                "{flag} debe ser una fecha RFC 3339, por ejemplo {example} (recibí «{received}»)"
+            )?;
+            Ok(None)
+        }
+    }
+}
+
 fn open_tracker(paths: &Paths) -> Result<Tracker> {
     std::fs::create_dir_all(&paths.data_dir)?;
     Ok(Tracker::open(&paths.data_dir.join("jobbot.db"))?)

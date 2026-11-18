@@ -11,7 +11,36 @@ use super::{
     optional_from_text, placeholders, state_from_text, to_text,
 };
 
+/// The span the state changes of `moves_between` are read from (`?1` from, `?2` until), with the
+/// join that leaves out an event whose posting is not stored. Its total, its rows and
+/// `move_counts_between` must add up, so the three read this one text.
+const MOVES_IN_SPAN: &str =
+    "FROM events e JOIN jobs j ON j.key = e.job_key WHERE e.at >= ?1 AND e.at <= ?2";
+
 impl Tracker {
+    /// Runs a COUNT query that lists states and then a `since` time: `sql` has `{marks}` where the
+    /// `?` of the states go and one more `?` after them for `since`. No states, no count: 0.
+    fn count_for_states_since(
+        &self,
+        sql: &str,
+        states: &[State],
+        since: DateTime<Utc>,
+    ) -> Result<i64> {
+        if states.is_empty() {
+            return Ok(0);
+        }
+        let sql = sql.replace("{marks}", &placeholders(states.len()));
+        let since_text = to_text(since);
+        let names = states.iter().map(|state| state.as_str());
+        let conn = self.lock();
+        let count = conn.query_row(
+            &sql,
+            params_from_iter(names.chain(std::iter::once(since_text.as_str()))),
+            |row| row.get(0),
+        )?;
+        Ok(count)
+    }
+
     /// Number of applications per state name.
     pub fn counts(&self) -> Result<BTreeMap<String, i64>> {
         let conn = self.lock();
@@ -46,23 +75,11 @@ impl Tracker {
 
     /// Transitions into any of `to_states` recorded at or after `since`.
     pub fn count_events(&self, to_states: &[State], since: DateTime<Utc>) -> Result<i64> {
-        if to_states.is_empty() {
-            return Ok(0);
-        }
-        let marks = placeholders(to_states.len());
-        let since_text = to_text(since);
-        let conn = self.lock();
-        let count = conn.query_row(
-            &format!("SELECT COUNT(*) FROM events WHERE to_state IN ({marks}) AND at >= ?"),
-            params_from_iter(
-                to_states
-                    .iter()
-                    .map(|state| state.as_str())
-                    .chain(std::iter::once(since_text.as_str())),
-            ),
-            |row| row.get(0),
-        )?;
-        Ok(count)
+        self.count_for_states_since(
+            "SELECT COUNT(*) FROM events WHERE to_state IN ({marks}) AND at >= ?",
+            to_states,
+            since,
+        )
     }
 
     /// The history of one application, oldest first. Empty when the key has none.
@@ -97,16 +114,14 @@ impl Tracker {
         let (from, until) = (to_text(from), to_text(until));
         let conn = self.lock();
         let total = conn.query_row(
-            "SELECT COUNT(*) FROM events e JOIN jobs j ON j.key = e.job_key \
-             WHERE e.at >= ?1 AND e.at <= ?2",
+            &format!("SELECT COUNT(*) {MOVES_IN_SPAN}"),
             [&from, &until],
             |row| row.get(0),
         )?;
-        let mut stmt = conn.prepare(
-            "SELECT e.at, e.job_key, j.company, j.title, e.to_state \
-             FROM events e JOIN jobs j ON j.key = e.job_key \
-             WHERE e.at >= ?1 AND e.at <= ?2 ORDER BY e.at DESC, e.id DESC LIMIT ?3",
-        )?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT e.at, e.job_key, j.company, j.title, e.to_state {MOVES_IN_SPAN} \
+             ORDER BY e.at DESC, e.id DESC LIMIT ?3"
+        ))?;
         let rows = stmt.query_map(
             params![from, until, i64::try_from(limit).unwrap_or(i64::MAX)],
             |row| {
@@ -133,9 +148,9 @@ impl Tracker {
     ) -> Result<Vec<(State, i64)>> {
         let (from, until) = (to_text(from), to_text(until));
         let conn = self.lock();
-        let mut stmt = conn.prepare(
-            "SELECT e.to_state, COUNT(*) FROM events e JOIN jobs j ON j.key = e.job_key              WHERE e.at >= ?1 AND e.at <= ?2 GROUP BY e.to_state",
-        )?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT e.to_state, COUNT(*) {MOVES_IN_SPAN} GROUP BY e.to_state"
+        ))?;
         let rows = stmt.query_map([&from, &until], |row| {
             let to: String = row.get(0)?;
             Ok((state_from_text(0, &to)?, row.get::<_, i64>(1)?))
@@ -148,51 +163,25 @@ impl Tracker {
     /// Applications that reached any of `states` at or after `since`, each counted once even if it
     /// went through (or repeated) a state several times; `count_events` counts every event.
     pub fn jobs_reaching(&self, states: &[State], since: DateTime<Utc>) -> Result<i64> {
-        if states.is_empty() {
-            return Ok(0);
-        }
-        let marks = placeholders(states.len());
-        let since_text = to_text(since);
-        let conn = self.lock();
-        let count = conn.query_row(
-            &format!(
-                "SELECT COUNT(DISTINCT job_key) FROM events WHERE to_state IN ({marks}) AND at >= ?"
-            ),
-            params_from_iter(
-                states
-                    .iter()
-                    .map(|state| state.as_str())
-                    .chain(std::iter::once(since_text.as_str())),
-            ),
-            |row| row.get(0),
-        )?;
-        Ok(count)
+        self.count_for_states_since(
+            "SELECT COUNT(DISTINCT job_key) FROM events WHERE to_state IN ({marks}) AND at >= ?",
+            states,
+            since,
+        )
     }
 
     /// Applications submitted at or after `since` that have reached any of `states` (at any
     /// time since): the numerator of a response rate whose denominator is `submitted_since`, so
     /// the rate cannot pass 1.
     pub fn submitted_since_reaching(&self, since: DateTime<Utc>, states: &[State]) -> Result<i64> {
-        if states.is_empty() {
-            return Ok(0);
-        }
-        let marks = placeholders(states.len());
-        let since_text = to_text(since);
-        let conn = self.lock();
-        let count = conn.query_row(
-            &format!(
-                "SELECT COUNT(*) FROM applications a \
-                 WHERE a.submitted_at IS NOT NULL AND a.submitted_at >= ? \
-                   AND EXISTS (SELECT 1 FROM events e WHERE e.job_key = a.job_key \
-                               AND e.to_state IN ({marks}))"
-            ),
-            params_from_iter(
-                std::iter::once(since_text.as_str())
-                    .chain(states.iter().map(|state| state.as_str())),
-            ),
-            |row| row.get(0),
-        )?;
-        Ok(count)
+        self.count_for_states_since(
+            "SELECT COUNT(*) FROM applications a \
+             WHERE EXISTS (SELECT 1 FROM events e WHERE e.job_key = a.job_key \
+                           AND e.to_state IN ({marks})) \
+               AND a.submitted_at IS NOT NULL AND a.submitted_at >= ?",
+            states,
+            since,
+        )
     }
 
     /// Applications that reached both `first` and `then` at some point: the base of a
@@ -309,19 +298,18 @@ mod tests {
     use chrono::{DateTime, TimeDelta, Utc};
     use jobbot_domain::fixtures::{NOW, make_job, make_job_with};
 
-    use crate::tracker::test_support::{stored_at, submit, three_scored};
+    use crate::tracker::test_support::{stored_at, submit, submit_approved, three_scored};
     use crate::tracker::{SourceFunnelRow, State, Tracker, to_text};
 
     #[test]
     fn approved_submitted_total_counts_only_approved() {
         let t = Tracker::in_memory().unwrap();
-        submit(
+        submit_approved(
             &t,
             &make_job_with(|j| {
                 j.external_id = "1".into();
                 j.company = "A".into();
             }),
-            true,
         );
         submit(
             &t,
@@ -329,7 +317,6 @@ mod tests {
                 j.external_id = "2".into();
                 j.company = "B".into();
             }),
-            false,
         );
         assert_eq!(t.approved_submitted_total().unwrap(), 1);
     }
@@ -573,7 +560,8 @@ mod tests {
         // An event whose posting is gone from `jobs` is left out, as `moves_between` leaves it.
         t.lock()
             .execute(
-                "INSERT INTO events (job_key, at, from_state, to_state)                  VALUES ('ghost:1', ?1, NULL, 'scored')",
+                "INSERT INTO events (job_key, at, from_state, to_state) \
+                 VALUES ('ghost:1', ?1, NULL, 'scored')",
                 [to_text(*NOW)],
             )
             .unwrap();

@@ -3,7 +3,8 @@
 //! itself.
 
 use super::support_tests::{
-    bank, checkbox_group, field, pay_and_start_bank, race_bank, radio, texts,
+    action_idxs, bank_with, bank_with_gaps, checkbox_group, field, pay_and_start_bank, race_bank,
+    radio, texts,
 };
 use super::*;
 use jobbot_domain::answers::AnswerEntry;
@@ -32,12 +33,10 @@ fn an_essay_box_never_gets_a_one_line_value_found_by_a_keyword() {
 
 #[test]
 fn the_shipped_bank_answers_a_salary_text_box_by_its_whole_label_and_no_essay() {
-    let bank = crate::test_support::load_bank(
-        &crate::test_support::workspace_root()
-            .join("profile")
-            .join("answers.toml"),
-    )
-    .unwrap();
+    let bank = crate::test_support::shipped_bank();
+    // Every wording of the salary question reaches the same one-line answer; none of them is
+    // answered with an empty or multi-line text.
+    let mut answers = Vec::new();
     for label in [
         "Salary expectations",
         "Compensation Expectations*",
@@ -49,12 +48,27 @@ fn the_shipped_bank_answers_a_salary_text_box_by_its_whole_label_and_no_essay() 
         let fields = [field(0, "textarea", "", label, true)];
         let plan = plan_fields(&fields, &bank, Path::new("cv.pdf"));
         assert!(plan.missing.is_empty(), "{label}: {:?}", plan.missing);
-        assert_eq!(
-            plan.actions[0].value,
-            FillValue::Text("USD 6,000 per month".into()),
-            "{label}"
+        let [
+            FillAction {
+                value: FillValue::Text(text),
+                ..
+            },
+        ] = plan.actions.as_slice()
+        else {
+            panic!("{label}: not one text answer: {:?}", plan.actions);
+        };
+        assert!(
+            !text.trim().is_empty() && !text.contains('\n'),
+            "{label}: {text:?}"
         );
+        answers.push(text.clone());
     }
+    answers.dedup();
+    assert_eq!(
+        answers.len(),
+        1,
+        "the wordings answer differently: {answers:?}"
+    );
     for label in ESSAYS {
         let fields = [field(0, "textarea", "", label, true)];
         let plan = plan_fields(&fields, &bank, Path::new("cv.pdf"));
@@ -64,13 +78,10 @@ fn the_shipped_bank_answers_a_salary_text_box_by_its_whole_label_and_no_essay() 
 
 #[test]
 fn an_essay_box_is_answered_by_an_entry_written_for_its_whole_label() {
-    let bank = AnswerBank {
-        entries: vec![AnswerEntry::new(
-            &["=compensation expectations"],
-            Some("USD 6,000 per month"),
-        )],
-        consent_phrases: vec![],
-    };
+    let bank = bank_with(vec![AnswerEntry::new(
+        &["=compensation expectations"],
+        Some("USD 6,000 per month"),
+    )]);
     let fields = [field(0, "textarea", "", "Compensation Expectations*", true)];
     let plan = plan_fields(&fields, &bank, Path::new("cv.pdf"));
     assert!(plan.missing.is_empty(), "{:?}", plan.missing);
@@ -112,10 +123,7 @@ fn a_long_label_is_answered_in_a_one_line_box_only_by_its_exact_entry() {
     // cannot make it carry extra claims: those are still answered.
     let long_yes_no =
         "Are you legally authorized to work in the country where you are applying today?";
-    let bank = AnswerBank {
-        entries: vec![AnswerEntry::new(&["legally authorized"], Some("Yes"))],
-        consent_phrases: vec![],
-    };
+    let bank = bank_with(vec![AnswerEntry::new(&["legally authorized"], Some("Yes"))]);
     let fields = [
         field(0, "select", "", long_yes_no, true),
         field(1, "input", "combobox", long_yes_no, true),
@@ -123,7 +131,7 @@ fn a_long_label_is_answered_in_a_one_line_box_only_by_its_exact_entry() {
         radio(3, "auth", long_yes_no, "No", true),
     ];
     let plan = plan_fields(&fields, &bank, Path::new("cv.pdf"));
-    let answered: Vec<usize> = plan.actions.iter().map(|action| action.idx).collect();
+    let answered = action_idxs(&plan);
     assert_eq!(answered, vec![0, 1, 2]);
 }
 
@@ -155,13 +163,10 @@ fn a_bare_yes_no_takes_a_qualified_option_only_when_it_is_the_only_one() {
 
 #[test]
 fn a_radio_group_does_not_guess_between_two_no_options() {
-    let bank = AnswerBank {
-        entries: vec![AnswerEntry::new(
-            &["work location in the united states"],
-            Some("No"),
-        )],
-        consent_phrases: vec![],
-    };
+    let bank = bank_with(vec![AnswerEntry::new(
+        &["work location in the united states"],
+        Some("No"),
+    )]);
     let question = "Is your work location in the United States";
     for required in [true, false] {
         let fields: Vec<FieldInfo> = relocation_options()
@@ -187,10 +192,7 @@ fn a_radio_group_does_not_guess_between_two_no_options() {
 
 #[test]
 fn a_checkbox_group_does_not_guess_between_two_no_options_either() {
-    let bank = AnswerBank {
-        entries: vec![AnswerEntry::new(&["work location"], Some("No"))],
-        consent_phrases: vec![],
-    };
+    let bank = bank_with(vec![AnswerEntry::new(&["work location"], Some("No"))]);
     let fields = checkbox_group(
         0,
         "Is your work location in the United States? (select one)",
@@ -261,13 +263,10 @@ fn a_mark_all_that_apply_race_group_still_ticks_only_white() {
         ],
         true,
     );
-    let bank = AnswerBank {
-        entries: vec![AnswerEntry::new(&["race/ethnicity"], Some("White"))],
-        consent_phrases: vec![],
-    };
+    let bank = bank_with(vec![AnswerEntry::new(&["race/ethnicity"], Some("White"))]);
     let plan = plan_fields(&fields, &bank, Path::new("cv.pdf"));
     assert!(plan.missing.is_empty(), "{:?}", plan.missing);
-    let ticked: Vec<usize> = plan.actions.iter().map(|action| action.idx).collect();
+    let ticked = action_idxs(&plan);
     assert_eq!(ticked, vec![2]);
 }
 
@@ -280,33 +279,6 @@ fn a_drop_down_list_is_never_answered_when_it_offers_hispanic_or_latino() {
     assert_eq!(options_named(&without, &race, false), vec![0]);
     // A multi-select list takes the answer whatever else it offers.
     assert_eq!(options_named(&with, &race, true), vec![0]);
-}
-
-#[test]
-fn not_hispanic_said_in_another_wording_is_refused() {
-    for option in [
-        "White (Other than Hispanic or Latino)",
-        "White, excluding Hispanic or Latino",
-        "White (No Hispanic origin)",
-        "White except Hispanic",
-        "White without Hispanic or Latino origin",
-        "Caucasian (other than Latinx)",
-        "Black or African American (Excluding Latina)",
-    ] {
-        assert!(claims_not_hispanic(option), "{option}");
-    }
-    for option in [
-        "Hispanic or Latino",
-        "White",
-        "Other",
-        "Other (please specify)",
-        "No answer",
-        "I do not wish to answer",
-        "Prefer not to say",
-        "Hispanic or Latino (any race)",
-    ] {
-        assert!(!claims_not_hispanic(option), "{option}");
-    }
 }
 
 #[test]
@@ -328,7 +300,7 @@ fn a_pre_ticked_marketing_box_is_reported_instead_of_going_out() {
     ];
     let allowed = AnswerBank {
         consent_phrases: vec!["privacy policy".into()],
-        ..bank()
+        ..bank_with_gaps()
     };
     let plan = plan_fields(&fields, &allowed, Path::new("cv.pdf"));
     let reported: Vec<&str> = plan

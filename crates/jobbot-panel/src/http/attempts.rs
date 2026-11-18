@@ -7,7 +7,7 @@ use anyhow::Result;
 
 use super::{Reply, Request, panic_text, post};
 use crate::Panel;
-use jobbot_app::ports::store::AttemptStart;
+use jobbot_app::ports::store::{AttemptStart, StoreError};
 
 /// The header of the attempt id a POST may carry: a repeat of the id gets the first reply back
 /// and the command runs once, so a retry never does the action twice. Optional: a POST without it runs as it always did.
@@ -61,9 +61,22 @@ pub(super) fn once(panel: &Panel, id: &str, api: &str, req: &Request) -> Result<
                 });
             match &reply {
                 Ok(reply) if reply.status < 500 => {
-                    panel
-                        .tracker
-                        .finish_attempt(id, reply.status, &reply.body)?;
+                    match panel.tracker.finish_attempt(id, reply.status, &reply.body) {
+                        Ok(()) => {}
+                        // The attempt has no row any more, so there is nowhere to keep the reply.
+                        // The command has already run: the page gets its answer, not a 500 that
+                        // would make it ask again (a retry with this id runs the command again).
+                        Err(StoreError::UnknownKey(_)) => {
+                            tracing::error!(
+                                attempt = id,
+                                api,
+                                "the attempt lost its row before its reply was kept"
+                            );
+                        }
+                        // Any other failure leaves the row `started`: the retry is told to look at
+                        // the state first.
+                        Err(err) => return Err(err.into()),
+                    }
                 }
                 // The failure is what the caller needs to see; a row that could not be dropped only
                 // answers 409 to a retry with the same id.
@@ -100,7 +113,8 @@ mod tests {
     use crate::fixtures::{add, panel};
     use crate::http::handle;
     use crate::http::support_tests::{
-        guard, json_of, panel_whose_clock_can_panic, request, text, with,
+        guard, json_of, panel_whose_clock_can_drop_an_attempt, panel_whose_clock_can_panic,
+        request, text, with,
     };
 
     const ATTEMPT: &str = "8e03978e-40d5-43e8-bc93-6894a57f9324";
@@ -157,6 +171,37 @@ mod tests {
             text(&retry)
         );
         assert_eq!(p.tracker.open_tasks().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_command_that_ran_still_answers_when_its_attempt_lost_its_row() {
+        use std::sync::atomic::Ordering;
+        let (p, _d, calls, forget_at) = panel_whose_clock_can_drop_an_attempt(ATTEMPT);
+        let body = serde_json::json!({ "text": "Llamar" }).to_string();
+        // The first clock read is `begin_attempt`'s; from the command's own read on the row is
+        // dropped, so it is gone by the time the reply is to be kept.
+        let begun = calls.load(Ordering::SeqCst);
+        forget_at.store(begun + 1, Ordering::SeqCst);
+        let reply = post_once(&p, "task/add", &body, Some(ATTEMPT));
+        forget_at.store(usize::MAX, Ordering::SeqCst);
+        assert_eq!(
+            reply.status,
+            200,
+            "the command ran, so the page gets its answer: {}",
+            text(&reply)
+        );
+        assert_eq!(reply.header("Idempotent-Replayed"), None);
+        assert_eq!(p.tracker.open_tasks().unwrap().len(), 1);
+        // The scene really was the one this test is about: the command read the clock after the
+        // attempt began, and no row was left behind (a drop before the attempt began would have
+        // left its row, finished).
+        assert!(calls.load(Ordering::SeqCst) >= begun + 2);
+        assert_eq!(
+            p.tracker
+                .begin_attempt(ATTEMPT, "task/add", body.as_bytes(), *jobbot_testkit::NOW)
+                .unwrap(),
+            AttemptStart::New
+        );
     }
 
     #[test]

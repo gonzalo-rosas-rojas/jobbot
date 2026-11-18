@@ -90,23 +90,18 @@ pub(super) enum Confirmation {
     Closed,
 }
 
-/// One look at the page while waiting: true when it confirms. In `Live` mode the first validation
-/// message that shows up is remembered in `rejection` and the wait goes on: many boards show
-/// "Submitting..." in an alert region while the request is on its way, and the confirmation that
-/// follows must win over it.
-fn judge(
+/// In `Live` mode, remembers in `rejection` the first validation message that shows up while
+/// waiting, and the wait goes on: many boards show "Submitting..." in an alert region while the
+/// request is on its way, and the confirmation that follows must win over it.
+fn remember_rejection(
     before: &PageSnapshot,
     after: &PageSnapshot,
     mode: SubmitMode,
     rejection: &mut Option<String>,
-) -> bool {
-    if newly_confirmed(before, after) {
-        return true;
-    }
+) {
     if mode == SubmitMode::Live && rejection.is_none() {
         *rejection = newly_rejected(before, after);
     }
-    false
 }
 
 /// What the wait ends with when the page never confirmed: the first validation message it showed, or
@@ -133,9 +128,10 @@ pub(super) async fn await_confirmation(
             return Confirmation::Closed;
         }
         let after = snapshot(page).await;
-        if judge(before, &after, mode, &mut rejection) {
+        if newly_confirmed(before, &after) {
             return Confirmation::Confirmed;
         }
+        remember_rejection(before, &after, mode, &mut rejection);
         if mode == SubmitMode::Live
             && let Some(reason) = wall_after_click(page).await
         {
@@ -205,14 +201,15 @@ mod tests {
         sending.errors = "Submitting your application...".into();
         let thanks = snap("https://x.test/apply", "Thank you for applying");
         let mut rejection = None;
-        assert!(!judge(&before, &sending, SubmitMode::Live, &mut rejection));
+        remember_rejection(&before, &sending, SubmitMode::Live, &mut rejection);
+        assert!(!newly_confirmed(&before, &sending));
         assert_eq!(rejection.as_deref(), Some("Submitting your application..."));
         // The first message is the one kept, and the confirmation still wins.
         let mut later = before.clone();
         later.errors = "Phone number is invalid.".into();
-        assert!(!judge(&before, &later, SubmitMode::Live, &mut rejection));
+        remember_rejection(&before, &later, SubmitMode::Live, &mut rejection);
         assert_eq!(rejection.as_deref(), Some("Submitting your application..."));
-        assert!(judge(&before, &thanks, SubmitMode::Live, &mut rejection));
+        assert!(newly_confirmed(&before, &thanks));
     }
 
     #[test]
@@ -231,7 +228,7 @@ mod tests {
         after.errors = "Phone number is invalid.".into();
         for mode in [SubmitMode::Assist, SubmitMode::DryRun] {
             let mut rejection = None;
-            assert!(!judge(&before, &after, mode, &mut rejection));
+            remember_rejection(&before, &after, mode, &mut rejection);
             assert_eq!(rejection, None, "{mode:?}");
         }
     }

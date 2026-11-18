@@ -1,7 +1,7 @@
 //! The documents and screenshots served from the user's folders. A request names an application and a
 //! kind, never a path, and the file has to sit under its own folder of `data/`.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
@@ -66,6 +66,16 @@ impl DocumentKind {
     }
 }
 
+/// `stored` as the file it really is (`canonicalize`d, so a `..` or a link is followed), when it
+/// sits under `root`, also `canonicalize`d. `None` when either cannot be resolved or the file is
+/// outside the folder. The one guard of what the panel serves from disk: `document` and
+/// `screenshot` both go through it.
+fn file_under(root: &Path, stored: &Path) -> Option<PathBuf> {
+    let root = std::fs::canonicalize(root).ok()?;
+    let file = std::fs::canonicalize(stored).ok()?;
+    file.starts_with(&root).then_some(file)
+}
+
 /// The CV, dossier or hand-over sheet of an application, as the file it is. It is the same guard as
 /// `screenshot`, because this is not a file server either: the request names an application and a
 /// kind and never a path; the file is the one the engine keeps for that application (the CV from
@@ -93,15 +103,13 @@ pub(super) fn document(panel: &Panel, key: &str, kind: DocumentKind) -> Result<R
     let Some(stored) = stored else {
         return none();
     };
-    let (Ok(root), Ok(file)) = (std::fs::canonicalize(&root), std::fs::canonicalize(&stored))
-    else {
+    let Some(file) = file_under(&root, &stored) else {
         return none();
     };
-    if !file.starts_with(&root)
-        || !file
-            .extension()
-            .and_then(|e| e.to_str())
-            .is_some_and(|e| e.eq_ignore_ascii_case(extension))
+    if !file
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case(extension))
     {
         return none();
     }
@@ -146,15 +154,12 @@ pub(super) fn screenshot(panel: &Panel, key: &str) -> Result<Reply> {
     let Some(stored) = row.screenshot_path else {
         return none();
     };
-    let Ok(root) = std::fs::canonicalize(panel.paths.data_dir.join("screenshots")) else {
+    let Some(file) = file_under(
+        &panel.paths.data_dir.join("screenshots"),
+        Path::new(&stored),
+    ) else {
         return none();
     };
-    let Ok(file) = std::fs::canonicalize(&stored) else {
-        return none();
-    };
-    if !file.starts_with(&root) {
-        return none();
-    }
     let content_type = match file
         .extension()
         .and_then(|e| e.to_str())
@@ -181,7 +186,7 @@ mod tests {
     use super::*;
     use crate::fixtures::{add, panel};
     use crate::http::handle;
-    use crate::http::support_tests::{encode, guard, json_of, request};
+    use crate::http::support_tests::{api_get, encode, guard, json_of, request};
 
     #[test]
     fn a_screenshot_is_served_only_from_the_screenshots_folder_and_a_failure_is_a_500() {
@@ -242,15 +247,7 @@ mod tests {
 
     /// `GET /api/file` for `key` and `kind`.
     fn file_of(p: &Panel, key: &str, kind: &str) -> Reply {
-        handle(
-            p,
-            &guard(),
-            &request(
-                "GET",
-                &format!("/api/file?key={}&kind={kind}", encode(key)),
-                "",
-            ),
-        )
+        api_get(p, &format!("/api/file?key={}&kind={kind}", encode(key)))
     }
 
     #[test]
