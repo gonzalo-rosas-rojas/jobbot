@@ -6,7 +6,7 @@ use std::io::Write;
 use anyhow::Result;
 use chrono::{DateTime, TimeDelta, Utc};
 
-use super::{EXIT_ERROR, EXIT_OK, RecordArgs, open_tracker};
+use super::{EXIT_ERROR, EXIT_OK, RecordArgs, open_tracker, parse_flag_time};
 use crate::actions;
 use crate::paths::Paths;
 
@@ -14,12 +14,27 @@ use crate::paths::Paths;
 /// runs fast, none for a date that has not happened.
 const FUTURE_TOLERANCE: TimeDelta = TimeDelta::minutes(5);
 
+/// Runs `act` on each key, in order, and prints what it answered. The exit code is the one `mark` gives for
+/// a refusal when any key was refused, `EXIT_OK` when all were accepted.
+fn act_on_each(
+    keys: &[String],
+    out: &mut dyn Write,
+    mut act: impl FnMut(&str) -> Result<actions::Outcome>,
+) -> Result<i32> {
+    let mut code = EXIT_OK;
+    for key in keys {
+        let outcome = act(key)?;
+        writeln!(out, "{}", outcome.message)?;
+        if !outcome.ok {
+            code = EXIT_ERROR;
+        }
+    }
+    Ok(code)
+}
+
 pub(super) fn cmd_approve(paths: &Paths, keys: &[String], out: &mut dyn Write) -> Result<i32> {
     let tracker = open_tracker(paths)?;
-    for key in keys {
-        writeln!(out, "{}", actions::approve(&tracker, key)?.message)?;
-    }
-    Ok(EXIT_OK)
+    act_on_each(keys, out, |key| actions::approve(&tracker, key))
 }
 
 pub(super) fn cmd_resolve(
@@ -29,10 +44,7 @@ pub(super) fn cmd_resolve(
     out: &mut dyn Write,
 ) -> Result<i32> {
     let tracker = open_tracker(paths)?;
-    for key in keys {
-        writeln!(out, "{}", actions::resolve(&tracker, key, now)?.message)?;
-    }
-    Ok(EXIT_OK)
+    act_on_each(keys, out, |key| actions::resolve(&tracker, key, now))
 }
 
 /// For `unconfirmed_submit` and assisted forms Gonza finished himself.
@@ -43,10 +55,7 @@ pub(super) fn cmd_confirm(
     out: &mut dyn Write,
 ) -> Result<i32> {
     let tracker = open_tracker(paths)?;
-    for key in keys {
-        writeln!(out, "{}", actions::confirm(&tracker, key, now)?.message)?;
-    }
-    Ok(EXIT_OK)
+    act_on_each(keys, out, |key| actions::confirm(&tracker, key, now))
 }
 
 /// Records a company's answer by hand: nothing reads the mailbox for it.
@@ -88,15 +97,9 @@ pub(super) fn cmd_record(
 ) -> Result<i32> {
     let at = match args.at.as_deref() {
         None => now,
-        Some(text) => match DateTime::parse_from_rfc3339(text.trim()) {
-            Ok(time) => time.with_timezone(&Utc),
-            Err(_) => {
-                writeln!(
-                    out,
-                    "--at debe ser una fecha RFC 3339, por ejemplo 2026-10-05T05:21:42Z (recibí «{text}»)"
-                )?;
-                return Ok(EXIT_ERROR);
-            }
+        Some(text) => match parse_flag_time("--at", text, "2026-10-05T05:21:42Z", out)? {
+            Some(time) => time,
+            None => return Ok(EXIT_ERROR),
         },
     };
     if at > now + FUTURE_TOLERANCE {
@@ -141,8 +144,32 @@ mod tests {
     async fn approve_unknown_key_is_reported() {
         let root = temp_root();
         let (code, out) = plain(root.path(), open_now(), &["approve", "nope:1"]).await;
-        assert_eq!(code, 0);
+        assert_eq!(code, 1, "a refused approval exits like a refused mark");
         assert!(out.contains("No existe: nope:1"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn approve_and_confirm_exit_with_an_error_only_when_a_key_was_refused() {
+        let root = temp_root();
+        seed(root.path(), &make_job(), &[State::Prepared]);
+        // Prepared but never filled in (no screenshot to review): the approval is refused.
+        let (code, out) = plain(root.path(), open_now(), &["approve", "test:1"]).await;
+        assert_eq!(code, 1, "{out}");
+        assert!(out.contains("No hay captura que revisar"), "{out}");
+        // A scored application is not waiting for Gonza: it cannot be confirmed.
+        seed(
+            root.path(),
+            &make_job_with(|j| j.external_id = "2".into()),
+            &[],
+        );
+        let (code, out) = plain(root.path(), open_now(), &["confirm", "test:2"]).await;
+        assert_eq!(code, 1, "{out}");
+        // Every key accepted: exit 0.
+        tracker_of(root.path())
+            .set_screenshot("test:1", Path::new("shots/a.png"))
+            .unwrap();
+        let (code, out) = plain(root.path(), open_now(), &["approve", "test:1"]).await;
+        assert_eq!(code, 0, "{out}");
     }
 
     #[tokio::test]
@@ -171,7 +198,7 @@ mod tests {
             .set_cv_path("test:1", Path::new("cv.pdf"))
             .unwrap();
         let (code, out) = plain(root.path(), open_now(), &["resolve", "test:1", "nope:1"]).await;
-        assert_eq!(code, 0);
+        assert_eq!(code, 1, "one key was refused: {out}");
         assert!(out.contains("De vuelta a la cola: test:1"), "{out}");
         assert!(out.contains("No existe: nope:1"), "{out}");
         assert_eq!(
@@ -211,7 +238,7 @@ mod tests {
         let root = temp_root();
         seed(root.path(), &make_job(), &[State::NeedsGonza]);
         let (code, out) = plain(root.path(), open_now(), &["confirm", "test:1", "nope:1"]).await;
-        assert_eq!(code, 0);
+        assert_eq!(code, 1, "one key was refused: {out}");
         assert!(out.contains("Confirmada como enviada: test:1"), "{out}");
         assert!(out.contains("No existe: nope:1"), "{out}");
         let row = tracker_of(root.path())
@@ -413,6 +440,77 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(row.submitted_at, Some(open_now()));
+    }
+
+    #[tokio::test]
+    async fn the_refusals_of_a_record_date_say_the_moment_as_utc_with_a_plus_zero_offset() {
+        let root = temp_root();
+        let record =
+            |at: &'static str| ["record", "--company", "Toku", "--title", "SE", "--at", at];
+        let said = |out: String| out.trim_end().to_string();
+        let (_, out) = plain(root.path(), open_now(), &record("ayer")).await;
+        assert_eq!(
+            said(out),
+            "--at debe ser una fecha RFC 3339, por ejemplo 2026-10-05T05:21:42Z (recibí «ayer»)"
+        );
+        for (at, shown) in [
+            ("2027-01-01T00:00:00Z", "2027-01-01T00:00:00+00:00"),
+            ("2026-12-31T21:00:00-03:00", "2027-01-01T00:00:00+00:00"),
+            ("2027-01-01T00:00:00.25Z", "2027-01-01T00:00:00.250+00:00"),
+        ] {
+            let (code, out) = plain(root.path(), open_now(), &record(at)).await;
+            assert_eq!(code, 1, "{at}");
+            assert_eq!(
+                said(out),
+                format!(
+                    "--at está en el futuro ({shown}): una postulación no se registra antes de enviarse."
+                ),
+                "{at}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn the_record_date_is_stored_as_the_utc_second_whatever_shape_it_came_in() {
+        let sent = Utc.with_ymd_and_hms(2026, 10, 14, 15, 0, 0).unwrap();
+        for (i, at) in [
+            "2026-10-14T15:00:00Z",
+            "2026-10-14T15:00:00+00:00",
+            "2026-10-14T12:00:00-03:00",
+            "2026-10-14T15:00:00.999999999Z",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let root = temp_root();
+            let url = format!("https://jobs.ashbyhq.com/toku/{i}");
+            let (code, out) = plain(
+                root.path(),
+                open_now(),
+                &[
+                    "record",
+                    "--company",
+                    "Toku",
+                    "--title",
+                    "SE",
+                    "--url",
+                    &url,
+                    "--at",
+                    at,
+                ],
+            )
+            .await;
+            assert_eq!(code, 0, "{at}: {out}");
+            let tracker = tracker_of(root.path());
+            assert_eq!(tracker.submitted_since(sent).unwrap(), 1, "{at}");
+            assert_eq!(
+                tracker
+                    .submitted_since(sent + chrono::TimeDelta::seconds(1))
+                    .unwrap(),
+                0,
+                "{at}: stored at 15:00:00, not rounded up"
+            );
+        }
     }
 
     #[tokio::test]

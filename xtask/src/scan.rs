@@ -250,7 +250,8 @@ mod tests {
                 (3, Kind::Term, "jane".to_string()),
                 (3, Kind::Term, "doe".to_string()),
             ],
-            "only the exact published address is let through: the bare name and a look-alike              account are still findings"
+            "only the exact published address is let through: the bare name and a look-alike \
+             account are still findings"
         );
         // Without the option nothing changes.
         assert_eq!(scan_text("docs/a.md", text, &plain).len(), 9);

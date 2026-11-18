@@ -110,6 +110,16 @@ mod tests {
     use crate::http::support_tests::{LAUNCH, TOKEN, guard, request, text, with, without};
     use crate::http::{TOKEN_HEADER, handle};
 
+    /// The nonce a page's policy names in `script-src 'nonce-...'`.
+    fn nonce_of(csp: &str) -> &str {
+        csp.split("'nonce-")
+            .nth(1)
+            .unwrap()
+            .split('\'')
+            .next()
+            .unwrap()
+    }
+
     #[test]
     fn the_page_needs_the_right_host_but_no_token_and_gets_a_fresh_nonce() {
         let (p, _d) = panel();
@@ -120,14 +130,7 @@ mod tests {
         let html = text(&page);
         assert!(!html.contains("__NONCE__"));
         let csp = page.header("content-security-policy").unwrap().to_string();
-        let nonce = csp
-            .split("'nonce-")
-            .nth(1)
-            .unwrap()
-            .split('\'')
-            .next()
-            .unwrap()
-            .to_string();
+        let nonce = nonce_of(&csp).to_string();
         assert!(
             html.contains(&format!("<script nonce=\"{nonce}\"")),
             "{html}"
@@ -151,13 +154,7 @@ mod tests {
         let (p, _d) = panel();
         let page = handle(&p, &guard(), &request("GET", "/", ""));
         let csp = page.header("content-security-policy").unwrap();
-        let nonce = csp
-            .split("'nonce-")
-            .nth(1)
-            .unwrap()
-            .split('\'')
-            .next()
-            .unwrap();
+        let nonce = nonce_of(csp);
         assert_eq!(
             csp,
             format!(

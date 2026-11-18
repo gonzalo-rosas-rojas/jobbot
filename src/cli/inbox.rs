@@ -6,10 +6,9 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 
-use super::{EXIT_ERROR, EXIT_OK, TaskAddArgs, open_tracker};
+use super::{EXIT_ERROR, EXIT_OK, TaskAddArgs, open_tracker, parse_flag_time};
 use crate::actions;
 use crate::inbox;
-use crate::outbound;
 use crate::paths::Paths;
 
 /// Imports the emails that Claude read in Gmail and wrote to `file`. Like `mark` and `record` it
@@ -51,19 +50,9 @@ pub(super) fn cmd_task_add(
 ) -> Result<i32> {
     let due_at = match args.due.as_deref() {
         None => None,
-        Some(text) => match DateTime::parse_from_rfc3339(text.trim()) {
-            Ok(time) => Some(time.with_timezone(&Utc)),
-            Err(_) => {
-                writeln!(
-                    out,
-                    "--due debe ser una fecha RFC 3339, por ejemplo 2026-10-08T15:00:00Z (recibí «{}»)",
-                    outbound::plain_line(text)
-                        .chars()
-                        .take(40)
-                        .collect::<String>()
-                )?;
-                return Ok(EXIT_ERROR);
-            }
+        Some(text) => match parse_flag_time("--due", text, "2026-10-08T15:00:00Z", out)? {
+            Some(time) => Some(time),
+            None => return Ok(EXIT_ERROR),
         },
     };
     let spec = actions::TaskSpec {
@@ -206,10 +195,10 @@ mod tests {
     #[tokio::test]
     async fn inbox_import_refuses_a_file_that_is_too_big_or_has_too_many_messages() {
         let root = temp_root();
-        // More than 2 MB in one text.
+        // One byte over the size limit (2 MB, as the refusal says) in one text.
         let big = write_inbox_file(
             root.path(),
-            &serde_json::json!(["x".repeat(2 * 1024 * 1024 + 1)]),
+            &serde_json::json!(["x".repeat(crate::inbox::MAX_FILE_BYTES as usize + 1)]),
         );
         let (code, out) = plain(
             root.path(),

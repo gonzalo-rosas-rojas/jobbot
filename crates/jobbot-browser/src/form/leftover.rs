@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use jobbot_domain::models::Job;
-use jobbot_domain::outbound::{plain_line, strip_invisible};
+use jobbot_domain::outbound::plain_line;
 use playwright_rs::Page;
 
 use super::shots::take_shot;
@@ -46,6 +46,25 @@ pub(super) fn first_line(err: &impl std::fmt::Display) -> String {
         .to_string()
 }
 
+/// Whether `field` stands for a required question nobody answered. A choice (a radio or a group of
+/// two or more controls) is one question, represented by its first control: it is open when one
+/// of its options is required and none was given an answer. A single control is open when it is
+/// required and has no answer.
+fn question_unanswered(
+    fields: &[FieldInfo],
+    field: &FieldInfo,
+    answered: impl Fn(usize) -> bool,
+) -> bool {
+    let group = choice_group(fields, field);
+    if group.len() >= 2 || field.kind == "radio" {
+        group.first().is_some_and(|first| first.idx == field.idx)
+            && group.iter().any(|member| member.required)
+            && !group.iter().any(|member| answered(member.idx))
+    } else {
+        field.required && !answered(field.idx)
+    }
+}
+
 /// The `data-jb` indexes of the controls a run leaves for Gonza, in page order: every required
 /// control the plan has no answer for (one option per radio or checkbox group, the first), every
 /// pre-ticked box he has to untick and every control whose fill failed. When the plan misses
@@ -58,15 +77,7 @@ pub(super) fn controls_left(fields: &[FieldInfo], plan: &FillPlan, failed: &[usi
     left.extend(&plan.to_untick);
     if !plan.missing.is_empty() {
         for field in fields {
-            let group = choice_group(fields, field);
-            let unanswered = if group.len() >= 2 || field.kind == "radio" {
-                group.first().is_some_and(|first| first.idx == field.idx)
-                    && group.iter().any(|member| member.required)
-                    && !group.iter().any(|member| answered(member.idx))
-            } else {
-                field.required && !answered(field.idx)
-            };
-            if unanswered {
+            if question_unanswered(fields, field, answered) {
                 left.push(field.idx);
             }
         }
@@ -134,15 +145,6 @@ pub(super) fn assist_closed_reason(leftover: Option<&str>) -> String {
     )
 }
 
-/// Page text for the terminal, without control characters (a page cannot print escape codes) or
-/// invisible format characters (a page cannot reorder or hide what is printed).
-pub(super) fn plain(text: &str) -> String {
-    strip_invisible(text)
-        .chars()
-        .filter(|c| !c.is_control())
-        .collect()
-}
-
 /// The line `--assist` prints on standard error when the form is in the person's hands: which
 /// posting, what is left to answer, and how long the program waits.
 pub(super) fn assist_banner(job: &Job, leftover: Option<&str>) -> String {
@@ -156,7 +158,7 @@ pub(super) fn assist_banner(job: &Job, leftover: Option<&str>) -> String {
              Complétalo, resuelve el captcha si aparece y envía tú. {waiting}",
             plain_line(&job.company),
             plain_line(&job.title),
-            plain(left)
+            plain_line(left)
         ),
         None => format!(
             "[assist] {} — {}: formulario listo en el navegador. Revisa, resuelve el captcha si aparece y envía tú. {waiting}",
@@ -227,7 +229,7 @@ pub(super) async fn flag_for_gonza(page: &Page, groups: &[Vec<usize>], untick: &
 mod tests {
     use super::*;
     use crate::form::plan_fields;
-    use crate::form::support_tests::{bank, field, radio};
+    use crate::form::support_tests::{bank_with_gaps, field, radio};
     use std::path::Path;
 
     #[test]
@@ -252,6 +254,13 @@ mod tests {
                 "{line}"
             );
         }
+    }
+
+    #[test]
+    fn a_label_split_over_two_lines_keeps_its_words_apart_in_the_assist_line() {
+        let job = Job::default();
+        let line = assist_banner(&job, Some("faltan respuestas: Phone\nNumber *"));
+        assert!(line.contains("faltan respuestas: Phone Number *"), "{line}");
     }
 
     #[test]
@@ -286,7 +295,7 @@ mod tests {
             field(8, "input", "file", "Portfolio PDF", true),
             field(9, "input", "file", "Resume/CV *", true), // gets the CV
         ];
-        let plan = plan_fields(&fields, &bank(), Path::new("cv.pdf"));
+        let plan = plan_fields(&fields, &bank_with_gaps(), Path::new("cv.pdf"));
         // The unanswered radio group is flagged once, on its first button; the answered one
         // (sponsorship) and the optional field are left out.
         assert_eq!(controls_left(&fields, &plan, &[]), vec![1, 3, 7, 8]);
@@ -310,7 +319,7 @@ mod tests {
     #[test]
     fn without_missing_answers_only_failed_controls_are_left() {
         let fields = [field(0, "input", "text", "First name *", true)];
-        let plan = plan_fields(&fields, &bank(), Path::new("cv.pdf"));
+        let plan = plan_fields(&fields, &bank_with_gaps(), Path::new("cv.pdf"));
         assert!(plan.missing.is_empty());
         assert_eq!(controls_left(&fields, &plan, &[]), Vec::<usize>::new());
         assert_eq!(controls_left(&fields, &plan, &[0]), vec![0]);

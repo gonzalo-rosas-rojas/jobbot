@@ -382,6 +382,35 @@ mod tests {
                     .with_timezone(&Utc)
             ))
         );
+        // What the probe prints is `ToString('s')` of UTC plus a `Z`: no fraction, no offset.
+        // The expected instant is written by hand, not read back with the call that is under test.
+        let at = |h, m, s| registered(Some(jobbot_testkit::utc_at(2026, 3, 1, h, m, s)));
+        assert_eq!(parse_answer("EXISTS 2026-03-01T00:00:00Z"), at(0, 0, 0));
+        assert_eq!(
+            parse_answer("EXISTS 2026-03-01T23:59:59Z\r\n"),
+            at(23, 59, 59)
+        );
+        // Other shapes of an RFC 3339 moment are read as the same instant; others are not.
+        assert_eq!(
+            parse_answer("EXISTS 2026-03-01T09:00:00-03:00"),
+            at(12, 0, 0)
+        );
+        assert_eq!(
+            parse_answer("EXISTS 2026-03-01T12:00:00.250Z"),
+            registered(Some(
+                jobbot_testkit::utc_at(2026, 3, 1, 12, 0, 0) + chrono::TimeDelta::milliseconds(250)
+            ))
+        );
+        assert_eq!(
+            parse_answer("EXISTS 2026-03-01T12:00:00"),
+            None,
+            "no offset: not a moment"
+        );
+        assert_eq!(
+            parse_answer("EXISTS 2026-03-01 12:00:00Z"),
+            at(12, 0, 0),
+            "a space in place of the T is read too"
+        );
         for nothing in [
             "",
             "\r\n",

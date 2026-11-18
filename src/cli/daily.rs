@@ -72,6 +72,15 @@ async fn run_daily_steps(
         .get_meta("last_discover_at")?
         .and_then(|text| DateTime::parse_from_rfc3339(&text).ok())
         .map(|t| t.with_timezone(&Utc));
+    let last_discover = match last_discover {
+        // A stamp from the future (the clock went back, or it came from another date) says
+        // nothing about when discovery last ran: it does not hold the next run back.
+        Some(last) if last > now => {
+            tracing::warn!(stamp = %last, %now, "last_discover_at is in the future; discovery runs");
+            None
+        }
+        known => known,
+    };
     match last_discover {
         Some(last) if now - last < TimeDelta::hours(DISCOVER_COOLDOWN_HOURS) => {
             writeln!(
@@ -110,12 +119,12 @@ async fn run_daily_steps(
     let code = cmd_prepare(paths, deps, now, out).await?;
     let prepared = transitions_into(paths, &[State::Prepared])? - before;
     if code != EXIT_OK {
-        writeln!(out, "prepare terminó con código {code}; se omite el envío.")?;
+        let why = format!("prepare terminó con código {code}");
+        writeln!(out, "{why}; se omite el envío.")?;
         log.ran(
             "prepare",
             serde_json::json!({"prepared": prepared, "code": code}),
         );
-        let why = format!("prepare terminó con código {code}");
         return Ok((code, RunEnd::Failed(why)));
     }
     log.ran("prepare", serde_json::json!({"prepared": prepared}));
@@ -254,6 +263,85 @@ mod tests {
         let (deps, _) = fake_deps(vec![]);
         let (_, out) = cli(root.path(), open_now(), deps, &["discover"]).await;
         assert!(out.contains("Descubrimiento: 0 avisos"), "{out}");
+    }
+
+    /// What `run-daily` says about discovery when the stamp of the last one reads `stamp` and the
+    /// clock stands at `open_now()` (2026-10-14T22:00:00Z).
+    async fn discovery_line_with_stamp(stamp: &str) -> String {
+        let root = temp_root();
+        write_cv_master(root.path(), "# Gonza\n\nFull-stack engineer.\n");
+        tracker_of(root.path())
+            .set_meta("last_discover_at", stamp)
+            .unwrap();
+        let (deps, _) = fake_deps(vec![]);
+        let (code, out) = cli(root.path(), open_now(), deps, &["run-daily"]).await;
+        assert_eq!(code, 0, "{out}");
+        out.lines()
+            .find(|line| line.starts_with("Descubrimiento"))
+            .unwrap_or_else(|| panic!("no line about discovery: {out}"))
+            .to_string()
+    }
+
+    #[tokio::test]
+    async fn the_discovery_stamp_is_read_in_any_rfc_3339_shape_and_the_cooldown_is_six_hours() {
+        let skipped = "Descubrimiento omitido: el último fue hace 30 min (se repite cada 6 h).";
+        for stamp in [
+            "2026-10-14T21:30:00+00:00",
+            "2026-10-14T21:30:00Z",
+            "2026-10-14T21:30:00.000000000+00:00",
+            "2026-10-14T18:30:00-03:00",
+            "2026-10-15T01:30:00+04:00",
+        ] {
+            assert_eq!(discovery_line_with_stamp(stamp).await, skipped, "{stamp}");
+        }
+        // One second short of six hours it is still skipped; at six hours it runs.
+        assert_eq!(
+            discovery_line_with_stamp("2026-10-14T16:00:01+00:00").await,
+            "Descubrimiento omitido: el último fue hace 359 min (se repite cada 6 h)."
+        );
+        assert!(
+            discovery_line_with_stamp("2026-10-14T16:00:00+00:00")
+                .await
+                .starts_with("Descubrimiento: 0 avisos")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_discovery_stamp_that_is_not_a_date_does_not_hold_discovery_back() {
+        for stamp in [
+            "ayer",
+            "2026-10-14",
+            "2026-10-14T21:30:00",
+            "1791000000",
+            "",
+        ] {
+            assert!(
+                discovery_line_with_stamp(stamp)
+                    .await
+                    .starts_with("Descubrimiento: 0 avisos"),
+                "{stamp:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_discovery_stamp_in_the_future_does_not_count_as_a_recent_run() {
+        let root = temp_root();
+        write_cv_master(root.path(), "# Gonza\n\nFull-stack engineer.\n");
+        // The clock went back, or the stamp came from another date: it is not "just ran".
+        tracker_of(root.path())
+            .set_meta(
+                "last_discover_at",
+                &(open_now() + TimeDelta::hours(2)).to_rfc3339(),
+            )
+            .unwrap();
+        let (deps, _) = fake_deps(vec![]);
+        let (code, out) = cli(root.path(), open_now(), deps, &["run-daily"]).await;
+        assert_eq!(code, 0, "{out}");
+        assert!(
+            out.contains("Descubrimiento: 0 avisos") && !out.contains("Descubrimiento omitido"),
+            "{out}"
+        );
     }
 
     /// A board that is slow to answer, so a run lasts long enough to cross the edge of the window.

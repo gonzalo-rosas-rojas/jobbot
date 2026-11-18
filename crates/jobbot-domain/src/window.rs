@@ -188,8 +188,9 @@ mod tests {
         parse_schedule(include_str!("../../../profile/schedule.toml")).unwrap()
     }
 
+    /// `utc_s` on a whole minute: the form the older tests below use.
     fn utc(y: i32, m: u32, d: u32, h: u32, min: u32) -> DateTime<Utc> {
-        Utc.with_ymd_and_hms(y, m, d, h, min, 0).unwrap()
+        utc_s(y, m, d, h, min, 0)
     }
 
     #[test]
@@ -311,6 +312,219 @@ mod tests {
         assert_eq!(
             next_window_start(&s, utc(2026, 12, 16, 15, 0)),
             utc(2026, 12, 16, 22, 0)
+        );
+    }
+
+    /// The one place this module's tests build an instant (the crate cannot use `jobbot_testkit`,
+    /// which depends on it).
+    fn utc_s(y: i32, m: u32, d: u32, h: u32, min: u32, s: u32) -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(y, m, d, h, min, s).unwrap()
+    }
+
+    /// A schedule whose blocks are given as `(zone, start, end)` and apply every day.
+    fn every_day(blocks: &[(&str, &str, &str)]) -> Schedule {
+        let all = "[\"mon\",\"tue\",\"wed\",\"thu\",\"fri\",\"sat\",\"sun\"]";
+        let text: String = blocks
+            .iter()
+            .map(|(zone, start, end)| block(zone, start, end, all))
+            .collect();
+        parse_schedule(&text).unwrap()
+    }
+
+    #[test]
+    fn a_block_includes_its_first_minute_and_leaves_out_its_last_to_the_second() {
+        let s = every_day(&[("America/Santiago", "09:00", "17:00")]);
+        // Summer, UTC-3: 09:00 local is 12:00Z.
+        let at = |h, mi, sec, ms| utc_s(2026, 3, 2, h, mi, sec) + TimeDelta::milliseconds(ms);
+        assert!(
+            in_run_window(&s, at(11, 59, 59, 999)),
+            "08:59:59.999 is free"
+        );
+        assert!(!in_run_window(&s, at(12, 0, 0, 0)), "09:00:00 is busy");
+        assert!(
+            !in_run_window(&s, at(19, 59, 59, 999)),
+            "16:59:59.999 is busy"
+        );
+        assert!(in_run_window(&s, at(20, 0, 0, 0)), "17:00:00 is free");
+        // Winter, UTC-4: the same local hours are one hour later in UTC.
+        let winter = |h, mi, sec| utc_s(2026, 7, 2, h, mi, sec);
+        assert!(in_run_window(&s, winter(12, 59, 59)));
+        assert!(!in_run_window(&s, winter(13, 0, 0)));
+        assert!(!in_run_window(&s, winter(20, 59, 59)));
+        assert!(in_run_window(&s, winter(21, 0, 0)));
+    }
+
+    #[test]
+    fn a_block_in_the_hour_the_clocks_go_back_covers_both_times_that_hour_happens() {
+        // 2025-04-06 03:00Z: Santiago goes from 24:00 back to 23:00, so 23:30 happens twice.
+        let s = every_day(&[("America/Santiago", "23:30", "23:45")]);
+        assert!(
+            !in_run_window(&s, utc_s(2025, 4, 6, 2, 30, 0)),
+            "23:30 the first time"
+        );
+        assert!(in_run_window(&s, utc_s(2025, 4, 6, 2, 45, 0)));
+        assert!(
+            !in_run_window(&s, utc_s(2025, 4, 6, 3, 30, 0)),
+            "23:30 the second time"
+        );
+        assert!(in_run_window(&s, utc_s(2025, 4, 6, 3, 45, 0)));
+    }
+
+    #[test]
+    fn a_block_in_the_hour_the_clocks_go_forward_covers_only_the_part_that_exists() {
+        // 2025-09-07 04:00Z: Santiago goes from 24:00 to 01:00, so 00:00-00:59 never happens.
+        let s = every_day(&[("America/Santiago", "00:30", "01:30")]);
+        assert!(
+            in_run_window(&s, utc_s(2025, 9, 7, 3, 59, 59)),
+            "23:59:59 on the 6th"
+        );
+        assert!(
+            !in_run_window(&s, utc_s(2025, 9, 7, 4, 0, 0)),
+            "01:00, the first minute there is"
+        );
+        assert!(!in_run_window(&s, utc_s(2025, 9, 7, 4, 29, 59)));
+        assert!(
+            in_run_window(&s, utc_s(2025, 9, 7, 4, 30, 0)),
+            "01:30 ends the block"
+        );
+    }
+
+    #[test]
+    fn the_day_of_a_block_is_the_weekday_in_its_own_zone() {
+        let monday_only =
+            parse_schedule(&block("America/Santiago", "00:00", "02:00", "[\"mon\"]")).unwrap();
+        // Monday 2026-03-02 00:00 in Santiago (UTC-3) is 03:00Z; Sunday night UTC is not Monday there.
+        assert!(in_run_window(&monday_only, utc_s(2026, 3, 2, 2, 59, 59)));
+        assert!(!in_run_window(&monday_only, utc_s(2026, 3, 2, 3, 0, 0)));
+        assert!(!in_run_window(&monday_only, utc_s(2026, 3, 2, 4, 59, 59)));
+        assert!(in_run_window(&monday_only, utc_s(2026, 3, 2, 5, 0, 0)));
+        // A block in Auckland (UTC+13 in March): Monday there starts on Sunday in UTC.
+        let auckland =
+            parse_schedule(&block("Pacific/Auckland", "00:00", "01:00", "[\"mon\"]")).unwrap();
+        assert!(!in_run_window(&auckland, utc_s(2026, 3, 1, 11, 30, 0)));
+        assert!(in_run_window(&auckland, utc_s(2026, 3, 1, 10, 59, 59)));
+    }
+
+    #[test]
+    fn the_next_window_lands_on_the_exact_minute_edge_and_an_open_instant_comes_back_whole() {
+        let s = every_day(&[("America/Santiago", "09:00", "17:00")]);
+        // 12:00 local in summer: the block ends at 17:00 local = 20:00Z whatever the seconds and fractions.
+        for now in [
+            utc_s(2026, 3, 1, 15, 0, 0),
+            utc_s(2026, 3, 1, 15, 0, 0) + TimeDelta::milliseconds(700),
+            utc_s(2026, 3, 1, 19, 59, 59) + TimeDelta::milliseconds(999),
+        ] {
+            assert_eq!(
+                next_window_start(&s, now),
+                utc_s(2026, 3, 1, 20, 0, 0),
+                "{now:?}"
+            );
+        }
+        // Winter: 17:00 local is 21:00Z.
+        assert_eq!(
+            next_window_start(&s, utc_s(2026, 7, 1, 15, 0, 7)),
+            utc_s(2026, 7, 1, 21, 0, 0)
+        );
+        // An open moment comes back as it is, fraction included.
+        let open = utc_s(2026, 3, 1, 22, 0, 0) + TimeDelta::nanoseconds(123_456_789);
+        assert_eq!(next_window_start(&s, open), open);
+    }
+
+    #[test]
+    fn a_schedule_busy_the_whole_day_in_two_zones_has_no_window_and_answers_eight_days_ahead() {
+        // Santiago is free at 23:59 local and Kolkata at 23:59 local, never at the same moment.
+        let s = every_day(&[
+            ("America/Santiago", "00:00", "23:59"),
+            ("Asia/Kolkata", "00:00", "23:59"),
+        ]);
+        // 2026-03-01 15:00Z is 12:00 in Santiago and 20:30 in Kolkata: busy in both.
+        let now = utc_s(2026, 3, 1, 15, 0, 0) + TimeDelta::milliseconds(500);
+        assert!(!in_run_window(&s, now));
+        assert_eq!(
+            next_window_start(&s, now),
+            utc_s(2026, 3, 9, 15, 0, 0) + TimeDelta::milliseconds(500),
+            "eight days ahead, with the fraction of now"
+        );
+    }
+
+    #[test]
+    fn a_clock_is_hour_and_minute_with_or_without_the_leading_zeros_and_may_start_with_blanks() {
+        let start_of = |text: &str| {
+            parse_schedule(&block("America/Santiago", text, "23:59", "[\"mon\"]"))
+                .map(|s| s.busy[0].start.to_string())
+                .map_err(|e| e.to_string())
+        };
+        assert_eq!(start_of("09:00"), Ok("09:00:00".to_string()));
+        assert_eq!(start_of("9:00"), Ok("09:00:00".to_string()));
+        assert_eq!(start_of("00:00"), Ok("00:00:00".to_string()));
+        let last_minute = parse_schedule(&block("America/Santiago", "00:00", "23:59", "[\"mon\"]"));
+        assert_eq!(last_minute.unwrap().busy[0].end.to_string(), "23:59:00");
+        assert_eq!(
+            start_of("9:0"),
+            Ok("09:00:00".to_string()),
+            "the minute may lose its zero too"
+        );
+        assert_eq!(
+            start_of(" 09:00"),
+            Ok("09:00:00".to_string()),
+            "blanks before the hour are skipped"
+        );
+        for bad in [
+            "24:00", "09:60", "9am", "09:00:00", "09", "", "09.00", "09:00 ",
+        ] {
+            assert!(start_of(bad).is_err(), "{bad:?}");
+        }
+        assert_eq!(
+            start_of("9am"),
+            Err("bad time \"9am\", expected HH:MM".to_string())
+        );
+    }
+
+    #[test]
+    fn a_refused_clock_says_its_own_message_and_carries_the_parsers_error_as_its_cause() {
+        use std::error::Error;
+        // The parser's own wording belongs to the library and is not asserted here.
+        for (bad, message) in [
+            ("9am", "bad time \"9am\", expected HH:MM"),
+            ("09", "bad time \"09\", expected HH:MM"),
+            ("25:00", "bad time \"25:00\", expected HH:MM"),
+        ] {
+            let err =
+                parse_schedule(&block("America/Santiago", bad, "17:00", "[\"mon\"]")).unwrap_err();
+            assert_eq!(err.to_string(), message);
+            let cause = err.source().expect("the parser's error follows ours");
+            assert!(!cause.to_string().is_empty(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn weekdays_are_read_by_three_letters_or_the_whole_name_in_any_case() {
+        let days_of = |names: &str| {
+            parse_schedule(&block("America/Santiago", "09:00", "17:00", names))
+                .map(|s| s.busy[0].days.clone())
+                .map_err(|e| e.to_string())
+        };
+        assert_eq!(
+            days_of("[\"mon\",\"Tue\",\"WED\",\"thu\",\"Friday\",\"saturday\",\"SUNDAY\"]"),
+            Ok(vec![
+                Weekday::Mon,
+                Weekday::Tue,
+                Weekday::Wed,
+                Weekday::Thu,
+                Weekday::Fri,
+                Weekday::Sat,
+                Weekday::Sun,
+            ])
+        );
+        for bad in ["mo", "tues", "thur", "lunes", "1", " mon", ""] {
+            assert!(
+                days_of(&format!("[\"{bad}\"]")).is_err(),
+                "{bad:?} is not a weekday"
+            );
+        }
+        assert_eq!(
+            days_of("[\"funday\"]"),
+            Err("unknown weekday \"funday\", use mon..sun".to_string())
         );
     }
 

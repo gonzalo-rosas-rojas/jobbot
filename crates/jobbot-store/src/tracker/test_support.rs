@@ -8,14 +8,25 @@ use jobbot_domain::models::Job;
 
 use super::{EmailKind, NewEmail, NewTask, State, Tracker};
 
-pub(super) fn submit(t: &Tracker, job: &Job, approve: bool) {
+/// Stores `job` and walks its application to `Prepared`.
+fn prepare(t: &Tracker, job: &Job) {
     t.add_job(job, 70.0, &BTreeMap::new(), *NOW).unwrap();
     t.create_application(&job.key(), *NOW).unwrap();
     t.transition(&job.key(), State::Prepared, None, *NOW)
         .unwrap();
-    if approve {
-        t.approve(&job.key()).unwrap();
-    }
+}
+
+/// Stores `job` and submits it without Gonza's approval.
+pub(super) fn submit(t: &Tracker, job: &Job) {
+    prepare(t, job);
+    t.transition(&job.key(), State::Submitted, None, *NOW)
+        .unwrap();
+}
+
+/// Stores `job`, has Gonza approve it and submits it.
+pub(super) fn submit_approved(t: &Tracker, job: &Job) {
+    prepare(t, job);
+    t.approve(&job.key()).unwrap();
     t.transition(&job.key(), State::Submitted, None, *NOW)
         .unwrap();
 }

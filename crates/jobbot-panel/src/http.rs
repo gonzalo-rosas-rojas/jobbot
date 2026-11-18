@@ -175,6 +175,11 @@ impl Reply {
     pub fn header(&self, name: &str) -> Option<&str> {
         find_header(&self.headers, name)
     }
+
+    /// Whether the body is JSON: the replies that are filtered for the user's folders and addresses.
+    fn is_json(&self) -> bool {
+        self.content_type.starts_with("application/json")
+    }
 }
 
 /// What a request has to match: the port the server really listens on and the token printed at
@@ -242,7 +247,7 @@ pub fn handle(panel: &Panel, guard: &Guard, req: &Request) -> Reply {
         }
     };
     // The one place where what leaves the panel is filtered: his folders and his own addresses.
-    if reply.content_type.starts_with("application/json") {
+    if reply.is_json() {
         reply = redact_reply(&panel.privacy.current(&panel.paths.profile_dir), reply);
     }
     with_common_headers(reply)
@@ -348,7 +353,7 @@ fn parse_target(target: &str) -> Option<Url> {
 /// string but the links (`UserPaths::redact_json`); any other reply is returned as it came. Every
 /// route's JSON, an error message included, passes here, so no route has to remember to filter.
 fn redact_reply(user: &UserPaths, mut reply: Reply) -> Reply {
-    if !reply.content_type.starts_with("application/json") {
+    if !reply.is_json() {
         return reply;
     }
     if let Ok(value) = serde_json::from_slice::<Value>(&reply.body) {
@@ -487,9 +492,29 @@ mod tests {
         assert_eq!(req.header("x-panel-token"), Some(TOKEN));
         assert_eq!(req.header("HOST"), Some("127.0.0.1:4321"));
         assert_eq!(req.header("origin"), None);
-        let reply = with_common_headers(Reply::empty(204));
+        let reply = {
+            let mut reply = Reply::empty(204);
+            reply
+                .headers
+                .push(("X-Content-Type-Options", "nosniff".to_string()));
+            reply
+        };
         assert_eq!(reply.header("x-content-type-options"), Some("nosniff"));
         assert_eq!(reply.header("x-nope"), None);
+    }
+
+    #[test]
+    fn common_headers_are_added_unless_the_route_set_them() {
+        let plain = with_common_headers(Reply::empty(204));
+        assert_eq!(plain.header("x-content-type-options"), Some("nosniff"));
+        assert_eq!(plain.header("cache-control"), Some("no-store"));
+        let mut cached = Reply::empty(200);
+        cached
+            .headers
+            .push(("Cache-Control", "public, max-age=60".to_string()));
+        let cached = with_common_headers(cached);
+        assert_eq!(cached.header("cache-control"), Some("public, max-age=60"));
+        assert_eq!(cached.header("x-content-type-options"), Some("nosniff"));
     }
 
     #[test]

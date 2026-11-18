@@ -37,7 +37,16 @@ pub(super) async fn cmd_panel(
         // A port that stays the same keeps the browser's saved settings (they belong to the origin, port included).
         None => match PanelServer::start(open_panel()?, PREFERRED_PANEL_PORT) {
             Ok(server) => server,
-            Err(_) => PanelServer::start(open_panel()?, 0)?,
+            Err(err) => {
+                // Any failure of the preferred port (busy, not allowed) falls back to a free one;
+                // the reason is kept for whoever asks why the port changed.
+                tracing::warn!(
+                    port = PREFERRED_PANEL_PORT,
+                    error = %err,
+                    "the preferred panel port is not available; using a free one"
+                );
+                PanelServer::start(open_panel()?, 0)?
+            }
         },
     };
     let url = server.url();
@@ -56,6 +65,8 @@ pub(super) async fn cmd_panel(
     }
     tokio::task::spawn_blocking(move || server.wait()).await?;
     writeln!(out, "El panel se cerró.")?;
+    // `wait` only returns when the serving loop ended on its own (Ctrl+C kills the process before
+    // this line, and nothing here calls `shutdown`): that is a server that died, not a close.
     Ok(EXIT_ERROR)
 }
 

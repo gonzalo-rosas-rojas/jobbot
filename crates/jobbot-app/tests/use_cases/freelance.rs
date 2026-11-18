@@ -1,18 +1,22 @@
-//! The `freelance` use cases against the real SQLite stores, the fake Claude and the shipped
-//! profile (moved from the root crate's `src/freelance.rs`).
+//! The `freelance` use cases against the real SQLite stores and the fake Claude (moved from the
+//! root crate's `src/freelance.rs`). The tests whose input names an entry of the exclusion list
+//! that ships still read that list (`shipped_list`); the rest use made-up exclusions.
 
 use serde_json::{Value, json};
 
 use jobbot_app::claude::ClaudeGate;
 use jobbot_app::freelance::*;
 use jobbot_app::profile::claude::ClaudeConfig;
-use jobbot_app::profile::load_exclusions;
 use jobbot_domain::rules::Exclusions;
 use jobbot_testkit::Tracker;
-use jobbot_testkit::{FakeClaude, NOW, SAMPLE_CV, real_paths};
+use jobbot_testkit::{FakeClaude, NOW, SAMPLE_CV};
 
 fn exclusions() -> Exclusions {
-    load_exclusions(&real_paths().profile_dir.join("exclusions.toml")).unwrap()
+    jobbot_testkit::profile::sample_exclusions()
+}
+/// The exclusion list that ships, for the tests whose input names an entry of it.
+fn shipped_list() -> Exclusions {
+    jobbot_testkit::profile::shipped_exclusions()
 }
 fn ready() -> FreelanceConfig {
     FreelanceConfig {
@@ -34,23 +38,17 @@ fn raw_profile(value: Value) -> RawProfile {
     serde_json::from_value(value).unwrap()
 }
 #[test]
-fn the_shipped_file_parses_and_is_deliberately_not_ready() {
-    let shipped = load_freelance_config(&real_paths().profile_dir.join("freelance.toml")).unwrap();
-    assert!(shipped.platforms.is_empty() && shipped.never_name.is_empty());
-    assert!(shipped.check_ready("upwork").is_err());
-}
-#[test]
 fn never_name_joins_the_exclusion_list_as_names() {
     let config = FreelanceConfig {
         never_name: vec!["DeskMate".into()],
         ..ready()
     };
-    let rules = config.guard_rules(&exclusions());
+    let rules = config.guard_rules(&shipped_list());
     assert!(
         rules.names.contains(&"DeskMate".to_string())
             && rules.names.contains(&"Harbor Light".to_string())
     );
-    assert_eq!(rules.categories, exclusions().categories);
+    assert_eq!(rules.categories, shipped_list().categories);
     assert_eq!(
         forbidden_in("I built DeskMate", &rules).as_deref(),
         Some("name:DeskMate")
@@ -116,7 +114,7 @@ fn a_draft_that_touches_the_exclusion_list_is_rejected() {
         let mut json = profile_json();
         json[field] = json!(text);
         let err =
-            assemble_profile(raw_profile(json), SAMPLE_CV, &ready(), &exclusions()).unwrap_err();
+            assemble_profile(raw_profile(json), SAMPLE_CV, &ready(), &shipped_list()).unwrap_err();
         assert!(
             err.to_string().contains("lista de exclusión"),
             "{text}: {err}"
@@ -125,7 +123,7 @@ fn a_draft_that_touches_the_exclusion_list_is_rejected() {
     let mut idea = profile_json();
     idea["portfolio_ideas"][0]["description"] =
         json!("A dashboard like the ones at Tidewater Systems");
-    assert!(assemble_profile(raw_profile(idea), SAMPLE_CV, &ready(), &exclusions()).is_err());
+    assert!(assemble_profile(raw_profile(idea), SAMPLE_CV, &ready(), &shipped_list()).is_err());
 }
 #[test]
 fn hostile_text_is_cleaned_and_capped_in_a_profile() {
@@ -144,7 +142,7 @@ fn hostile_text_is_cleaned_and_capped_in_a_profile() {
 fn a_proposal_is_cleaned_capped_and_checked() {
     let ok = assemble_proposal(
             serde_json::from_value(json!({"proposal": "I would start with a spike.", "questions_for_client": ["Scope?", "", "Budget?", "a", "b", "c"]})).unwrap(),
-            &exclusions(),
+            &shipped_list(),
         )
         .unwrap();
     assert_eq!(
@@ -154,12 +152,12 @@ fn a_proposal_is_cleaned_capped_and_checked() {
     );
     let empty = assemble_proposal(
         serde_json::from_value(json!({"proposal": "  "})).unwrap(),
-        &exclusions(),
+        &shipped_list(),
     );
     assert!(empty.is_err(), "an empty proposal is not a draft");
     let bad = assemble_proposal(
         serde_json::from_value(json!({"proposal": "I did this at Harbor Light."})).unwrap(),
-        &exclusions(),
+        &shipped_list(),
     );
     assert!(bad.unwrap_err().to_string().contains("lista de exclusión"));
 }
@@ -187,7 +185,7 @@ async fn the_profile_prompt_never_has_the_employer_the_contact_line_or_a_never_n
     let path = draft_profile(
         &gate,
         &config,
-        &exclusions(),
+        &shipped_list(),
         SAMPLE_CV,
         "Upwork",
         e.dir.path(),
@@ -233,6 +231,54 @@ async fn the_profile_prompt_never_has_the_employer_the_contact_line_or_a_never_n
     assert!(!md.contains("Kubernetes"));
 }
 #[tokio::test]
+async fn the_draft_is_named_and_dated_by_the_day_in_santiago_not_in_utc() {
+    use chrono::{TimeZone, Utc};
+    for (now, day) in [
+        // Summer, UTC-3: the day changes at 03:00 UTC.
+        (
+            Utc.with_ymd_and_hms(2026, 1, 15, 2, 59, 59).unwrap(),
+            "2026-01-14",
+        ),
+        (
+            Utc.with_ymd_and_hms(2026, 1, 15, 3, 0, 0).unwrap(),
+            "2026-01-15",
+        ),
+        // Winter, UTC-4: at 04:00 UTC.
+        (
+            Utc.with_ymd_and_hms(2026, 7, 15, 3, 59, 59).unwrap(),
+            "2026-07-14",
+        ),
+        (
+            Utc.with_ymd_and_hms(2026, 7, 15, 4, 0, 0).unwrap(),
+            "2026-07-15",
+        ),
+    ] {
+        let e = env();
+        let fake = FakeClaude::new(vec![FakeClaude::structured(profile_json(), 0.04)]);
+        let gate = ClaudeGate::new(&fake, &e.tracker, e.config.daily_budget_usd);
+        let path = draft_profile(
+            &gate,
+            &ready(),
+            &exclusions(),
+            SAMPLE_CV,
+            "Upwork",
+            e.dir.path(),
+            now,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            path.file_name().unwrap().to_string_lossy(),
+            format!("upwork-profile-{day}.md")
+        );
+        let md = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            md.contains(&format!("Borrador generado el {day} (hora de Santiago).")),
+            "{md}"
+        );
+    }
+}
+#[tokio::test]
 async fn a_rejected_draft_leaves_no_file_but_stays_in_the_ledger() {
     let e = env();
     let mut bad = profile_json();
@@ -242,7 +288,7 @@ async fn a_rejected_draft_leaves_no_file_but_stays_in_the_ledger() {
     let err = draft_profile(
         &gate,
         &ready(),
-        &exclusions(),
+        &shipped_list(),
         SAMPLE_CV,
         "upwork",
         e.dir.path(),
@@ -292,7 +338,7 @@ async fn a_posting_in_an_excluded_category_is_refused_before_claude_is_called() 
     let err = draft_proposal(
         &gate,
         &ready(),
-        &exclusions(),
+        &shipped_list(),
         SAMPLE_CV,
         "upwork",
         posting,
@@ -335,7 +381,7 @@ async fn a_proposal_is_written_from_a_clean_cv_and_a_cut_posting() {
     let path = draft_proposal(
         &gate,
         &ready(),
-        &exclusions(),
+        &shipped_list(),
         SAMPLE_CV,
         "upwork",
         &posting,

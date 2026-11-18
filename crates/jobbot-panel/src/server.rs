@@ -708,6 +708,62 @@ mod tests {
         );
     }
 
+    /// The `Date:` line `on_the_wire` writes at `now`.
+    fn date_line(now: DateTime<Utc>) -> String {
+        let wire = String::from_utf8(on_the_wire(&reply(200, ""), false, now)).unwrap();
+        wire.lines()
+            .find(|line| line.starts_with("Date: "))
+            .unwrap()
+            .to_string()
+    }
+
+    #[test]
+    fn the_date_header_is_an_http_date_in_gmt_for_every_month_and_with_zero_padding() {
+        let first_of =
+            |month: u32, h: u32, m: u32, s: u32| jobbot_testkit::utc_at(2026, month, 1, h, m, s);
+        for (now, expected) in [
+            (first_of(1, 0, 0, 0), "Date: Thu, 01 Jan 2026 00:00:00 GMT"),
+            (first_of(2, 1, 2, 3), "Date: Sun, 01 Feb 2026 01:02:03 GMT"),
+            (
+                first_of(3, 23, 59, 59),
+                "Date: Sun, 01 Mar 2026 23:59:59 GMT",
+            ),
+            (first_of(4, 12, 0, 0), "Date: Wed, 01 Apr 2026 12:00:00 GMT"),
+            (first_of(5, 12, 0, 0), "Date: Fri, 01 May 2026 12:00:00 GMT"),
+            (first_of(6, 12, 0, 0), "Date: Mon, 01 Jun 2026 12:00:00 GMT"),
+            (first_of(7, 12, 0, 0), "Date: Wed, 01 Jul 2026 12:00:00 GMT"),
+            (first_of(8, 12, 0, 0), "Date: Sat, 01 Aug 2026 12:00:00 GMT"),
+            (first_of(9, 12, 0, 0), "Date: Tue, 01 Sep 2026 12:00:00 GMT"),
+            (
+                first_of(10, 12, 0, 0),
+                "Date: Thu, 01 Oct 2026 12:00:00 GMT",
+            ),
+            (
+                first_of(11, 12, 0, 0),
+                "Date: Sun, 01 Nov 2026 12:00:00 GMT",
+            ),
+            (
+                first_of(12, 12, 0, 0),
+                "Date: Tue, 01 Dec 2026 12:00:00 GMT",
+            ),
+            (
+                jobbot_testkit::utc_at(2028, 2, 29, 23, 59, 59),
+                "Date: Tue, 29 Feb 2028 23:59:59 GMT",
+            ),
+        ] {
+            assert_eq!(date_line(now), expected);
+        }
+    }
+
+    #[test]
+    fn the_date_header_drops_the_fraction_of_a_second_without_rounding() {
+        use chrono::TimeDelta;
+        let nearly = *NOW - TimeDelta::nanoseconds(1);
+        assert_eq!(date_line(nearly), "Date: Thu, 01 Oct 2026 11:59:59 GMT");
+        let fraction = *NOW + TimeDelta::nanoseconds(999_999_999);
+        assert_eq!(date_line(fraction), "Date: Thu, 01 Oct 2026 12:00:00 GMT");
+    }
+
     #[test]
     fn the_answer_to_a_head_has_the_length_and_no_body() {
         let wire = String::from_utf8(on_the_wire(&reply(405, "no"), true, *NOW)).unwrap();

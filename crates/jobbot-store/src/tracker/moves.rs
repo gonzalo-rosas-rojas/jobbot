@@ -46,6 +46,14 @@ fn newest_event(conn: &Connection, job_key: &str) -> Result<Option<StoredEvent>>
         .optional()?)
 }
 
+/// Who made a move: the program (`transition`) or Gonza by hand (`mark_transition`). Only a move
+/// by hand keeps what it overwrites, so only it can be taken back.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MoveOrigin {
+    Automatic,
+    ByHand,
+}
+
 /// An `events` row as stored, as `undo_mark` reads it.
 struct StoredEvent {
     id: i64,
@@ -66,8 +74,8 @@ impl Tracker {
         new_state: State,
         note: Option<&str>,
         now: DateTime<Utc>,
-    ) -> Result<(), TrackerError> {
-        self.move_application(job_key, new_state, note, now, false)
+    ) -> Result<()> {
+        self.move_application(job_key, new_state, note, now, MoveOrigin::Automatic)
     }
 
     /// `transition` for a move Gonza recorded by hand. Its event also keeps the columns the move
@@ -78,8 +86,8 @@ impl Tracker {
         new_state: State,
         note: Option<&str>,
         now: DateTime<Utc>,
-    ) -> Result<(), TrackerError> {
-        self.move_application(job_key, new_state, note, now, true)
+    ) -> Result<()> {
+        self.move_application(job_key, new_state, note, now, MoveOrigin::ByHand)
     }
 
     fn move_application(
@@ -88,8 +96,8 @@ impl Tracker {
         new_state: State,
         note: Option<&str>,
         now: DateTime<Utc>,
-        undoable: bool,
-    ) -> Result<(), TrackerError> {
+        origin: MoveOrigin,
+    ) -> Result<()> {
         let mut conn = self.lock();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let current: Option<(String, String)> = tx
@@ -115,13 +123,20 @@ impl Tracker {
         let note = note.as_deref();
         tx.execute(
             "UPDATE applications SET state = ?1, updated_at = ?2, note = ?3, \
-             needs_reason = CASE WHEN ?1 = 'needs_gonza' THEN ?3 \
-                                 WHEN state = 'needs_gonza' THEN NULL \
+             needs_reason = CASE WHEN ?1 = ?5 THEN ?3 \
+                                 WHEN state = ?5 THEN NULL \
                                  ELSE needs_reason END, \
-             submitted_at = CASE WHEN ?1 = 'submitted' THEN ?2 ELSE submitted_at END, \
+             submitted_at = CASE WHEN ?1 = ?6 THEN ?2 ELSE submitted_at END, \
              snoozed_until = NULL \
              WHERE job_key = ?4",
-            params![new_state.as_str(), at, note, job_key],
+            params![
+                new_state.as_str(),
+                at,
+                note,
+                job_key,
+                State::NeedsGonza.as_str(),
+                State::Submitted.as_str()
+            ],
         )?;
         tx.execute(
             "INSERT INTO events (job_key, at, from_state, to_state, note, undo) \
@@ -132,7 +147,7 @@ impl Tracker {
                 current.as_str(),
                 new_state.as_str(),
                 note,
-                undoable.then_some(before)
+                (origin == MoveOrigin::ByHand).then_some(before)
             ],
         )?;
         tx.commit()?;
@@ -321,7 +336,7 @@ mod tests {
     fn technical_test_path_ends_in_accepted_and_refuses_withdrawal() {
         let t = Tracker::in_memory().unwrap();
         let first = make_job_with(|j| j.external_id = "1".into());
-        submit(&t, &first, false);
+        submit(&t, &first);
         for state in [
             State::TechnicalTest,
             State::Interview,
@@ -344,7 +359,7 @@ mod tests {
             j.external_id = "2".into();
             j.company = "Other Co".into();
         });
-        submit(&t, &second, false);
+        submit(&t, &second);
         for state in [
             State::Ghosted,
             State::Replied,
@@ -367,7 +382,7 @@ mod tests {
         ] {
             let t = Tracker::in_memory().unwrap();
             let job = make_job();
-            submit(&t, &job, false);
+            submit(&t, &job);
             t.transition(&job.key(), State::Ghosted, None, *NOW)
                 .unwrap();
             t.transition(&job.key(), late, None, *NOW).unwrap();
@@ -376,7 +391,7 @@ mod tests {
         // What was never answered cannot jump to the end of the process.
         let t = Tracker::in_memory().unwrap();
         let job = make_job();
-        submit(&t, &job, false);
+        submit(&t, &job);
         t.transition(&job.key(), State::Ghosted, None, *NOW)
             .unwrap();
         for never in [State::Accepted, State::Withdrawn, State::Submitted] {
@@ -676,6 +691,54 @@ mod tests {
             Err(UndoRefusal::NoRecentMark)
         );
         assert_eq!(state_of(&t, &key), State::Submitted);
+    }
+
+    /// `undoable_marks` (SQL) and `undo_mark` (Rust) each spell the rule "the row still shows the
+    /// mark"; this fails when they stop agreeing, so the panel never offers an undo that is refused.
+    #[test]
+    fn undoable_marks_lists_exactly_what_undo_mark_accepts() {
+        let t = tracker_with_prepared(&["1", "2", "3", "4", "5", "6"]);
+        for id in ["1", "2", "3", "4", "5", "6"] {
+            t.transition(&format!("test:{id}"), State::Submitted, None, *NOW)
+                .unwrap();
+        }
+        let since = *NOW + TimeDelta::minutes(1);
+        let later = *NOW + TimeDelta::minutes(2);
+        t.mark_transition("test:1", State::Replied, None, later)
+            .unwrap();
+        t.mark_transition("test:2", State::Replied, None, *NOW)
+            .unwrap();
+        t.mark_transition("test:3", State::Replied, None, later)
+            .unwrap();
+        t.transition("test:3", State::Interview, None, later)
+            .unwrap();
+        t.mark_transition("test:4", State::Replied, None, later)
+            .unwrap();
+        t.set_snoozed_until("test:4", Some(later + TimeDelta::days(1)))
+            .unwrap();
+        t.transition("test:5", State::Replied, None, later).unwrap();
+        t.mark_transition("test:6", State::Replied, None, later)
+            .unwrap();
+        t.mark_transition(
+            "test:6",
+            State::Interview,
+            None,
+            later + TimeDelta::minutes(1),
+        )
+        .unwrap();
+
+        let listed = t.undoable_marks(since).unwrap();
+        let mut offered = 0;
+        for id in ["1", "2", "3", "4", "5", "6"] {
+            let key = format!("test:{id}");
+            let accepted = t.undo_mark(&key, since).unwrap().is_ok();
+            assert_eq!(listed.contains_key(&key), accepted, "{key}");
+            offered += usize::from(accepted);
+        }
+        assert!(
+            (2..6).contains(&offered),
+            "the scenarios must include both answers"
+        );
     }
 
     #[test]

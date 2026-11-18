@@ -162,6 +162,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_digest_file_is_named_after_the_day_in_santiago_not_in_utc() {
+        use chrono::{TimeZone, Utc};
+        for (now, name) in [
+            // Summer, UTC-3: the day changes at 03:00 UTC.
+            (
+                Utc.with_ymd_and_hms(2026, 1, 15, 2, 59, 59).unwrap(),
+                "digest-2026-01-14.md",
+            ),
+            (
+                Utc.with_ymd_and_hms(2026, 1, 15, 3, 0, 0).unwrap(),
+                "digest-2026-01-15.md",
+            ),
+            // Winter, UTC-4: at 04:00 UTC.
+            (
+                Utc.with_ymd_and_hms(2026, 7, 15, 3, 59, 59).unwrap(),
+                "digest-2026-07-14.md",
+            ),
+            (
+                Utc.with_ymd_and_hms(2026, 7, 15, 4, 0, 0).unwrap(),
+                "digest-2026-07-15.md",
+            ),
+            // The night the clocks go back (2025-04-06 03:00 UTC) the day is still the 5th.
+            (
+                Utc.with_ymd_and_hms(2025, 4, 6, 3, 30, 0).unwrap(),
+                "digest-2025-04-05.md",
+            ),
+            (
+                Utc.with_ymd_and_hms(2025, 4, 6, 4, 0, 0).unwrap(),
+                "digest-2025-04-06.md",
+            ),
+        ] {
+            let root = temp_root();
+            plain(root.path(), now, &["digest"]).await;
+            let mut files: Vec<String> = std::fs::read_dir(root.path().join("data"))
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+                .filter(|file| file.starts_with("digest-"))
+                .collect();
+            files.sort();
+            assert_eq!(files, [name], "{now:?}");
+        }
+    }
+
+    #[tokio::test]
     async fn status_on_empty_database() {
         let root = temp_root();
         let (code, out) = plain(root.path(), open_now(), &["status"]).await;

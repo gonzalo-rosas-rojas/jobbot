@@ -67,27 +67,35 @@ impl Tracker {
     /// discovery will not overwrite. An application that already moved on, or that no longer
     /// exists, only has its intent closed. Returns the keys handed to Gonza.
     pub fn recover_open_intents(&self, now: DateTime<Utc>) -> Result<Vec<String>> {
-        let mut handed = Vec::new();
+        let mut keys_for_gonza = Vec::new();
         for intent in self.open_intents(INTENT_SUBMIT)? {
-            let prepared = self
-                .get_application(&intent.job_key)?
-                .is_some_and(|row| row.state == State::Prepared);
-            if prepared {
-                self.record_attempt(&intent.job_key, now)?;
-                self.transition(
-                    &intent.job_key,
-                    State::NeedsGonza,
-                    Some(&format!(
-                        "{INTERRUPTED_PREFIX}: la corrida se cortó entre el clic y su confirmación; \
-                         revisa a mano si se envió (jobbot confirm si salió, jobbot resolve si no)"
-                    )),
-                    now,
-                )?;
-                handed.push(intent.job_key.clone());
+            if let Some(key) = self.recover_one(&intent, now)? {
+                keys_for_gonza.push(key);
             }
-            self.finish_intent(intent.id, "interrupted", now)?;
         }
-        Ok(handed)
+        Ok(keys_for_gonza)
+    }
+
+    /// Recovers one open submit intent: hands its application to Gonza when it is still
+    /// `Prepared` (and returns its key), then closes the intent either way.
+    fn recover_one(&self, intent: &Intent, now: DateTime<Utc>) -> Result<Option<String>> {
+        let prepared = self
+            .get_application(&intent.job_key)?
+            .is_some_and(|row| row.state == State::Prepared);
+        if prepared {
+            self.record_attempt(&intent.job_key, now)?;
+            self.transition(
+                &intent.job_key,
+                State::NeedsGonza,
+                Some(&format!(
+                    "{INTERRUPTED_PREFIX}: la corrida se cortó entre el clic y su confirmación; \
+                     revisa a mano si se envió (jobbot confirm si salió, jobbot resolve si no)"
+                )),
+                now,
+            )?;
+        }
+        self.finish_intent(intent.id, "interrupted", now)?;
+        Ok(prepared.then(|| intent.job_key.clone()))
     }
 }
 

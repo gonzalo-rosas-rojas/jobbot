@@ -5,7 +5,7 @@ use chrono::{DateTime, TimeDelta, Utc};
 use rusqlite::{OptionalExtension, TransactionBehavior, params};
 use sha2::{Digest, Sha256};
 
-use super::{AttemptStart, Result, Tracker, to_text};
+use super::{AttemptStart, Result, Tracker, TrackerError, to_text};
 
 /// How long the reply of a command with an attempt id is kept for a repeat of that id.
 const ATTEMPT_KEEP: TimeDelta = TimeDelta::days(7);
@@ -67,13 +67,17 @@ impl Tracker {
         Ok(start)
     }
 
-    /// Keeps the reply of the attempt `id`, whose command has run.
+    /// Keeps the reply of the attempt `id`, whose command has run. An id that was never begun (or
+    /// was already dropped) is `UnknownKey`: there is no row to keep the reply in.
     pub fn finish_attempt(&self, id: &str, status: u16, reply: &[u8]) -> Result<()> {
         let conn = self.lock();
-        conn.execute(
+        let changed = conn.execute(
             "UPDATE command_attempts SET state = 'done', status = ?2, reply = ?3 WHERE id = ?1",
             params![id, status, reply],
         )?;
+        if changed == 0 {
+            return Err(TrackerError::UnknownKey(id.to_string()));
+        }
         Ok(())
     }
 
@@ -92,6 +96,24 @@ mod tests {
     use sha2::{Digest, Sha256};
 
     use crate::tracker::{AttemptStart, Tracker};
+
+    #[test]
+    fn finishing_an_attempt_that_was_never_begun_is_an_error_and_stores_nothing() {
+        let tracker = Tracker::in_memory().unwrap();
+        let err = tracker
+            .finish_attempt("never-begun", 200, b"{}")
+            .unwrap_err();
+        assert!(
+            matches!(err, crate::tracker::TrackerError::UnknownKey(ref id) if id == "never-begun")
+        );
+        assert_eq!(
+            tracker
+                .begin_attempt("never-begun", "learn/grade", b"{}", *NOW)
+                .unwrap(),
+            AttemptStart::New,
+            "the failed finish left no row behind"
+        );
+    }
 
     #[test]
     fn a_finished_attempt_gives_its_reply_back_and_a_new_id_runs() {

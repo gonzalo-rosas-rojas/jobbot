@@ -2,7 +2,7 @@
 //! and listings that hold cards, and the sentence that says why a waiting card waits.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
@@ -136,6 +136,8 @@ fn reason_kind(reason: &str) -> (&'static str, &'static str) {
             "missing_answers",
             "El formulario pide respuestas que no tengo",
         )
+    // Not `is_handoff_reason` ("handoff:"): the browser also writes the bare `handoff_host`, for a
+    // form a redirect sent to a handoff host, and that one is a form Gonza sends too.
     } else if reason.starts_with("handoff") {
         (
             "handoff",
@@ -160,10 +162,10 @@ fn reason_kind(reason: &str) -> (&'static str, &'static str) {
 
 /// What a card needs besides its row: the clock, the dossier and hand-over folders, the age limit
 /// and the marks that can still be undone.
-pub(crate) struct CardContext<'a> {
+pub(crate) struct CardContext {
     now: DateTime<Utc>,
-    dossiers: &'a Path,
-    handoffs: &'a Path,
+    dossiers: PathBuf,
+    handoffs: PathBuf,
     /// `max_posting_age_days` of `profile/criteria.toml`; `None` when it cannot be read.
     max_age_days: Option<i64>,
     /// `undoable_marks` within `UNDO_WINDOW`, by key.
@@ -199,7 +201,7 @@ pub(super) fn file_on_disk(path: Option<&str>) -> bool {
     path.is_some_and(|p| Path::new(p).is_file())
 }
 
-pub(crate) fn card(row: &ApplicationRow, ctx: &CardContext<'_>) -> Card {
+pub(crate) fn card(row: &ApplicationRow, ctx: &CardContext) -> Card {
     let has_screenshot = has_screenshot_on_disk(row.screenshot_path.as_deref());
     let mut actions = Vec::new();
     match row.state {
@@ -249,8 +251,8 @@ pub(crate) fn card(row: &ApplicationRow, ctx: &CardContext<'_>) -> Card {
         approved: row.approved,
         has_screenshot,
         has_cv: file_on_disk(row.cv_path.as_deref()),
-        has_dossier: dossier_path(ctx.dossiers, &row.job_key).is_file(),
-        has_handoff: sheet_path(ctx.handoffs, &row.job_key).is_file(),
+        has_dossier: dossier_path(&ctx.dossiers, &row.job_key).is_file(),
+        has_handoff: sheet_path(&ctx.handoffs, &row.job_key).is_file(),
         updated_at: iso(row.updated_at),
         actions,
         marks: marks_from(row.state)
@@ -279,24 +281,35 @@ pub(crate) fn card(row: &ApplicationRow, ctx: &CardContext<'_>) -> Card {
     }
 }
 
-pub(super) fn listing(rows: &[ApplicationRow], cap: usize, ctx: &CardContext<'_>) -> Listing {
+pub(super) fn listing(rows: &[ApplicationRow], cap: usize, ctx: &CardContext) -> Listing {
     Listing {
         total: rows.len(),
         cards: rows.iter().take(cap).map(|r| card(r, ctx)).collect(),
     }
 }
 
-pub(crate) fn card_context<'a>(
+/// Where the dossiers are written (`data/dossiers`).
+pub(super) fn dossiers_dir(panel: &Panel) -> PathBuf {
+    panel.paths.data_dir.join("dossiers")
+}
+
+/// Where the answer sheets of the hand-overs are written (`data/handoff`).
+fn handoffs_dir(panel: &Panel) -> PathBuf {
+    panel.paths.data_dir.join("handoff")
+}
+
+/// What the cards drawn at `now` need besides their rows. The folders come from `panel`; the age
+/// limit comes from `criteria`, which the caller reads once because the sections around the cards
+/// use it too.
+pub(crate) fn card_context(
     panel: &Panel,
     now: DateTime<Utc>,
-    dossiers: &'a Path,
-    handoffs: &'a Path,
     criteria: Option<&Criteria>,
-) -> Result<CardContext<'a>> {
+) -> Result<CardContext> {
     Ok(CardContext {
         now,
-        dossiers,
-        handoffs,
+        dossiers: dossiers_dir(panel),
+        handoffs: handoffs_dir(panel),
         max_age_days: criteria.map(|c| c.max_posting_age_days),
         undoable: panel.tracker.undoable_marks(now - UNDO_WINDOW)?,
     })
@@ -320,7 +333,9 @@ mod tests {
 
     use super::*;
     use crate::fixtures::{add, panel};
-    use crate::snapshot::support_tests::{column, profile_with, shipped_criteria};
+    use crate::snapshot::support_tests::{
+        column, profile_with, sample_criteria, use_sample_criteria,
+    };
     use crate::snapshot::{Snapshot, build_job_detail, build_snapshot};
     use jobbot_testkit::{NOW, make_job_with};
 
@@ -361,6 +376,7 @@ mod tests {
                 "handoff: envía tú este formulario. Hoja de respuestas: data/handoff/x.md",
                 "handoff",
             ),
+            ("handoff_host", "handoff"),
             ("captcha", "blocked"),
             ("login_required", "blocked"),
             ("blocked_page", "blocked"),
@@ -548,7 +564,8 @@ mod tests {
 
     #[test]
     fn a_card_carries_the_posting_dates_the_pay_and_its_ages() {
-        let (panel, dir) = panel();
+        let (mut panel, dir) = panel();
+        use_sample_criteria(&mut panel, dir.path());
         let t = &panel.tracker;
         // Dated, paid, waiting for Gonza since a day and a half ago.
         let dated = make_job_with(|j| {
@@ -585,7 +602,7 @@ mod tests {
             .unwrap();
 
         let snap = build_snapshot(&panel).unwrap();
-        let max_age = shipped_criteria().max_posting_age_days;
+        let max_age = sample_criteria().max_posting_age_days;
 
         let card = card_of(&snap, &dated.key());
         assert_eq!(card["posted_at"], "2026-08-31T12:00:00Z");
@@ -619,7 +636,6 @@ mod tests {
         assert_eq!(detail.card.age_days, Some(31));
 
         // Without a readable criteria.toml nobody knows the age limit.
-        let mut panel = panel;
         panel.paths.profile_dir = profile_with(dir.path(), None, None);
         let snap = build_snapshot(&panel).unwrap();
         assert!(card_of(&snap, &dated.key())["prune_in_days"].is_null());

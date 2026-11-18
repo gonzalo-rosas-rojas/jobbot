@@ -1,11 +1,12 @@
 //! jobbot's test support, for the tests of every crate above the domain and for the integration
-//! tests under `tests/`: the shared fixtures (re-exported from the domain), a fake Claude, the
-//! location of the shipped profile, and the real SQLite stores to open in memory. It is a
+//! tests under `tests/`: the shared fixtures (re-exported from the domain), a fake Claude, made-up
+//! profile files (`profile`), and the real SQLite stores to open in memory. It is a
 //! dev-dependency only; `tests/architecture.rs` keeps it out of anything that ships.
 
 pub mod bench;
 pub mod fuzz;
 pub mod hostile;
+pub mod profile;
 pub mod spans;
 pub mod synthetic;
 
@@ -15,6 +16,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
+use chrono::{DateTime, TimeZone, Utc};
 
 use jobbot_app::paths::Paths;
 use jobbot_app::ports::{AccountSeen, ClaudeError, ClaudeReply, ClaudeRequest, ClaudeRunner};
@@ -28,8 +30,35 @@ pub use jobbot_domain::fixtures::{
 pub use jobbot_store::prep::PrepStore;
 pub use jobbot_store::tracker::Tracker;
 
+/// The UTC instant `year-month-day hour:minute:second` (no fraction; add a `TimeDelta` for one).
+/// The one place the date tests of the crates that depend on this one build their input instants,
+/// so a change of date library touches this function and not each test. Panics on a date that
+/// does not exist.
+pub fn utc_at(
+    year: i32,
+    month: u32,
+    day: u32,
+    hour: u32,
+    minute: u32,
+    second: u32,
+) -> DateTime<Utc> {
+    Utc.with_ymd_and_hms(year, month, day, hour, minute, second)
+        .single()
+        .expect("a UTC date and time that exists")
+}
+
+/// `Paths` rooted at `root` whose `profile/` is an empty folder that this call creates, so a test
+/// writes into it the profile files it needs (and states them) instead of reading the user's own.
+pub fn paths_with_empty_profile(root: &Path) -> Paths {
+    let mut paths = Paths::new(root);
+    paths.profile_dir = root.join("profile-under-test");
+    std::fs::create_dir_all(&paths.profile_dir).expect("an empty profile folder under the root");
+    paths
+}
+
 /// `Paths` rooted at the real project directory (where `profile/` lives): the workspace root, two
-/// folders above this crate.
+/// folders above this crate. Only for the tests that exist to check the files the repository
+/// ships; a new test should build its own profile with `paths_with_empty_profile`.
 pub fn real_paths() -> Paths {
     let crate_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     Paths::new(
@@ -172,6 +201,14 @@ pub fn sample_dossier_json() -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn utc_at_is_the_utc_instant_of_the_fields() {
+        // 2026-03-01T12:00:00Z is 1_772_366_400 seconds after 1970-01-01T00:00:00Z.
+        assert_eq!(utc_at(2026, 3, 1, 12, 0, 0).timestamp(), 1_772_366_400);
+        assert_eq!(utc_at(2026, 3, 1, 12, 0, 1).timestamp(), 1_772_366_401);
+        assert_eq!(utc_at(1970, 1, 1, 0, 0, 0).timestamp(), 0);
+    }
 
     #[test]
     fn real_paths_point_at_the_project_root() {

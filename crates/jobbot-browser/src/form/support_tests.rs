@@ -74,7 +74,8 @@ pub(super) fn checkbox_group(
         .collect()
 }
 
-pub(super) fn bank() -> AnswerBank {
+/// The bank with holes on purpose: no answer for the email, a blank one for the phone.
+pub(super) fn bank_with_gaps() -> AnswerBank {
     AnswerBank {
         entries: vec![
             AnswerEntry::new(&["first name"], Some("Jane")),
@@ -87,6 +88,19 @@ pub(super) fn bank() -> AnswerBank {
         ],
         consent_phrases: vec![],
     }
+}
+
+/// An answer bank with `entries` and no consent phrases.
+pub(super) fn bank_with(entries: Vec<AnswerEntry>) -> AnswerBank {
+    AnswerBank {
+        entries,
+        consent_phrases: vec![],
+    }
+}
+
+/// The `data-jb` numbers the plan acts on, in plan order.
+pub(super) fn action_idxs(plan: &FillPlan) -> Vec<usize> {
+    plan.actions.iter().map(|action| action.idx).collect()
 }
 
 pub(super) fn pay_and_start_bank() -> AnswerBank {

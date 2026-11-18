@@ -5,7 +5,7 @@ use std::io::Write;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 
-use super::claude::{claude_gate, claude_runner};
+use super::claude::{ClaudeSetup, print_account_warnings, read_cv_master};
 use super::{Deps, EXIT_ERROR, EXIT_OK, FreelanceCommand, open_tracker};
 use crate::claude::load_claude_config;
 use crate::freelance::{draft_profile, draft_proposal, load_freelance_config};
@@ -31,25 +31,16 @@ pub(super) async fn cmd_freelance(
         writeln!(out, "{reason}")?;
         return Ok(EXIT_ERROR);
     }
-    let tracker = open_tracker(paths)?;
-    let runner = claude_runner(paths, deps, &config)?;
-    let gate = claude_gate(runner.as_ref(), &tracker, &config);
-    gate.check_account(now).await?;
-    let cv_md = std::fs::read_to_string(&paths.cv_master)
-        .with_context(|| format!("leyendo {}", paths.cv_master.display()))?;
+    let setup = ClaudeSetup::with(paths, deps, config, open_tracker(paths)?)?;
+    let gate = setup.gate();
+    // A managed policy on the account is shown, as in `run-daily` and `dossier`.
+    let seen = gate.check_account(now).await?;
+    print_account_warnings(&seen, out)?;
+    let cv_md = read_cv_master(paths)?;
     let dir = paths.data_dir.join("freelance");
     let path = match command {
-        FreelanceCommand::Profile(a) => {
-            draft_profile(
-                &gate,
-                &freelance,
-                &exclusions,
-                &cv_md,
-                &a.platform,
-                &dir,
-                now,
-            )
-            .await?
+        FreelanceCommand::Profile(_) => {
+            draft_profile(&gate, &freelance, &exclusions, &cv_md, &platform, &dir, now).await?
         }
         FreelanceCommand::Proposal(a) => {
             let posting = std::fs::read_to_string(&a.job_file)
@@ -64,7 +55,7 @@ pub(super) async fn cmd_freelance(
                 &freelance,
                 &exclusions,
                 &cv_md,
-                &a.platform,
+                &platform,
                 &posting,
                 &name,
                 &dir,
@@ -171,6 +162,38 @@ mod tests {
         for secret in ["Harbor Light", "jane.doe@example.com", "+56"] {
             assert!(!fake.requests()[0].prompt.contains(secret), "{secret}");
         }
+    }
+
+    #[tokio::test]
+    async fn freelance_shows_the_managed_policy_warning_of_the_account() {
+        let root = temp_root();
+        write_cv_master(root.path(), SAMPLE_CV);
+        write_freelance_toml(
+            root.path(),
+            "platforms = [\"upwork\"]\nmin_hourly_usd = 35\n",
+        );
+        let note = "hay una política administrada de prueba";
+        let fake = Arc::new(
+            FakeClaude::new(vec![FakeClaude::structured(
+                serde_json::json!({
+                    "headline": "AI engineer", "bio": "I build LLM agents with Python.",
+                    "skills": ["Python"], "hourly_rate_usd": 20.0,
+                    "portfolio_ideas": [{"title": "RAG demo", "description": "Built."}]
+                }),
+                0.04,
+            )])
+            .warning_about(note),
+        );
+        let deps = with_claude(fake_deps(vec![]).0, &fake);
+        let (code, out) = cli(
+            root.path(),
+            open_now(),
+            deps,
+            &["freelance", "profile", "upwork"],
+        )
+        .await;
+        assert_eq!(code, 0, "{out}");
+        assert!(out.contains(&format!("Aviso: {note}")), "{out}");
     }
 
     #[tokio::test]

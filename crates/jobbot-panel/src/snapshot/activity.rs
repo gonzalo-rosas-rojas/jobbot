@@ -155,9 +155,8 @@ mod tests {
     use crate::fixtures::panel;
     use crate::snapshot::build_snapshot;
     use crate::snapshot::support_tests::{profile_with, seen_at};
-    use jobbot_app::paths::Paths;
     use jobbot_domain::state::State;
-    use jobbot_testkit::{NOW, PrepStore, Tracker, real_paths};
+    use jobbot_testkit::{NOW, PrepStore, Tracker, paths_with_empty_profile};
 
     #[test]
     fn claude_spend_covers_the_last_24_hours_only() {
@@ -179,8 +178,7 @@ mod tests {
     /// A panel over fresh databases whose clock stands at `at`.
     fn panel_at(at: DateTime<Utc>) -> (Panel, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
-        let mut paths = Paths::new(dir.path());
-        paths.profile_dir = real_paths().profile_dir;
+        let paths = paths_with_empty_profile(dir.path());
         let panel = Panel::new(
             paths,
             Tracker::in_memory().unwrap(),

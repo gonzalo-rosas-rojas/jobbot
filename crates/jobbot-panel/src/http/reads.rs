@@ -89,7 +89,8 @@ mod tests {
         );
 
         let path = results_path(&p.paths.data_dir);
-        for n in 1..=3 {
+        // More lines than the default tail, so the default is told from "everything there is".
+        for n in 1..=25 {
             let job = jobbot_testkit::make_job_with(|j| j.external_id = n.to_string());
             let line = jobbot_app::apply::results::ResultLine::new(
                 &job,
@@ -106,20 +107,20 @@ mod tests {
             jobbot_app::apply::results::append_result(&path, &line).unwrap();
         }
         let two = json_of(&get("?last=2"));
-        assert_eq!(two["total"], 3);
+        assert_eq!(two["total"], 25);
         let keys: Vec<&str> = two["lines"]
             .as_array()
             .unwrap()
             .iter()
             .map(|l| l["key"].as_str().unwrap())
             .collect();
-        assert_eq!(keys, ["test:2", "test:3"], "the newest two, oldest first");
+        assert_eq!(keys, ["test:24", "test:25"], "the newest two, oldest first");
         assert_eq!(two["lines"][0]["mode"], "dry_run");
         assert_eq!(two["lines"][0]["fields_left"][0], "Pronombres");
         assert_eq!(
             json_of(&get(""))["lines"].as_array().unwrap().len(),
-            3,
-            "20 by default"
+            20,
+            "the tail is 20 lines by default"
         );
         assert_eq!(
             json_of(&get("?last=0"))["lines"].as_array().unwrap().len(),
@@ -157,8 +158,8 @@ mod tests {
                 .as_str()
                 .is_some_and(|a| !a.is_empty())
         );
-        let grade = |id: &str, grade: u32| {
-            let body = serde_json::json!({ "id": id, "grade": grade }).to_string();
+        let grade = |id: &str, points: u32| {
+            let body = serde_json::json!({ "id": id, "grade": points }).to_string();
             handle(&p, &guard(), &request("POST", "/api/learn/grade", &body))
         };
         assert_eq!(grade(&id, 5).status, 200);

@@ -5,13 +5,13 @@ use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::{DateTime, TimeDelta, Utc};
 
 use super::{Deps, EXIT_ERROR, EXIT_OK, open_tracker};
 use crate::claude::{
-    ClaudeConfig, ClaudeGate, ClaudeRequest, ClaudeRunner, CliClaude, TESTED_CLAUDE_VERSION,
-    is_account_error, load_claude_config,
+    ClaudeConfig, ClaudeGate, ClaudeRequest, ClaudeRunner, CliClaude, DEFAULT_CONFIG_DIR,
+    TESTED_CLAUDE_VERSION, is_account_error, load_claude_config,
 };
 use crate::paths::Paths;
 use crate::tracker::Tracker;
@@ -27,17 +27,66 @@ pub(super) fn claude_gate<'a>(
         .with_per_call_cap(config.per_call_budget_usd)
 }
 
-/// The injected runner (tests) or the real `claude.exe`, started in the empty `data/claude-cwd`.
-pub(super) fn claude_runner(
-    paths: &Paths,
-    deps: &Deps,
-    config: &ClaudeConfig,
-) -> Result<Arc<dyn ClaudeRunner>> {
+/// The runner and, when none was injected, the real program behind it.
+type LocatedRunner = (Arc<dyn ClaudeRunner>, Option<Arc<CliClaude>>);
+
+/// The injected runner (tests) or the real `claude.exe`, started in the empty `data/claude-cwd`,
+/// and with it the real program when no runner was injected: the real program is located once,
+/// and it is the same one that runs.
+fn locate_runner(paths: &Paths, deps: &Deps, config: &ClaudeConfig) -> Result<LocatedRunner> {
     if let Some(injected) = &deps.claude {
-        return Ok(injected.clone());
+        return Ok((injected.clone(), None));
     }
-    let cli = CliClaude::locate(config.clone(), paths.claude_work.clone())?;
-    Ok(Arc::new(cli))
+    let real = Arc::new(CliClaude::locate(
+        config.clone(),
+        paths.claude_work.clone(),
+    )?);
+    Ok((real.clone(), Some(real)))
+}
+
+/// What a command that talks to Claude has before its first prompt: `claude.toml`, the tracker
+/// that keeps the ledger and the runner (with the real program when the runner is not injected).
+pub(super) struct ClaudeSetup {
+    pub(super) config: ClaudeConfig,
+    pub(super) tracker: Tracker,
+    pub(super) runner: Arc<dyn ClaudeRunner>,
+    pub(super) real: Option<Arc<CliClaude>>,
+}
+
+impl ClaudeSetup {
+    /// `claude.toml`, then the tracker, then the runner, in that order: the first that fails is
+    /// the error Gonza reads.
+    pub(super) fn open(paths: &Paths, deps: &Deps) -> Result<ClaudeSetup> {
+        let config = load_claude_config(&paths.profile_dir.join("claude.toml"))?;
+        let tracker = open_tracker(paths)?;
+        ClaudeSetup::with(paths, deps, config, tracker)
+    }
+
+    /// The setup around a `config` read and a `tracker` opened already.
+    pub(super) fn with(
+        paths: &Paths,
+        deps: &Deps,
+        config: ClaudeConfig,
+        tracker: Tracker,
+    ) -> Result<ClaudeSetup> {
+        let (runner, real) = locate_runner(paths, deps, &config)?;
+        Ok(ClaudeSetup {
+            config,
+            tracker,
+            runner,
+            real,
+        })
+    }
+
+    pub(super) fn gate(&self) -> ClaudeGate<'_> {
+        claude_gate(self.runner.as_ref(), &self.tracker, &self.config)
+    }
+}
+
+/// The master CV every Claude command reads, as text.
+pub(super) fn read_cv_master(paths: &Paths) -> Result<String> {
+    std::fs::read_to_string(&paths.cv_master)
+        .with_context(|| format!("leyendo {}", paths.cv_master.display()))
 }
 
 pub(super) async fn cmd_claude_check(
@@ -46,12 +95,10 @@ pub(super) async fn cmd_claude_check(
     now: DateTime<Utc>,
     out: &mut dyn Write,
 ) -> Result<i32> {
-    let config = load_claude_config(&paths.profile_dir.join("claude.toml"))?;
-    let tracker = open_tracker(paths)?;
-    let runner = claude_runner(paths, deps, &config)?;
-    if deps.claude.is_none() {
+    let setup = ClaudeSetup::open(paths, deps)?;
+    let (config, tracker) = (&setup.config, &setup.tracker);
+    if let Some(real) = &setup.real {
         // Only the real program has a path and a version to report.
-        let real = CliClaude::locate(config.clone(), paths.claude_work.clone())?;
         writeln!(out, "Programa: {}", real.program().display())?;
         match real.version().await {
             Some(v) if v == TESTED_CLAUDE_VERSION => writeln!(out, "Versión: {v} (la probada)")?,
@@ -63,11 +110,11 @@ pub(super) async fn cmd_claude_check(
             None => writeln!(out, "Aviso: no pude leer la versión de claude.")?,
         }
     }
-    let gate = claude_gate(runner.as_ref(), &tracker, &config);
+    let gate = setup.gate();
     let seen = gate.check_account(now).await?;
     writeln!(out, "Cuenta: {}", seen.describe())?;
     print_account_warnings(&seen, out)?;
-    if let Some(note) = unanchored_note(&config) {
+    if let Some(note) = unanchored_note(config) {
         writeln!(out, "{note}")?;
     }
     let request = ClaudeRequest {
@@ -92,8 +139,8 @@ pub(super) async fn cmd_claude_check(
     Ok(EXIT_OK)
 }
 
-/// The line that says, in red-flag words, that nothing fixes which account is the right one:
-/// `None` when `expected_email` and `expected_org_id` are both set.
+/// The warning shown when `claude.local.toml` does not pin both `expected_email` and
+/// `expected_org_id` (any Pro or Max session then passes the check); `None` when both are set.
 pub(super) fn unanchored_note(config: &ClaudeConfig) -> Option<String> {
     (!config.is_anchored()).then(|| {
         "Aviso: cuenta sin anclar. profile/claude.local.toml no fija expected_email y \
@@ -124,15 +171,13 @@ pub(super) async fn cmd_claude_login(
     now: DateTime<Utc>,
     out: &mut dyn Write,
 ) -> Result<i32> {
-    let config = load_claude_config(&paths.profile_dir.join("claude.toml"))?;
-    let tracker = open_tracker(paths)?;
-    let runner = claude_runner(paths, deps, &config)?;
-    if deps.claude.is_none() {
-        let real = CliClaude::locate(config.clone(), paths.claude_work.clone())?;
-        writeln!(out, "{}", login_notice(&config, real.config_dir()))?;
+    let setup = ClaudeSetup::open(paths, deps)?;
+    let (config, runner) = (&setup.config, &setup.runner);
+    if let Some(real) = &setup.real {
+        writeln!(out, "{}", login_notice(config, real.config_dir()))?;
         real.login().await?;
     }
-    let gate = claude_gate(runner.as_ref(), &tracker, &config);
+    let gate = setup.gate();
     match gate.check_account(now).await {
         Ok(seen) => {
             writeln!(out, "Sesión verificada. Cuenta: {}", seen.describe())?;
@@ -170,7 +215,7 @@ pub(super) async fn cmd_claude_login(
                         out,
                         "No pude cerrar esa sesión ({e}). Ciérrala a mano antes de seguir: borra \
                          la carpeta de la sesión de jobbot (la que dice más arriba; por defecto \
-                         %LOCALAPPDATA%\\jobbot\\claude-config)."
+                         %LOCALAPPDATA%\\{DEFAULT_CONFIG_DIR})."
                     )?,
                 }
             }

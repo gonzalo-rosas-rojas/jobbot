@@ -10,6 +10,22 @@ use jobbot_domain::fixtures::make_job_with;
 use wiremock::matchers::method;
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+/// What the CV picker of the fixture form shows as the chosen file (`#filename`).
+async fn uploaded_label(session: &Session) -> String {
+    session
+        .page
+        .locator("#filename")
+        .text_content()
+        .await
+        .unwrap()
+        .unwrap_or_default()
+}
+
+/// Whether the fixture form was sent (`window.submitted`).
+async fn was_submitted(session: &Session) -> bool {
+    session.eval("String(Boolean(window.submitted))").await == "true"
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs chromium"]
 async fn dry_run_fills_and_does_not_submit() {
@@ -23,21 +39,12 @@ async fn dry_run_fills_and_does_not_submit() {
     assert_eq!(session.value("#first_name").await, "Jane");
     assert_eq!(session.value("#email").await, "search@example.com");
     assert_eq!(session.value("#country").await, "cl");
-    let uploaded = session
-        .page
-        .locator("#filename")
-        .text_content()
-        .await
-        .unwrap()
-        .unwrap_or_default();
+    let uploaded = uploaded_label(&session).await;
     assert!(
         uploaded.contains("cv.pdf"),
         "uploaded file label was: {uploaded}"
     );
-    assert_eq!(
-        session.eval("String(Boolean(window.submitted))").await,
-        "false"
-    );
+    assert!(!was_submitted(&session).await);
     session.stop().await;
 }
 
@@ -57,10 +64,7 @@ async fn live_run_waits_for_the_button_clicks_it_and_saves_the_after_screenshot(
             .to_string_lossy()
             .ends_with("-after.png")
     );
-    assert_eq!(
-        session.eval("String(Boolean(window.submitted))").await,
-        "true"
-    );
+    assert!(was_submitted(&session).await);
     let confirm = session
         .page
         .locator("#confirm")
@@ -87,10 +91,7 @@ async fn missing_required_answer_goes_to_gonza_without_submitting() {
             .starts_with("faltan respuestas: Email")
     );
     assert!(result.screenshot.unwrap().exists());
-    assert_eq!(
-        session.eval("String(Boolean(window.submitted))").await,
-        "false"
-    );
+    assert!(!was_submitted(&session).await);
     session.stop().await;
 }
 
@@ -107,10 +108,7 @@ async fn unknown_required_question_goes_to_gonza() {
         reason.contains("Favorite programming paradigm"),
         "reason was: {reason}"
     );
-    assert_eq!(
-        session.eval("String(Boolean(window.submitted))").await,
-        "false"
-    );
+    assert!(!was_submitted(&session).await);
     session.stop().await;
 }
 
@@ -132,22 +130,13 @@ async fn dry_run_with_a_missing_answer_fills_the_rest_and_flags_what_is_left() {
     assert_eq!(session.value("#first_name").await, "Jane");
     assert_eq!(session.value("#email").await, "search@example.com");
     assert_eq!(session.value("#country").await, "cl");
-    let uploaded = session
-        .page
-        .locator("#filename")
-        .text_content()
-        .await
-        .unwrap()
-        .unwrap_or_default();
+    let uploaded = uploaded_label(&session).await;
     assert!(uploaded.contains("cv.pdf"), "uploaded was: {uploaded}");
     // What only Gonza can answer is untouched, flagged, and nothing was sent.
     assert_eq!(session.value("#paradigm").await, "");
     assert_eq!(flagged_ids(&session).await, "paradigm");
     assert_eq!(session.eval("String(window.clicks || 0)").await, "0");
-    assert_eq!(
-        session.eval("String(Boolean(window.submitted))").await,
-        "false"
-    );
+    assert!(!was_submitted(&session).await);
     session.stop().await;
 }
 
@@ -173,13 +162,7 @@ async fn a_field_that_fails_does_not_hide_the_ones_after_it() {
             "search@example.com",
             "{mode:?}"
         );
-        let uploaded = session
-            .page
-            .locator("#filename")
-            .text_content()
-            .await
-            .unwrap()
-            .unwrap_or_default();
+        let uploaded = uploaded_label(&session).await;
         assert!(uploaded.contains("cv.pdf"), "{mode:?}: {uploaded}");
         assert_eq!(flagged_ids(&session).await, "country", "{mode:?}");
         assert_eq!(
@@ -221,11 +204,7 @@ async fn live_never_clicks_submit_while_a_required_answer_is_missing() {
             "0",
             "{variant}"
         );
-        assert_eq!(
-            session.eval("String(Boolean(window.submitted))").await,
-            "false",
-            "{variant}"
-        );
+        assert!(!was_submitted(&session).await, "{variant}");
         assert_eq!(session.value("#first_name").await, "", "{variant}");
     }
     session.stop().await;
@@ -267,10 +246,7 @@ async fn assist_leaves_the_unanswerable_question_to_gonza_and_waits_for_his_clic
     assert_eq!(session.value("#first_name").await, "Jane");
     assert_eq!(session.value("#email").await, "search@example.com");
     assert_eq!(session.value("#essay").await, "Because I build agents.");
-    assert_eq!(
-        session.eval("String(Boolean(window.submitted))").await,
-        "true"
-    );
+    assert!(was_submitted(&session).await);
     session.stop().await;
 }
 
@@ -319,10 +295,10 @@ async fn assist_keeps_the_browser_open_when_a_field_fails() {
         "{:?}",
         result.reason
     );
-    assert_eq!(
-        session.eval("String(Boolean(window.submitted))").await,
-        "true"
-    );
+    assert!(was_submitted(&session).await);
+    // The CV was attached before the form went out: the flow does not give up at the country.
+    let uploaded = uploaded_label(&session).await;
+    assert!(uploaded.contains("cv.pdf"), "uploaded was: {uploaded}");
     session.stop().await;
 }
 
@@ -348,10 +324,7 @@ async fn captcha_that_appears_while_filling_stops_the_live_submit() {
         .await;
     assert_eq!(result.status, SubmitStatus::NeedsGonza);
     assert_eq!(result.reason.as_deref(), Some("captcha"));
-    assert_eq!(
-        session.eval("String(Boolean(window.submitted))").await,
-        "false"
-    );
+    assert!(!was_submitted(&session).await);
     session.stop().await;
 }
 
@@ -592,10 +565,7 @@ async fn validation_error_after_click_is_unconfirmed() {
             .to_string_lossy()
             .ends_with("-after.png")
     );
-    assert_eq!(
-        session.eval("String(Boolean(window.submitted))").await,
-        "false"
-    );
+    assert!(!was_submitted(&session).await);
     session.stop().await;
 }
 
@@ -648,10 +618,7 @@ async fn assist_mode_waits_for_the_human_click() {
         "{:?}",
         result.reason
     );
-    assert_eq!(
-        session.eval("String(Boolean(window.submitted))").await,
-        "true"
-    );
+    assert!(was_submitted(&session).await);
     session.stop().await;
 }
 

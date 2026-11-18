@@ -1,5 +1,6 @@
-//! The `dossier` use cases against the real SQLite stores, the fake Claude and the shipped
-//! profile (moved from the root crate's `src/dossier.rs`).
+//! The `dossier` use cases against the real SQLite stores and the fake Claude (moved from the
+//! root crate's `src/dossier.rs`). Made-up exclusions, except in the two tests that assert the
+//! current employer of `SAMPLE_CV` never reaches Claude: those read the list that ships.
 
 use serde_json::json;
 
@@ -7,14 +8,13 @@ use jobbot_app::claude::ClaudeGate;
 use jobbot_app::claude::is_budget_error;
 use jobbot_app::learn::dossier::*;
 use jobbot_app::profile::claude::ClaudeConfig;
-use jobbot_app::profile::load_exclusions;
 use jobbot_domain::models::Job;
 use jobbot_domain::outbound::{key_slug, redact_contact};
+use jobbot_domain::rules::Exclusions;
 use jobbot_testkit::PrepStore;
 use jobbot_testkit::Tracker;
-use jobbot_testkit::{
-    FakeClaude, NOW, SAMPLE_CV, make_job, make_job_with, real_paths, sample_dossier_json,
-};
+use jobbot_testkit::profile::{sample_exclusions, shipped_exclusions};
+use jobbot_testkit::{FakeClaude, NOW, SAMPLE_CV, make_job, make_job_with, sample_dossier_json};
 
 fn raw(value: serde_json::Value) -> RawDossier {
     serde_json::from_value(value).unwrap()
@@ -34,14 +34,26 @@ fn env() -> Env {
     }
 }
 async fn build(e: &Env, fake: &FakeClaude, job: &Job) -> anyhow::Result<DossierOutcome> {
+    build_with(e, fake, job, &sample_exclusions()).await
+}
+/// Like `build`, with the exclusion list that ships: for the tests that assert the current
+/// employer of `SAMPLE_CV` (an entry of that list) never reaches Claude.
+async fn build_shipped(e: &Env, fake: &FakeClaude, job: &Job) -> anyhow::Result<DossierOutcome> {
+    build_with(e, fake, job, &shipped_exclusions()).await
+}
+async fn build_with(
+    e: &Env,
+    fake: &FakeClaude,
+    job: &Job,
+    exclusions: &Exclusions,
+) -> anyhow::Result<DossierOutcome> {
     let gate = ClaudeGate::new(fake, &e.tracker, e.config.daily_budget_usd);
-    let exclusions = load_exclusions(&real_paths().profile_dir.join("exclusions.toml")).unwrap();
     build_dossier(
         &gate,
         &e.store,
         job,
         SAMPLE_CV,
-        &exclusions,
+        exclusions,
         e.dir.path(),
         *NOW,
     )
@@ -89,7 +101,7 @@ fn card_ids_come_from_the_slugged_key() {
 async fn a_dossier_is_written_with_its_cards_and_the_call_is_recorded() {
     let e = env();
     let fake = FakeClaude::new(vec![FakeClaude::structured(sample_dossier_json(), 0.05)]);
-    let outcome = build(&e, &fake, &make_job()).await.unwrap();
+    let outcome = build_shipped(&e, &fake, &make_job()).await.unwrap();
     let path = dossier_path(e.dir.path(), "test:1");
     assert_eq!(
         outcome,
@@ -138,7 +150,7 @@ async fn a_story_built_on_the_current_employer_is_dropped_because_it_was_never_s
         "Design and build internal workflow-automation and reporting software for a multi-office healthcare practice"
     );
     let fake = FakeClaude::new(vec![FakeClaude::structured(reply, 0.05)]);
-    let outcome = build(&e, &fake, &make_job()).await.unwrap();
+    let outcome = build_shipped(&e, &fake, &make_job()).await.unwrap();
     // Of the three stories in the reply only "Job system" has evidence in the text Claude saw.
     assert!(
         matches!(

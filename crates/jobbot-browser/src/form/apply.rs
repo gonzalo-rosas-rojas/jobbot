@@ -5,8 +5,9 @@ use std::time::Duration;
 use playwright_rs::Page;
 
 use super::dropdown::choose;
-use super::leftover::{first_line, plain};
+use super::leftover::first_line;
 use super::{FieldInfo, FillAction, FillValue, NoOption};
+use jobbot_domain::outbound::plain_line;
 
 /// True when a failed fill only means "this list has no option for the answer" and the field is
 /// optional: the field is skipped and left as it was. A required field keeps failing loudly, and
@@ -34,7 +35,7 @@ pub(super) async fn apply_all(
             if is_skippable(&err, required) {
                 eprintln!(
                     "[omitido] {}: {}; es opcional y queda como estaba",
-                    plain(&action.label),
+                    plain_line(&action.label),
                     skip_note(&err)
                 );
                 continue;
@@ -93,18 +94,22 @@ async fn select_option(locator: &playwright_rs::Locator) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// What the reserved question says about the list, in the terminal line and in the reason Gonza
+/// reads in the panel.
+const RESERVED_LIST_NOTE: &str = "la lista ofrece Hispanic o Latino";
+
 /// What a skipped optional field says on the terminal.
-fn skip_note(err: &anyhow::Error) -> &'static str {
+fn skip_note(err: &anyhow::Error) -> String {
     match err.downcast_ref::<NoOption>() {
-        Some(NoOption::Reserved) => "la lista ofrece Hispanic o Latino: esa respuesta es tuya",
-        _ => "ninguna opción de la lista coincide con la respuesta",
+        Some(NoOption::Reserved) => format!("{RESERVED_LIST_NOTE}: esa respuesta es tuya"),
+        _ => "ninguna opción de la lista coincide con la respuesta".to_string(),
     }
 }
 
 fn failure_reason(action: &FillAction, err: &anyhow::Error) -> String {
     if err.downcast_ref::<NoOption>() == Some(&NoOption::Reserved) {
         return format!(
-            "pregunta reservada para ti (la lista ofrece Hispanic o Latino): {}",
+            "pregunta reservada para ti ({RESERVED_LIST_NOTE}): {}",
             action.label
         );
     }
@@ -136,5 +141,27 @@ mod tests {
         // A page that did not answer is a failure whatever the field.
         assert!(!is_skippable(&broken, false));
         assert!(!is_skippable(&broken, true));
+    }
+
+    #[test]
+    fn the_reserved_question_is_worded_the_same_for_the_terminal_and_for_the_panel() {
+        let reserved = anyhow::Error::new(NoOption::Reserved);
+        assert_eq!(
+            skip_note(&reserved),
+            "la lista ofrece Hispanic o Latino: esa respuesta es tuya"
+        );
+        assert_eq!(
+            skip_note(&anyhow::Error::new(NoOption::NoMatch)),
+            "ninguna opción de la lista coincide con la respuesta"
+        );
+        let action = FillAction {
+            idx: 3,
+            label: "Ethnicity".into(),
+            value: FillValue::Select(vec!["Hispanic".into()]),
+        };
+        assert_eq!(
+            failure_reason(&action, &reserved),
+            "pregunta reservada para ti (la lista ofrece Hispanic o Latino): Ethnicity"
+        );
     }
 }

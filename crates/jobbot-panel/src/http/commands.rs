@@ -234,6 +234,8 @@ fn task_add(panel: &Panel, req: &Request) -> Result<Reply> {
         Some(text) => match moment(text) {
             Some(at) => Some(at),
             None => {
+                // A 409 on purpose, not the 400 of a malformed body: the date is refused like the
+                // other refusals of `task add`, and its test lists it with them.
                 return Ok(outcome_reply(Outcome {
                     ok: false,
                     message: "La fecha límite debe ser RFC 3339, por ejemplo 2026-10-08T15:00:00Z"
@@ -268,6 +270,8 @@ fn record(panel: &Panel, req: &Request) -> Result<Reply> {
         Some(text) => match moment(text) {
             Some(at) => at,
             None => {
+                // A 409 on purpose, like the future date below: both are refusals of `record`, as
+                // `jobbot record` makes them, and its test lists them together.
                 return refused(
                     "La fecha de envío (at) debe ser RFC 3339, por ejemplo 2026-10-05T05:21:42Z"
                         .to_string(),

@@ -10,6 +10,12 @@ use crate::actions;
 use crate::paths::Paths;
 use crate::prep::PrepStore;
 
+/// How many weak topics `prep stats` lists.
+const WEAK_TOPICS_SHOWN: usize = 3;
+
+/// How many of its latest reviews decide whether a topic is weak.
+const WEAK_TOPIC_REVIEWS: usize = 10;
+
 pub(super) fn open_prep_store(paths: &Paths) -> Result<PrepStore> {
     std::fs::create_dir_all(&paths.data_dir)?;
     Ok(PrepStore::open(&paths.data_dir.join("prep.db"))?)
@@ -54,7 +60,7 @@ pub(super) fn cmd_prep(
                 "Vistas: {}/{} · Pendientes hoy: {}",
                 stats.seen, stats.total, stats.due
             )?;
-            for (topic, average) in store.weak_topics(3, 10)? {
+            for (topic, average) in store.weak_topics(WEAK_TOPICS_SHOWN, WEAK_TOPIC_REVIEWS)? {
                 writeln!(out, "Tema débil: {topic} (promedio {average:.1})")?;
             }
         }
@@ -65,6 +71,7 @@ pub(super) fn cmd_prep(
 #[cfg(test)]
 mod tests {
     use crate::cli::test_support::{busy_now, open_now, plain, temp_root};
+    use crate::prep::PrepStore;
 
     #[tokio::test]
     async fn prep_flow_next_reveal_grade_stats() {
@@ -165,5 +172,33 @@ mod tests {
             out.contains("Tema débil: javascript (promedio 1.0)"),
             "{out}"
         );
+    }
+
+    #[tokio::test]
+    async fn prep_next_serves_cards_added_to_the_store() {
+        let root = temp_root();
+        std::fs::create_dir_all(root.path().join("data")).unwrap();
+        let store = PrepStore::open(&root.path().join("data").join("prep.db")).unwrap();
+        let card = crate::prep::Question {
+            id: "gap-x-1".into(),
+            topic: "kubernetes".into(),
+            question: "What does a Deployment do?".into(),
+            answer: "It manages ReplicaSets.".into(),
+        };
+        store.add_cards(&[card], "test:1", open_now()).unwrap();
+        drop(store);
+        let (code, out) = plain(
+            root.path(),
+            open_now(),
+            &["prep", "next", "--topic", "kubernetes"],
+        )
+        .await;
+        assert_eq!(code, 0);
+        assert!(
+            out.contains("gap-x-1 [kubernetes]") && out.contains("What does a Deployment do?"),
+            "{out}"
+        );
+        let (_, out) = plain(root.path(), open_now(), &["prep", "reveal", "gap-x-1"]).await;
+        assert!(out.contains("It manages ReplicaSets."), "{out}");
     }
 }

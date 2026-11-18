@@ -161,6 +161,31 @@ mod tests {
         );
     }
 
+    #[test]
+    fn the_milliseconds_of_created_at_are_cut_to_the_second_and_zero_or_less_is_no_date() {
+        use chrono::{TimeZone, Utc};
+        let posted = |created: Value| {
+            let mut posting = payload()[0].clone();
+            posting["createdAt"] = created;
+            parse_posting("acme", &posting).unwrap().posted_at
+        };
+        let noon = Utc.with_ymd_and_hms(2025, 10, 1, 12, 0, 0).unwrap();
+        assert_eq!(posted(json!(1_759_320_000_000_i64)), Some(noon));
+        assert_eq!(posted(json!(1_759_320_000_999_i64)), Some(noon));
+        assert_eq!(posted(json!(1_759_320_000_500.5)), Some(noon));
+        assert_eq!(
+            posted(json!(1_759_320_001_000_i64)),
+            Some(noon + chrono::TimeDelta::seconds(1))
+        );
+        assert_eq!(
+            posted(json!(999)),
+            Some(Utc.with_ymd_and_hms(1970, 1, 1, 0, 0, 0).unwrap())
+        );
+        for none in [json!(0), json!(-1_000), json!("1759320000000"), Value::Null] {
+            assert_eq!(posted(none.clone()), None, "{none}");
+        }
+    }
+
     #[tokio::test]
     async fn lever_object_instead_of_array_is_recorded() {
         let server = MockServer::start().await;

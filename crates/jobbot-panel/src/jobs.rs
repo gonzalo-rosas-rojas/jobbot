@@ -154,10 +154,8 @@ pub fn build_jobs_page(panel: &Panel, query: &JobsQuery) -> Result<JobsPage> {
     };
     rows.retain(|row| query.accepts(row));
     let total = rows.len();
-    let dossiers = panel.paths.data_dir.join("dossiers");
-    let handoffs = panel.paths.data_dir.join("handoff");
     let criteria = panel.criteria();
-    let ctx = card_context(panel, panel.now(), &dossiers, &handoffs, criteria.as_ref())?;
+    let ctx = card_context(panel, panel.now(), criteria.as_ref())?;
     Ok(JobsPage {
         page: query.page,
         per_page: PAGE_SIZE,

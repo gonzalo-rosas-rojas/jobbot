@@ -238,20 +238,28 @@ mod tests {
     use super::*;
     use crate::fixtures::panel;
     use crate::snapshot::build_snapshot;
-    use crate::snapshot::support_tests::profile_with;
+    use crate::snapshot::support_tests::{SAMPLE_SCHEDULE, profile_with};
     use jobbot_testkit::NOW;
 
     #[test]
     fn controls_show_stop_and_tolerate_a_missing_schedule_and_claude_config() {
         let (mut panel, dir) = panel();
+        panel.paths.profile_dir = profile_with(dir.path(), None, Some(SAMPLE_SCHEDULE));
         assert!(!build_snapshot(&panel).unwrap().controls.stopped);
         std::fs::write(&panel.paths.stop_file, "stop").unwrap();
         let controls = build_snapshot(&panel).unwrap().controls;
         assert!(controls.stopped);
         assert!(controls.window_open.is_some());
+        // The budget is whatever the profile's own claude.toml says: this one is written here.
+        panel.paths.profile_dir = profile_with(dir.path(), None, None);
+        std::fs::write(
+            panel.paths.profile_dir.join("claude.toml"),
+            "daily_budget_usd = 2.25\n",
+        )
+        .unwrap();
         assert_eq!(
             build_snapshot(&panel).unwrap().claude.unwrap().daily_budget,
-            Some(1.5)
+            Some(2.25)
         );
         panel.paths.profile_dir = dir.path().join("no-profile");
         let snap = build_snapshot(&panel).unwrap();
@@ -371,59 +379,48 @@ mod tests {
         let folder = profile_with(dir.path(), None, None);
         panel.paths.profile_dir = folder.clone();
         let anchored = |panel: &Panel| {
-            serde_json::to_value(build_snapshot(panel).unwrap().controls).unwrap()["claude_account"]
-                ["anchored"]
-                .clone()
+            controls_json(panel)["claude_account"]["anchored"]
+                .as_bool()
+                .expect("`anchored` is a boolean")
         };
         let write = |name: &str, text: &str| std::fs::write(folder.join(name), text).unwrap();
 
         // Nothing to compare the login with, or no way to read what there is: not anchored. A
         // verified account is not the same as an account that was checked against anything.
-        assert_eq!(anchored(&panel), false, "no claude.toml at all");
+        assert!(!anchored(&panel), "no claude.toml at all");
         write("claude.toml", "model = \"claude-sonnet-5-5\"\n");
-        assert_eq!(
-            anchored(&panel),
-            false,
-            "the shipped file leaves both empty"
-        );
+        assert!(!anchored(&panel), "the shipped file leaves both empty");
         write("claude.local.toml", "expected_email = \"me@example.com\"\n");
-        assert_eq!(
-            anchored(&panel),
-            false,
-            "the address without the organization"
-        );
+        assert!(!anchored(&panel), "the address without the organization");
         write(
             "claude.local.toml",
             "expected_email = \"me@example.com\"\nexpected_org_id = \"org-1\"\n",
         );
-        assert_eq!(anchored(&panel), true);
+        assert!(anchored(&panel));
         write("claude.local.toml", "expected_email = [\n");
-        assert_eq!(anchored(&panel), false, "a broken file anchors nothing");
+        assert!(!anchored(&panel), "a broken file anchors nothing");
     }
 
     #[test]
     fn controls_carry_the_auto_approval_threshold_or_null() {
         let (panel, _dir) = panel();
-        let controls =
-            |panel: &Panel| serde_json::to_value(build_snapshot(panel).unwrap().controls).unwrap();
-        let off = controls(&panel);
+        let off = controls_json(&panel);
         assert!(
             off.as_object().unwrap().contains_key("auto_approve_min")
                 && off["auto_approve_min"].is_null(),
             "off is a null that is there"
         );
         panel.tracker.set_meta("auto_approve_min", "90").unwrap();
-        assert_eq!(controls(&panel)["auto_approve_min"], 90);
+        assert_eq!(controls_json(&panel)["auto_approve_min"], 90);
         // A damaged setting is off, never a number the page would trust.
         panel.tracker.set_meta("auto_approve_min", "999").unwrap();
-        assert!(controls(&panel)["auto_approve_min"].is_null());
+        assert!(controls_json(&panel)["auto_approve_min"].is_null());
     }
 
     #[test]
     fn controls_carry_how_the_last_run_ended_and_what_each_step_did() {
         let (panel, _dir) = panel();
-        let controls =
-            |panel: &Panel| serde_json::to_value(build_snapshot(panel).unwrap().controls).unwrap();
+        let controls = controls_json;
         let meta = |key: &str, value: &str| panel.tracker.set_meta(key, value).unwrap();
 
         // No run yet: both keys are there, empty.
@@ -497,7 +494,7 @@ mod tests {
         // An empty `meta` and no question asked (A15): the engine never ran, and nobody knows
         // about the task. "No data" is `null`, never `exists: false`.
         let (bare, _dir) = panel();
-        let controls = serde_json::to_value(build_snapshot(&bare).unwrap().controls).unwrap();
+        let controls = controls_json(&bare);
         assert_eq!(controls["engine"], "never");
         assert!(controls["last_run_at"].is_null());
         assert!(controls["scheduled_task"].is_null());
@@ -506,8 +503,7 @@ mod tests {
             let (panel, _dir) = panel();
             let panel = panel.with_task_query(FixedTask(answer));
             panel.tasks.settle();
-            let controls = serde_json::to_value(build_snapshot(&panel).unwrap().controls).unwrap();
-            controls["scheduled_task"].clone()
+            controls_json(&panel)["scheduled_task"].clone()
         };
         let next = *NOW + TimeDelta::minutes(65);
         assert_eq!(

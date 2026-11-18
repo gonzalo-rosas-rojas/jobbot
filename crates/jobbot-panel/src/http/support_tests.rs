@@ -29,6 +29,17 @@ pub(super) fn request(method: &str, target: &str, body: &str) -> Request {
     }
 }
 
+/// An authenticated `GET` of `target` (path and query), answered as the panel answers it.
+pub(super) fn api_get(p: &Panel, target: &str) -> Reply {
+    handle(p, &guard(), &request("GET", target, ""))
+}
+
+/// An authenticated `POST` of `body` (as text, for the ones that are not valid JSON on purpose) to
+/// the route `route` (path included: `/api/settings`).
+pub(super) fn api_post(p: &Panel, route: &str, body: &str) -> Reply {
+    handle(p, &guard(), &request("POST", route, body))
+}
+
 pub(super) fn without(mut req: Request, name: &str) -> Request {
     req.headers.retain(|(k, _)| !k.eq_ignore_ascii_case(name));
     req
@@ -67,8 +78,7 @@ pub(super) fn panel_whose_clock_can_panic() -> (
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     let dir = tempfile::tempdir().unwrap();
-    let mut paths = jobbot_app::paths::Paths::new(dir.path());
-    paths.profile_dir = jobbot_testkit::real_paths().profile_dir;
+    let paths = jobbot_testkit::paths_with_empty_profile(dir.path());
     let calls = Arc::new(AtomicUsize::new(0));
     let panic_at = Arc::new(AtomicUsize::new(usize::MAX));
     let clock = {
@@ -88,4 +98,37 @@ pub(super) fn panel_whose_clock_can_panic() -> (
         clock,
     );
     (p, dir, calls, panic_at)
+}
+
+/// A panel over a database file whose clock, from the call numbered `*forget_at` on (counting from 0,
+/// never while it is `usize::MAX`), drops the stored attempt `attempt` through a second connection
+/// to the same file: the way to make an attempt lose its row between its start and its end.
+pub(super) fn panel_whose_clock_can_drop_an_attempt(
+    attempt: &'static str,
+) -> (
+    Panel,
+    tempfile::TempDir,
+    std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    std::sync::Arc<std::sync::atomic::AtomicUsize>,
+) {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let dir = tempfile::tempdir().unwrap();
+    let paths = jobbot_testkit::paths_with_empty_profile(dir.path());
+    let database = paths.data_dir.join("jobbot.db");
+    let calls = Arc::new(AtomicUsize::new(0));
+    let forget_at = Arc::new(AtomicUsize::new(usize::MAX));
+    let clock = {
+        let (calls, forget_at) = (calls.clone(), forget_at.clone());
+        Box::new(move || {
+            let n = calls.fetch_add(1, Ordering::SeqCst);
+            if n >= forget_at.load(Ordering::SeqCst) {
+                let other = jobbot_testkit::Tracker::open(&database).unwrap();
+                other.forget_attempt(attempt).unwrap();
+            }
+            *jobbot_testkit::NOW
+        })
+    };
+    let p = crate::fixtures::open(paths, clock).unwrap();
+    (p, dir, calls, forget_at)
 }

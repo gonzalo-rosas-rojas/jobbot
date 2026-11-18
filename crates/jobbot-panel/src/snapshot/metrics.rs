@@ -94,6 +94,12 @@ pub struct Trust {
     pub cap_after: u32,
 }
 
+/// The start of "all time": before any posting this program has stored, for the weekly numbers
+/// that also count everything (`metrics`) and for the funnel (`funnel`).
+fn all_time_from() -> DateTime<Utc> {
+    Utc.with_ymd_and_hms(2000, 1, 1, 0, 0, 0).unwrap()
+}
+
 fn ratio(part: i64, whole: i64) -> Option<f64> {
     (whole > 0).then(|| part as f64 / whole as f64)
 }
@@ -101,7 +107,7 @@ fn ratio(part: i64, whole: i64) -> Option<f64> {
 pub(super) fn metrics(panel: &Panel, now: DateTime<Utc>) -> Result<Metrics> {
     let t = &panel.tracker;
     let week = now - TimeDelta::days(7);
-    let ever = Utc.with_ymd_and_hms(2000, 1, 1, 0, 0, 0).unwrap();
+    let ever = all_time_from();
     let sent_week = t.submitted_since(week)?;
     let responses_week = t.jobs_reaching(&ANSWERED_STATES, week)?;
     // The rate compares like with like: of what was sent this week, how much got an answer.
@@ -123,7 +129,7 @@ pub(super) fn metrics(panel: &Panel, now: DateTime<Utc>) -> Result<Metrics> {
 
 pub(super) fn funnel(panel: &Panel) -> Result<Funnel> {
     let t = &panel.tracker;
-    let ever = Utc.with_ymd_and_hms(2000, 1, 1, 0, 0, 0).unwrap();
+    let ever = all_time_from();
     Ok(Funnel {
         sent: t.submitted_since(ever)?,
         answered: t.jobs_reaching(&ANSWERED_STATES, ever)?,
@@ -224,8 +230,11 @@ mod tests {
     use super::*;
     use crate::fixtures::{add, panel};
     use crate::snapshot::build_snapshot;
-    use crate::snapshot::support_tests::{profile_with, seen_at, shipped_criteria};
-    use jobbot_testkit::{NOW, make_job_with, real_paths};
+    use crate::snapshot::support_tests::{
+        SAMPLE_CRITERIA, profile_with, sample_criteria, seen_at, use_sample_criteria,
+    };
+    use jobbot_testkit::profile::with_line;
+    use jobbot_testkit::{NOW, make_job_with};
 
     #[test]
     fn the_funnel_counts_each_application_once_per_stage_it_ever_reached() {
@@ -429,24 +438,13 @@ mod tests {
         assert_eq!(m.response_rate, Some(0.0));
     }
 
-    /// The shipped `criteria.toml` with `first_n_reviewed` changed.
+    /// `SAMPLE_CRITERIA` with `first_n_reviewed` changed.
     fn criteria_with_first_n(first_n: u32) -> String {
-        let shipped =
-            std::fs::read_to_string(real_paths().profile_dir.join("criteria.toml")).unwrap();
-        let mut found = false;
-        let text: Vec<String> = shipped
-            .lines()
-            .map(|line| {
-                if line.starts_with("first_n_reviewed") {
-                    found = true;
-                    format!("first_n_reviewed = {first_n}")
-                } else {
-                    line.to_string()
-                }
-            })
-            .collect();
-        assert!(found, "the shipped criteria.toml sets first_n_reviewed");
-        text.join("\n")
+        with_line(
+            SAMPLE_CRITERIA,
+            "first_n_reviewed",
+            &format!("first_n_reviewed = {first_n}"),
+        )
     }
 
     #[test]
@@ -558,10 +556,11 @@ mod tests {
     fn the_threshold_comes_from_criteria_toml_and_is_none_when_it_cannot_be_read() {
         let (mut panel, dir) = panel();
         seen_at(&panel, "1", 70.0, *NOW, Some(&[]));
+        use_sample_criteria(&mut panel, dir.path());
         let snap = build_snapshot(&panel).unwrap();
         assert_eq!(
             snap.pipeline.threshold,
-            Some(shipped_criteria().apply_threshold)
+            Some(sample_criteria().apply_threshold)
         );
 
         // No criteria.toml at all, and one that does not parse: same answer, the counts stay.
@@ -577,9 +576,10 @@ mod tests {
     #[test]
     fn the_panel_rereads_criteria_toml_on_every_call_and_gives_none_for_a_missing_or_broken_file() {
         let (mut panel, dir) = panel();
+        use_sample_criteria(&mut panel, dir.path());
         assert_eq!(
             panel.criteria().map(|c| c.apply_threshold),
-            Some(shipped_criteria().apply_threshold)
+            Some(sample_criteria().apply_threshold)
         );
         for criteria in [None, Some("floor_monthly_usd = ")] {
             panel.paths.profile_dir = profile_with(dir.path(), criteria, None);
@@ -590,9 +590,9 @@ mod tests {
     #[test]
     fn trust_counts_the_reviewed_sends_and_the_cap_in_force() {
         let (mut panel, dir) = panel();
-        let shipped = shipped_criteria();
+        let criteria = sample_criteria();
         assert_ne!(
-            shipped.daily_cap, shipped.daily_cap_until_reviewed,
+            criteria.daily_cap, criteria.daily_cap_until_reviewed,
             "the test needs two different caps to tell them apart"
         );
         panel.paths.profile_dir = profile_with(dir.path(), Some(&criteria_with_first_n(2)), None);
@@ -615,8 +615,8 @@ mod tests {
                 first_n: 2,
                 review_phase: true,
                 sent_24h: 0,
-                cap: shipped.daily_cap_until_reviewed,
-                cap_after: shipped.daily_cap,
+                cap: criteria.daily_cap_until_reviewed,
+                cap_after: criteria.daily_cap,
             }
         );
 
@@ -626,7 +626,7 @@ mod tests {
         let trust = build_snapshot(&panel).unwrap().trust.unwrap();
         assert_eq!((trust.reviewed, trust.review_phase), (1, true));
         assert_eq!(trust.sent_24h, 2);
-        assert_eq!(trust.cap, shipped.daily_cap_until_reviewed);
+        assert_eq!(trust.cap, criteria.daily_cap_until_reviewed);
 
         // The second approved send ends the review phase: the larger cap is in force now.
         send("c", true);
@@ -636,13 +636,14 @@ mod tests {
             (2, 2, false)
         );
         assert_eq!(trust.sent_24h, 3);
-        assert_eq!(trust.cap, shipped.daily_cap);
-        assert_eq!(trust.cap_after, shipped.daily_cap);
+        assert_eq!(trust.cap, criteria.daily_cap);
+        assert_eq!(trust.cap_after, criteria.daily_cap);
     }
 
     #[test]
     fn sent_24h_counts_what_the_gate_counts_as_a_click() {
-        let (panel, _dir) = panel();
+        let (mut panel, dir) = panel();
+        use_sample_criteria(&mut panel, dir.path());
         let hour = TimeDelta::hours(1);
         let send = |id: &str, at: DateTime<Utc>| {
             let key = add(&panel, id, 80.0, &[State::Prepared]);

@@ -126,7 +126,7 @@ impl Tracker {
             .optional()?)
     }
 
-    /// Gives an email that was stored without a posting its posting, and the same to the task it
+    /// Sets the posting (`job_key`) of a stored email that had none, and of the task that email
     /// made. False when the message is unknown or already has a posting: a link is made once.
     pub fn link_email(&self, message_id: &str, job_key: &str) -> Result<bool> {
         let mut conn = self.lock();

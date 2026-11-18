@@ -4,7 +4,8 @@
 use std::path::PathBuf;
 
 use super::support_tests::{
-    bank, checkbox, checkbox_group, field, pay_and_start_bank, race_bank, radio, texts,
+    action_idxs, bank_with, bank_with_gaps, checkbox, checkbox_group, field, pay_and_start_bank,
+    race_bank, radio, texts,
 };
 use super::*;
 use jobbot_domain::answers::AnswerEntry;
@@ -15,7 +16,7 @@ fn plan_fills_text_and_select_fields_from_the_bank() {
         field(0, "input", "text", "First name *", true),
         field(1, "select", "", "Country", false),
     ];
-    let plan = plan_fields(&fields, &bank(), Path::new("cv.pdf"));
+    let plan = plan_fields(&fields, &bank_with_gaps(), Path::new("cv.pdf"));
     assert!(plan.missing.is_empty());
     assert_eq!(
         plan.actions,
@@ -37,7 +38,7 @@ fn plan_fills_text_and_select_fields_from_the_bank() {
 #[test]
 fn select_candidates_include_alternatives() {
     let fields = [field(0, "select", "", "How did you hear about us?", true)];
-    let plan = plan_fields(&fields, &bank(), Path::new("cv.pdf"));
+    let plan = plan_fields(&fields, &bank_with_gaps(), Path::new("cv.pdf"));
     assert_eq!(
         plan.actions[0].value,
         FillValue::Select(vec![
@@ -51,19 +52,16 @@ fn select_candidates_include_alternatives() {
     // alternatives are option texts, not free text. (A one-line input may be a custom
     // drop-down and keeps them: see `a_text_input_with_alternatives_may_be_a_custom_dropdown`.)
     let fields = [field(0, "textarea", "", "How did you hear about us?", true)];
-    let plan = plan_fields(&fields, &bank(), Path::new("cv.pdf"));
+    let plan = plan_fields(&fields, &bank_with_gaps(), Path::new("cv.pdf"));
     assert!(plan.actions.is_empty());
     assert_eq!(plan.missing, vec!["How did you hear about us?"]);
-    let exact = AnswerBank {
-        entries: vec![
-            AnswerEntry::new(
-                &["=how did you hear about us"],
-                Some("Company careers page"),
-            )
-            .with_alternatives(&["Company website", "Other"]),
-        ],
-        consent_phrases: vec![],
-    };
+    let exact = bank_with(vec![
+        AnswerEntry::new(
+            &["=how did you hear about us"],
+            Some("Company careers page"),
+        )
+        .with_alternatives(&["Company website", "Other"]),
+    ]);
     let plan = plan_fields(&fields, &exact, Path::new("cv.pdf"));
     assert_eq!(
         plan.actions[0].value,
@@ -84,7 +82,7 @@ fn consent_checkbox_is_ticked_only_when_allowed() {
         field(1, "input", "checkbox", "Send me job alerts", false),
     ];
     // The shipped default: nothing is allowed, so the required checkbox is a missing answer.
-    let plan = plan_fields(&fields, &bank(), Path::new("cv.pdf"));
+    let plan = plan_fields(&fields, &bank_with_gaps(), Path::new("cv.pdf"));
     assert_eq!(
         plan.missing,
         vec!["I have read and accept the Privacy Policy *"]
@@ -93,7 +91,7 @@ fn consent_checkbox_is_ticked_only_when_allowed() {
     // With Gonza's phrase the required checkbox is ticked; the optional one is left alone.
     let allowed = AnswerBank {
         consent_phrases: vec!["privacy policy".into()],
-        ..bank()
+        ..bank_with_gaps()
     };
     let plan = plan_fields(&fields, &allowed, Path::new("cv.pdf"));
     assert!(plan.missing.is_empty());
@@ -141,7 +139,7 @@ fn radio_group_is_answered_from_the_bank() {
             true,
         ),
     ];
-    let plan = plan_fields(&fields, &bank(), Path::new("cv.pdf"));
+    let plan = plan_fields(&fields, &bank_with_gaps(), Path::new("cv.pdf"));
     assert!(plan.missing.is_empty());
     // One button per answered group ("No" also matches "No, ..."); the optional group with no
     // bank answer is skipped.
@@ -178,14 +176,14 @@ fn an_option_that_already_shows_the_answer_is_not_clicked_again() {
     };
     let unanswered = field(2, "input", "text", "Favorite color *", true);
     let fields = [option(0, "Yes", false), option(1, "No", true), unanswered];
-    let plan = plan_fields(&fields, &bank(), Path::new("cv.pdf"));
+    let plan = plan_fields(&fields, &bank_with_gaps(), Path::new("cv.pdf"));
     assert!(plan.actions.is_empty(), "{:?}", plan.actions);
     assert_eq!(plan.missing, vec!["Favorite color *"]);
     // Only the open question is left for Gonza, not the group that already says "No".
     assert_eq!(controls_left(&fields, &plan, &[]), vec![2]);
     // Another option selected: the bank's answer is clicked.
     let fields = [option(0, "Yes", true), option(1, "No", false)];
-    let plan = plan_fields(&fields, &bank(), Path::new("cv.pdf"));
+    let plan = plan_fields(&fields, &bank_with_gaps(), Path::new("cv.pdf"));
     assert_eq!(plan.actions.len(), 1);
     assert_eq!(plan.actions[0].idx, 1);
 }
@@ -197,9 +195,9 @@ fn plan_uploads_the_cv_only_to_resume_inputs() {
         field(1, "input", "file", "Cover letter", false),
         field(2, "input", "file", "Currículum", false),
     ];
-    let plan = plan_fields(&fields, &bank(), Path::new("cv.pdf"));
+    let plan = plan_fields(&fields, &bank_with_gaps(), Path::new("cv.pdf"));
     assert!(plan.missing.is_empty());
-    let uploaded: Vec<usize> = plan.actions.iter().map(|a| a.idx).collect();
+    let uploaded = action_idxs(&plan);
     assert_eq!(uploaded, vec![0, 2]);
     assert_eq!(
         plan.actions[0].value,
@@ -210,7 +208,7 @@ fn plan_uploads_the_cv_only_to_resume_inputs() {
 #[test]
 fn required_file_input_that_is_not_a_resume_is_missing() {
     let fields = [field(0, "input", "file", "Portfolio PDF", true)];
-    let plan = plan_fields(&fields, &bank(), Path::new("cv.pdf"));
+    let plan = plan_fields(&fields, &bank_with_gaps(), Path::new("cv.pdf"));
     assert_eq!(plan.missing, vec!["Portfolio PDF"]);
     assert!(plan.actions.is_empty());
 }
@@ -223,7 +221,7 @@ fn required_field_without_a_value_is_missing_and_optional_one_is_skipped() {
         field(2, "input", "text", "Nickname", false),
         field(3, "input", "text", "", true),
     ];
-    let plan = plan_fields(&fields, &bank(), Path::new("cv.pdf"));
+    let plan = plan_fields(&fields, &bank_with_gaps(), Path::new("cv.pdf"));
     assert_eq!(
         plan.missing,
         vec!["Email *", "Favorite color", "campo sin etiqueta"]
@@ -234,7 +232,7 @@ fn required_field_without_a_value_is_missing_and_optional_one_is_skipped() {
 #[test]
 fn blank_bank_value_counts_as_missing() {
     let fields = [field(0, "input", "tel", "Phone", true)];
-    let plan = plan_fields(&fields, &bank(), Path::new("cv.pdf"));
+    let plan = plan_fields(&fields, &bank_with_gaps(), Path::new("cv.pdf"));
     assert_eq!(plan.missing, vec!["Phone"]);
 }
 
@@ -304,10 +302,7 @@ fn a_date_picker_stays_unanswered_whatever_text_the_scan_gives_it() {
     // Ashby's start date is a text input drawn as a date picker. Its label used to be the
     // placeholder ("Pick date..."), now it is the question; the shipped bank answers that
     // question with "Immediately", which a date picker cannot take, so Gonza picks the day.
-    let path = crate::test_support::workspace_root()
-        .join("profile")
-        .join("answers.toml");
-    let shipped = crate::test_support::load_bank(&path).unwrap();
+    let shipped = crate::test_support::shipped_bank();
     for label in ["When can you start a new role?", "Pick date...", ""] {
         let fields = [field(0, "input", "date", label, true)];
         let plan = plan_fields(&fields, &shipped, Path::new("cv.pdf"));
@@ -331,14 +326,11 @@ fn a_control_of_an_unknown_kind_is_never_typed_into_and_is_reported() {
         field(2, "input", "password", "Choose a password *", true),
         field(3, "input", "hologram", "Another mystery", false),
     ];
-    let bank = AnswerBank {
-        entries: vec![
-            AnswerEntry::new(&["brand color"], Some("Blue")),
-            AnswerEntry::new(&["mystery"], Some("42")),
-            AnswerEntry::new(&["password"], Some("hunter2")),
-        ],
-        consent_phrases: vec![],
-    };
+    let bank = bank_with(vec![
+        AnswerEntry::new(&["brand color"], Some("Blue")),
+        AnswerEntry::new(&["mystery"], Some("42")),
+        AnswerEntry::new(&["password"], Some("hunter2")),
+    ]);
     for bank in [&bank, &AnswerBank::default()] {
         let plan = plan_fields(&fields, bank, Path::new("cv.pdf"));
         assert!(plan.actions.is_empty(), "{:?}", plan.actions);
@@ -371,6 +363,13 @@ fn every_spelling_of_not_hispanic_is_refused() {
         "Not Latino",
         "Non-Latino White",
         "I am not of Latino descent",
+        "White (Other than Hispanic or Latino)",
+        "White, excluding Hispanic or Latino",
+        "White (No Hispanic origin)",
+        "White except Hispanic",
+        "White without Hispanic or Latino origin",
+        "Caucasian (other than Latinx)",
+        "Black or African American (Excluding Latina)",
     ] {
         assert!(claims_not_hispanic(option), "{option}");
     }
@@ -379,6 +378,12 @@ fn every_spelling_of_not_hispanic_is_refused() {
         "Hispanic",
         "White",
         "Decline to self-identify",
+        "Other",
+        "Other (please specify)",
+        "No answer",
+        "I do not wish to answer",
+        "Prefer not to say",
+        "Hispanic or Latino (any race)",
     ] {
         assert!(!claims_not_hispanic(option), "{option}");
     }
@@ -476,13 +481,10 @@ fn a_place_matches_an_option_that_names_all_its_parts() {
 fn a_text_input_with_alternatives_may_be_a_custom_dropdown() {
     // Greenhouse's drop-downs are inputs, not selects: the filler needs every option text to
     // try. A plain text box (and a textarea) takes the first one only.
-    let bank = AnswerBank {
-        entries: vec![
-            AnswerEntry::new(&["=school"], Some("Example Professional Institute"))
-                .with_alternatives(&["Example PI", "Other"]),
-        ],
-        consent_phrases: vec![],
-    };
+    let bank = bank_with(vec![
+        AnswerEntry::new(&["=school"], Some("Example Professional Institute"))
+            .with_alternatives(&["Example PI", "Other"]),
+    ]);
     let fields = [
         field(0, "input", "text", "School*", true),
         field(1, "textarea", "", "School", false),
@@ -516,7 +518,7 @@ fn required_checkbox_and_radio_group_are_missing_once() {
         radio(2, "remote", "Open to remote work?", "No", true),
         field(3, "input", "checkbox", "Subscribe to the newsletter", false),
     ];
-    let plan = plan_fields(&fields, &bank(), Path::new("cv.pdf"));
+    let plan = plan_fields(&fields, &bank_with_gaps(), Path::new("cv.pdf"));
     assert_eq!(
         plan.missing,
         vec!["I agree to the privacy policy", "Open to remote work?"]
@@ -525,10 +527,7 @@ fn required_checkbox_and_radio_group_are_missing_once() {
 }
 
 fn languages_bank(value: Option<&str>) -> AnswerBank {
-    AnswerBank {
-        entries: vec![AnswerEntry::new(&["which languages"], value)],
-        consent_phrases: vec![],
-    }
+    bank_with(vec![AnswerEntry::new(&["which languages"], value)])
 }
 
 const LANGUAGES: &str = "Which languages do you use? (select all that apply) *";
@@ -541,7 +540,7 @@ fn a_consent_phrase_in_the_question_of_a_group_ticks_none_of_its_options() {
     let fields = checkbox_group(0, question, &["Email", "SMS", "Phone"], true);
     let allowed = AnswerBank {
         consent_phrases: vec!["privacy notice".into()],
-        ..bank()
+        ..bank_with_gaps()
     };
     let plan = plan_fields(&fields, &allowed, Path::new("cv.pdf"));
     assert!(plan.actions.is_empty(), "{:?}", plan.actions);
@@ -554,7 +553,7 @@ fn a_consent_box_whose_text_names_hispanic_or_latino_is_never_ticked() {
     // consent, and ticking it would answer the Hispanic or Latino question, left to Gonza.
     let allowed = AnswerBank {
         consent_phrases: vec!["privacy policy".into()],
-        ..bank()
+        ..bank_with_gaps()
     };
     let caption = "I agree to the privacy policy *";
     let pages = [
@@ -591,7 +590,7 @@ fn a_checkbox_group_ticks_every_option_the_bank_lists() {
         Path::new("cv.pdf"),
     );
     assert!(plan.missing.is_empty(), "{:?}", plan.missing);
-    let ticked: Vec<usize> = plan.actions.iter().map(|action| action.idx).collect();
+    let ticked = action_idxs(&plan);
     assert_eq!(ticked, vec![0, 1]);
     assert!(
         plan.actions
@@ -604,13 +603,10 @@ fn a_checkbox_group_ticks_every_option_the_bank_lists() {
 fn a_checkbox_group_takes_the_first_candidate_the_form_has() {
     // Like a drop-down: the value, then each alternative; the first one that names an option
     // wins and nothing else is ticked.
-    let bank = AnswerBank {
-        entries: vec![
-            AnswerEntry::new(&["how did you hear"], Some("Company careers page"))
-                .with_alternatives(&["Company website", "Other"]),
-        ],
-        consent_phrases: vec![],
-    };
+    let bank = bank_with(vec![
+        AnswerEntry::new(&["how did you hear"], Some("Company careers page"))
+            .with_alternatives(&["Company website", "Other"]),
+    ]);
     let question = "How did you hear about us? (select all that apply) *";
     let fields = checkbox_group(0, question, &["LinkedIn", "Glassdoor", "Other"], true);
     let plan = plan_fields(&fields, &bank, Path::new("cv.pdf"));
@@ -663,10 +659,10 @@ fn a_checkbox_group_never_ticks_a_not_hispanic_option() {
     ];
     let question = "Race or ethnicity (select all that apply) *";
     let fields = checkbox_group(0, question, &options, true);
-    let bank = AnswerBank {
-        entries: vec![AnswerEntry::new(&["race or ethnicity"], Some("White"))],
-        consent_phrases: vec![],
-    };
+    let bank = bank_with(vec![AnswerEntry::new(
+        &["race or ethnicity"],
+        Some("White"),
+    )]);
     let plan = plan_fields(&fields, &bank, Path::new("cv.pdf"));
     assert!(plan.actions.is_empty(), "{:?}", plan.actions);
     assert_eq!(plan.missing, vec![question]);
@@ -682,7 +678,7 @@ fn an_option_that_is_already_ticked_is_kept_and_the_others_are_ticked() {
         Path::new("cv.pdf"),
     );
     assert_eq!(plan.kept, vec![0]);
-    let ticked: Vec<usize> = plan.actions.iter().map(|action| action.idx).collect();
+    let ticked = action_idxs(&plan);
     assert_eq!(ticked, vec![1]);
 }
 
@@ -696,10 +692,7 @@ fn an_open_checkbox_group_is_left_to_gonza_once_on_its_first_option() {
         true,
     ));
     // The languages are answered (so they are not flagged), the tools are open.
-    let bank = AnswerBank {
-        entries: vec![AnswerEntry::new(&["which languages"], Some("Go"))],
-        consent_phrases: vec![],
-    };
+    let bank = bank_with(vec![AnswerEntry::new(&["which languages"], Some("Go"))]);
     let plan = plan_fields(&fields, &bank, Path::new("cv.pdf"));
     assert_eq!(plan.missing, vec!["Which tools? (select all that apply) *"]);
     let left = controls_left(&fields, &plan, &[]);

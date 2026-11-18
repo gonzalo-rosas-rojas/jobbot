@@ -116,6 +116,13 @@ mod tests {
     use crate::form::FillValue;
     use crate::form::support_tests::field;
 
+    /// `count` identical text controls, numbered from 0, all asking for a "Reference".
+    fn references(count: usize) -> Vec<FieldInfo> {
+        (0..count)
+            .map(|idx| field(idx, "input", "text", "Reference", false))
+            .collect()
+    }
+
     #[test]
     fn a_second_read_carries_the_old_controls_to_their_new_numbers() {
         let first = [
@@ -136,15 +143,8 @@ mod tests {
         assert_eq!(appeared.len(), 1);
         assert_eq!(appeared[0].label, "Describe it *");
         // Two controls with the same text are matched one by one, in page order.
-        let twins = [
-            field(0, "input", "text", "Reference", false),
-            field(1, "input", "text", "Reference", false),
-        ];
-        let three = [
-            field(0, "input", "text", "Reference", false),
-            field(1, "input", "text", "Reference", false),
-            field(2, "input", "text", "Reference", false),
-        ];
+        let twins = references(2);
+        let three = references(3);
         let carried = carried_over(&twins, &three);
         assert_eq!(carried, HashMap::from([(0, 0), (1, 1)]));
         assert_eq!(new_controls(&three, &carried)[0].idx, 2);
@@ -152,15 +152,8 @@ mod tests {
 
     #[test]
     fn a_control_that_went_away_has_no_new_number() {
-        let twins = [
-            field(0, "input", "text", "Reference", false),
-            field(1, "input", "text", "Reference", false),
-        ];
-        let three = [
-            field(0, "input", "text", "Reference", false),
-            field(1, "input", "text", "Reference", false),
-            field(2, "input", "text", "Reference", false),
-        ];
+        let twins = references(2);
+        let three = references(3);
         assert_eq!(
             carried_over(&three, &twins),
             HashMap::from([(0, 0), (1, 1)])

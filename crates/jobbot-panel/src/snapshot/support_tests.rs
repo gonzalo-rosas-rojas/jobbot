@@ -1,5 +1,5 @@
 //! What the tests of `snapshot` and its children share: a board column lookup, builders of tasks
-//! and emails, postings first seen at a given moment, profile folders and the shipped criteria.
+//! and emails, postings first seen at a given moment, profile folders and a sample criteria.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -7,30 +7,14 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 
 use super::*;
-use jobbot_app::ports::store::{EmailKind, NewEmail, NewTask};
-use jobbot_app::profile::load_criteria;
-use jobbot_testkit::{NOW, make_job_with, real_paths};
+use jobbot_app::ports::store::{EmailKind, NewEmail};
+use jobbot_testkit::{NOW, make_job_with};
 
 pub(super) fn column<'a>(snap: &'a Snapshot, state: &str) -> &'a Column {
     snap.board.iter().find(|c| c.state == state).unwrap()
 }
 
-pub(super) fn task(panel: &Panel, text: &str, due: Option<DateTime<Utc>>, job_key: Option<&str>) {
-    panel
-        .tracker
-        .add_task(
-            &NewTask {
-                job_key: job_key.map(str::to_string),
-                kind: "action_required".into(),
-                text: text.into(),
-                due_at: due,
-                source_message_id: None,
-                link: None,
-            },
-            *NOW,
-        )
-        .unwrap();
-}
+pub(super) use crate::fixtures::task;
 
 pub(super) fn email(panel: &Panel, id: &str, kind: EmailKind, at: DateTime<Utc>, subject: &str) {
     panel
@@ -96,6 +80,10 @@ pub(super) fn profile_with(dir: &Path, criteria: Option<&str>, schedule: Option<
     folder
 }
 
-pub(super) fn shipped_criteria() -> jobbot_domain::rules::Criteria {
-    load_criteria(&real_paths().profile_dir.join("criteria.toml")).unwrap()
+// The made-up profile files the panel tests write into their own profile folder.
+pub(super) use jobbot_testkit::profile::{SAMPLE_CRITERIA, SAMPLE_SCHEDULE, sample_criteria};
+
+/// Makes `panel` read `SAMPLE_CRITERIA` as its `criteria.toml`, from a profile folder in `dir`.
+pub(super) fn use_sample_criteria(panel: &mut Panel, dir: &Path) {
+    panel.paths.profile_dir = profile_with(dir, Some(SAMPLE_CRITERIA), None);
 }

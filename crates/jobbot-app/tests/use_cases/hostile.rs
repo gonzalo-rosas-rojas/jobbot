@@ -20,12 +20,13 @@ use jobbot_app::learn::dossier::{
 use jobbot_domain::exclusion::check_exclusion;
 use jobbot_domain::handoff::sheet_path;
 use jobbot_domain::navigation::{NavPolicy, check};
-use jobbot_domain::rules::{Exclusions, parse_criteria};
+use jobbot_domain::rules::Exclusions;
 use jobbot_domain::scoring::{parse_salary_monthly_usd, score_job};
 use jobbot_domain::state::State;
 use jobbot_domain::text::{html_to_text, safe_key};
 use jobbot_testkit::hostile::{LINKS, MARK, disguises, emails, hidden_chars, postings, texts};
-use jobbot_testkit::{NOW, SAMPLE_CV, Tracker, make_job_with, real_paths};
+use jobbot_testkit::profile::sample_criteria;
+use jobbot_testkit::{NOW, SAMPLE_CV, Tracker, make_job_with};
 
 /// Made-up rules in the shape of the real exclusion list.
 fn rules() -> Exclusions {
@@ -81,8 +82,7 @@ fn the_browser_opens_none_of_the_odd_links() {
 
 #[test]
 fn the_readers_of_a_posting_take_every_hostile_one() {
-    let criteria = std::fs::read_to_string(real_paths().profile_dir.join("criteria.toml")).unwrap();
-    let criteria = parse_criteria(&criteria).unwrap();
+    let criteria = sample_criteria();
     for (name, job) in postings() {
         let score = score_job(&job, &criteria);
         assert!(score.total.is_finite(), "{name}: {}", score.total);

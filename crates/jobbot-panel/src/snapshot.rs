@@ -37,6 +37,7 @@ mod today;
 
 pub use activity::{Activity, ClaudeSpend, Move, Slot, StageSpend};
 use activity::{activity, claude_spend};
+use cards::dossiers_dir;
 pub use cards::{COLUMN_CAP, Card, Column, Listing, QUEUE_CAP, UndoCard, offer_label};
 use cards::{awaits_approval, label, listing};
 pub(super) use cards::{card, card_context};
@@ -58,7 +59,11 @@ pub struct Snapshot {
     pub controls: Controls,
     /// The sections that are not on the way to applying (`metrics`, `funnel`, `activity`, `claude`,
     /// `learn`) are `null` when they could not be built: the page reads each of them as optional,
-    /// and a failure in one must not take the queues and their buttons with it.
+    /// and a failure in one must not take the queues and their buttons with it. Every other
+    /// section is built with `?` and a failure in it fails the whole snapshot: `controls`,
+    /// `pipeline`, `today`, the queues and the board, and also `trust`. `trust` is an `Option`
+    /// for another reason: it is `null` when `criteria.toml` cannot be read, not when building it
+    /// fails.
     pub metrics: Option<Metrics>,
     pub funnel: Option<Funnel>,
     pub pipeline: Pipeline,
@@ -136,10 +141,8 @@ fn optional<T>(section: &str, built: Result<T>) -> Option<T> {
 
 pub fn build_snapshot(panel: &Panel) -> Result<Snapshot> {
     let now = panel.now();
-    let dossiers = panel.paths.data_dir.join("dossiers");
-    let handoffs = panel.paths.data_dir.join("handoff");
     let criteria = panel.criteria();
-    let ctx = card_context(panel, now, &dossiers, &handoffs, criteria.as_ref())?;
+    let ctx = card_context(panel, now, criteria.as_ref())?;
     let counts = panel.tracker.counts()?;
     let mut board = Vec::new();
     // Gonza's two queues are made from the rows their columns read.
@@ -213,10 +216,8 @@ pub fn build_job_detail(panel: &Panel, key: &str) -> Result<Option<JobDetail>> {
     let Some(job) = panel.tracker.get_job(key)? else {
         return Ok(None);
     };
-    let dossiers = panel.paths.data_dir.join("dossiers");
-    let handoffs = panel.paths.data_dir.join("handoff");
     let criteria = panel.criteria();
-    let ctx = card_context(panel, panel.now(), &dossiers, &handoffs, criteria.as_ref())?;
+    let ctx = card_context(panel, panel.now(), criteria.as_ref())?;
     let events = panel
         .tracker
         .events_for(key)?
@@ -231,7 +232,7 @@ pub fn build_job_detail(panel: &Panel, key: &str) -> Result<Option<JobDetail>> {
     // A dossier that does not exist is the normal case; one that exists and cannot be read
     // (permissions, invalid UTF-8) still reaches the page as "none", but leaves a trace, because
     // its card says `has_dossier`.
-    let dossier = match std::fs::read_to_string(dossier_path(&dossiers, key)) {
+    let dossier = match std::fs::read_to_string(dossier_path(&dossiers_dir(panel), key)) {
         Ok(text) => Some(truncate(&text, DOSSIER_CAP)),
         Err(err) => {
             if err.kind() != std::io::ErrorKind::NotFound {
@@ -271,6 +272,9 @@ mod board_tests;
 mod contract_tests;
 
 #[cfg(test)]
+mod date_text_tests;
+
+#[cfg(test)]
 mod support_tests;
 
 #[cfg(test)]
@@ -280,17 +284,17 @@ mod tests {
     use chrono::TimeDelta;
 
     use super::contract_tests::missing_contract_paths;
-    use super::support_tests::{column, email, shipped_criteria, task};
+    use super::support_tests::{column, email, sample_criteria, task, use_sample_criteria};
     use super::*;
     use crate::fixtures::{add, panel};
-    use jobbot_app::paths::Paths;
     use jobbot_app::ports::store::{EmailKind, GapRow, TopicProgress};
     use jobbot_domain::prep::{Question, load_questions};
-    use jobbot_testkit::{NOW, Tracker, make_job_with, real_paths};
+    use jobbot_testkit::{NOW, Tracker, make_job_with, paths_with_empty_profile};
 
     #[test]
     fn an_empty_database_gives_an_empty_but_complete_snapshot() {
-        let (panel, _dir) = panel();
+        let (mut panel, dir) = panel();
+        use_sample_criteria(&mut panel, dir.path());
         let snap = build_snapshot(&panel).unwrap();
         assert_eq!(snap.board.len(), 12);
         assert!(
@@ -336,11 +340,11 @@ mod tests {
         assert!(snap.claude.as_ref().unwrap().by_stage.is_empty());
         assert_eq!((snap.today.tasks_total, snap.today.emails_total), (0, 0));
         assert!(snap.today.tasks.is_empty() && snap.today.emails.is_empty());
-        let shipped = shipped_criteria();
+        let criteria = sample_criteria();
         let pipeline = &snap.pipeline;
         assert_eq!(
             (pipeline.days, pipeline.threshold),
-            (7, Some(shipped.apply_threshold))
+            (7, Some(criteria.apply_threshold))
         );
         assert_eq!(
             (
@@ -357,11 +361,11 @@ mod tests {
             snap.trust,
             Some(Trust {
                 reviewed: 0,
-                first_n: shipped.first_n_reviewed,
+                first_n: criteria.first_n_reviewed,
                 review_phase: true,
                 sent_24h: 0,
-                cap: shipped.daily_cap_until_reviewed,
-                cap_after: shipped.daily_cap,
+                cap: criteria.daily_cap_until_reviewed,
+                cap_after: criteria.daily_cap,
             })
         );
         let activity = snap.activity.as_ref().unwrap();
@@ -442,8 +446,7 @@ mod tests {
     #[test]
     fn a_study_store_that_fails_costs_the_snapshot_its_learn_section_and_nothing_else() {
         let dir = tempfile::tempdir().unwrap();
-        let mut paths = Paths::new(dir.path());
-        paths.profile_dir = real_paths().profile_dir;
+        let paths = paths_with_empty_profile(dir.path());
         let panel = Panel::new(
             paths,
             Tracker::in_memory().unwrap(),
@@ -603,12 +606,21 @@ mod tests {
             panel.tracker.create_application(&job.key(), seen).unwrap();
         }
 
-        let dated = build_job_detail(&panel, &dated.key()).unwrap().unwrap();
-        let undated = build_job_detail(&panel, &undated.key()).unwrap().unwrap();
+        let dated_detail = build_job_detail(&panel, &dated.key()).unwrap().unwrap();
+        let undated_detail = build_job_detail(&panel, &undated.key()).unwrap().unwrap();
 
-        assert_eq!(dated.first_seen.as_deref(), Some("2026-09-30T12:00:00Z"));
-        assert_eq!(dated.posted_at.as_deref(), Some("2026-09-28T12:00:00Z"));
-        assert_eq!(undated.first_seen.as_deref(), Some("2026-10-01T07:00:00Z"));
-        assert_eq!(undated.posted_at, None);
+        assert_eq!(
+            dated_detail.first_seen.as_deref(),
+            Some("2026-09-30T12:00:00Z")
+        );
+        assert_eq!(
+            dated_detail.posted_at.as_deref(),
+            Some("2026-09-28T12:00:00Z")
+        );
+        assert_eq!(
+            undated_detail.first_seen.as_deref(),
+            Some("2026-10-01T07:00:00Z")
+        );
+        assert_eq!(undated_detail.posted_at, None);
     }
 }

@@ -1,5 +1,5 @@
-//! The `gate` use cases against the real SQLite stores, the fake Claude and the shipped
-//! profile (moved from the root crate's `src/gate.rs`).
+//! The `gate` use cases against the real SQLite stores and the fake Claude, with
+//! made-up rules (moved from the root crate's `src/gate.rs`).
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -10,24 +10,18 @@ use chrono::{DateTime, Utc};
 
 use jobbot_app::apply::gate::*;
 use jobbot_app::ports::store::ApplicationRow;
-use jobbot_app::profile::{load_criteria, load_exclusions};
 use jobbot_domain::models::Job;
 use jobbot_domain::rules::{Criteria, Exclusions};
 use jobbot_domain::state::State;
 use jobbot_testkit::Tracker;
+use jobbot_testkit::profile::sample_exclusions;
 use jobbot_testkit::{NOW, make_job_with};
 
 fn criteria() -> Criteria {
-    let path = jobbot_testkit::real_paths()
-        .profile_dir
-        .join("criteria.toml");
-    load_criteria(&path).unwrap()
+    jobbot_testkit::profile::sample_criteria()
 }
 fn exclusions() -> Exclusions {
-    let path = jobbot_testkit::real_paths()
-        .profile_dir
-        .join("exclusions.toml");
-    load_exclusions(&path).unwrap()
+    jobbot_testkit::profile::sample_exclusions()
 }
 /// Adds the job, moves it to `prepared`, and optionally approves and submits it.
 fn prepared(tracker: &Tracker, job: &Job, approved: bool, submit: bool) -> ApplicationRow {
@@ -351,7 +345,7 @@ fn daily_cap_counts_the_last_24_hours_not_the_calendar_day() {
 fn exclusion_is_rechecked() {
     let (_dir, stop) = no_stop_file();
     let tracker = Tracker::in_memory().unwrap();
-    let job = make_job_with(|j| j.company = "Tidewater Systems".into());
+    let job = make_job_with(|j| j.company = sample_exclusions().names[0].clone());
     prepared(&tracker, &job, true, false);
     let decision = decide(&tracker, &job, &criteria(), &stop, *NOW);
     assert!(decision.reason.unwrap().starts_with("excluded:"));
