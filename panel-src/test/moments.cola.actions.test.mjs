@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createColaActions, requestOf, batchRequest, engineRequest, DEFAULT_SNOOZE, MAX_BATCH } from "../src/moments/cola/actions.js";
+import { createColaActions, requestOf, batchRequest, DEFAULT_SNOOZE, MAX_BATCH } from "../src/moments/cola/actions.js";
+import { engineRequest } from "../src/moments/shared/engine.js";
 import { ARM_MIN_MS, ARM_MAX_MS } from "../src/core/dom.js";
 
 // A fake session whose `act` stays open until the test lets it finish, so the state in the middle can be looked at.

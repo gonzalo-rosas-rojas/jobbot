@@ -2,17 +2,18 @@
 // number given in ?clock=. This module only knows hours and the two marks the sky celebrates (09:00 and 18:00); it never
 // touches the DOM and takes every timer from outside, so tests can drive it with a fake clock.
 
-import { clockHours, SERVER_TZ } from "../core/time.js";
+import { wrapHour } from "../core/math.js";
+import { clockHours, SERVER_TZ, MINUTE_MS } from "../core/time.js";
 
 export const WINDOW_START = 18;
 export const WINDOW_END = 9;
 // Real time between two ticks beyond which the machine was asleep or the tab frozen: the sky jumps, nothing is announced.
 // A hidden tab is throttled to one tick a minute, which stays well under this.
-export const MAX_GAP_MS = 5 * 60 * 1000;
+export const MAX_GAP_MS = 5 * MINUTE_MS;
 const MAX_WALK_H = 6;
 
 /** Hours since 18:00 on a 24-hour ring, in [0, 24). The sky and the lit windows are functions of this. */
-export const nightT = (hora) => (((hora - WINDOW_START) % 24) + 24) % 24;
+export const nightT = (hora) => wrapHour(hora - WINDOW_START);
 
 /** True while the bot's window is open (18:00 to 09:00). */
 export const inWindow = (hora) => hora >= WINDOW_START || hora < WINDOW_END;
@@ -24,11 +25,11 @@ export const horaOf = (ms, tz = SERVER_TZ) => clockHours(ms, tz);
  * The marks passed going forward from `prev` to `next` (decimal hours), ordered by how soon they come. A gap of more than
  * six hours, or a step backwards (a clock change), crosses nothing; midnight is not a mark.
  */
-export function crossings(prev, next, marks = [9, 18]) {
-  const gap = (((next - prev) % 24) + 24) % 24;
+export function crossings(prev, next, marks = [WINDOW_END, WINDOW_START]) {
+  const gap = wrapHour(next - prev);
   if (gap === 0 || gap > MAX_WALK_H) return [];
   return marks
-    .map((mark) => ({ mark, d: (((mark - prev) % 24) + 24) % 24 }))
+    .map((mark) => ({ mark, d: wrapHour(mark - prev) }))
     .filter(({ d }) => d > 0 && d <= gap)
     .sort((a, b) => a.d - b.d)
     .map(({ mark }) => mark);

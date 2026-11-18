@@ -4,7 +4,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { openPage, ev, run, press, travel, arrived, STOPS, fixture, answerWith } from "./helpers/acceptance.mjs";
-import { polygonHitsRect } from "../src/stage/beam.js";
+import { polygonHitsRect } from "./helpers/polygon.mjs";
 import { clockText } from "../src/stage/stage.js";
 
 const OPENS = `!!document.querySelector("#app .sheet-host h1") && document.fonts.status === "loaded" && !!window.__app.model()`;

@@ -6,6 +6,8 @@ use serde_json::Value;
 /// Working hours in a month (40 hours a week, 4 weeks), used for hourly rates.
 const HOURS_PER_MONTH: f64 = 160.0;
 
+const MONTHS_PER_YEAR: f64 = 12.0;
+
 /// A JSON number, or a string that holds one (`"4500"`). Anything else is `None`.
 pub fn number(value: &Value) -> Option<f64> {
     match value {
@@ -23,7 +25,7 @@ pub fn monthly_usd(amount: f64, currency: &str, period: &str) -> Option<f64> {
     }
     let period = period.to_ascii_lowercase();
     if period.contains("year") || period.contains("annual") {
-        Some(amount / 12.0)
+        Some(amount / MONTHS_PER_YEAR)
     } else if period.contains("month") {
         Some(amount)
     } else if period.contains("hour") {

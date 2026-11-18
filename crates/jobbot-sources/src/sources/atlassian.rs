@@ -18,7 +18,9 @@ use async_trait::async_trait;
 use serde_json::Value;
 
 use super::Source;
-use super::base::{failure, get_json, id_string, join_places, skipped_error, str_field};
+use super::base::{
+    get_json, id_string, join_places, or_if_empty, record, str_field, with_labeled_lines,
+};
 use jobbot_domain::models::{FetchResult, Job};
 use jobbot_domain::text::html_to_text;
 
@@ -75,17 +77,12 @@ impl Source for AtlassianSource {
 
     async fn fetch(&self) -> FetchResult {
         let mut result = FetchResult::default();
-        match self.fetch_listings().await {
-            Ok((jobs, skipped)) => {
-                result.jobs = jobs;
-                if skipped > 0 {
-                    result
-                        .errors
-                        .push(skipped_error("atlassian", "listings", skipped));
-                }
-            }
-            Err(error) => result.errors.push(failure("atlassian", "listings", &error)),
-        }
+        record(
+            &mut result,
+            "atlassian",
+            "listings",
+            self.fetch_listings().await,
+        );
         result
     }
 }
@@ -132,6 +129,27 @@ fn remote_region(cleaned: &str) -> Option<&str> {
         .filter(|region| REGIONS.contains(&region.to_lowercase().as_str()))
 }
 
+/// The ad's sections, then its category, its type and the remote regions the location left out.
+fn description_of(item: &Value, regions: &[&str]) -> String {
+    let sections = ["overview", "responsibilities", "qualifications"]
+        .iter()
+        .map(|key| html_to_text(str_field(item, key)))
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    with_labeled_lines(
+        sections,
+        &[
+            ("Category", str_field(item, "category")),
+            ("Type", str_field(item, "type")),
+            (
+                "Remote region (Atlassian hires only where it has a legal entity)",
+                &regions.join(", "),
+            ),
+        ],
+    )
+}
+
 fn parse_job(item: &Value) -> Option<Job> {
     let external_id = id_string(&item["id"])?;
     let title = str_field(item, "title").trim();
@@ -160,34 +178,17 @@ fn parse_job(item: &Value) -> Option<Job> {
             .map(String::as_str)
             .filter(|place| remote_region(place).is_none()),
     );
-    let mut description = ["overview", "responsibilities", "qualifications"]
-        .iter()
-        .map(|key| html_to_text(str_field(item, key)))
-        .filter(|text| !text.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n");
-    for (label, value) in [
-        ("Category", str_field(item, "category").to_string()),
-        ("Type", str_field(item, "type").to_string()),
-        (
-            "Remote region (Atlassian hires only where it has a legal entity)",
-            regions.join(", "),
-        ),
-    ] {
-        if !value.is_empty() {
-            description = format!("{description}\n{label}: {value}");
-        }
-    }
+    let apply_url = or_if_empty(apply_url, url);
     Some(Job {
         source: "atlassian".to_string(),
         external_id,
         company: "Atlassian".to_string(),
         title: title.to_string(),
         url: url.to_string(),
-        apply_url: if apply_url.is_empty() { url } else { apply_url }.to_string(),
+        apply_url: apply_url.to_string(),
         location,
         remote: places.iter().any(|place| is_remote_place(place)),
-        description,
+        description: description_of(item, &regions),
         salary_min_monthly_usd: None,
         salary_max_monthly_usd: None,
         posted_at: None,
@@ -210,13 +211,28 @@ mod tests {
         serde_json::from_str(include_str!("../../tests/fixtures/sources/atlassian.json")).unwrap()
     }
 
-    fn job_at(index: usize) -> Job {
-        parse_job(&real_payload()[index]).unwrap()
+    /// The postings of the fixture, by their `id`.
+    const SYDNEY_BACKEND: u64 = 25538;
+    const THREE_AUSTRALIAN_CITIES: u64 = 26986;
+    const INDIAN_SALES: u64 = 25480;
+    const SYDNEY_SALES: u64 = 27500;
+    const SEATTLE_ONLY: u64 = 25998;
+    const NO_PLACE: u64 = 26753;
+
+    fn job_with_id(id: u64) -> Job {
+        let payload = real_payload();
+        let item = payload
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"] == id)
+            .unwrap_or_else(|| panic!("the fixture has no posting {id}"));
+        parse_job(item).unwrap()
     }
 
     #[test]
     fn parses_a_real_posting() {
-        let job = job_at(0);
+        let job = job_with_id(SYDNEY_BACKEND);
 
         assert_eq!(job.key(), "atlassian:25538");
         assert_eq!(job.company, "Atlassian");
@@ -246,15 +262,15 @@ mod tests {
     #[test]
     fn places_lose_their_postcodes_and_keep_their_countries() {
         assert_eq!(
-            job_at(1).location,
+            job_with_id(THREE_AUSTRALIAN_CITIES).location,
             "Sydney, Australia; Remote; Melbourne, Australia; Brisbane, Australia"
         );
         assert_eq!(
-            job_at(3).location,
+            job_with_id(INDIAN_SALES).location,
             // The bare `Remote` is already named inside `Remote, India`.
             "Bengaluru, India; Remote, India"
         );
-        assert_eq!(job_at(5).location, "Seattle, United States");
+        assert_eq!(job_with_id(SEATTLE_ONLY).location, "Seattle, United States");
         assert_eq!(
             clean_place(
                 "Mountain View - United States or Remote -   Mountain View, California 94041 United States"
@@ -300,7 +316,7 @@ mod tests {
 
     #[test]
     fn a_posting_with_no_place_has_no_location_and_is_not_remote() {
-        let job = job_at(6);
+        let job = job_with_id(NO_PLACE);
 
         assert_eq!(job.location, "");
         assert!(!job.remote);
@@ -317,24 +333,33 @@ mod tests {
         let australia = ["australia".to_string(), "sydney".to_string()];
 
         assert!(
-            !region_ok(&job_at(0)),
+            !region_ok(&job_with_id(SYDNEY_BACKEND)),
             "Australia is not open without the extra place"
         );
         assert!(
-            region_ok_with(&job_at(0), &australia),
+            region_ok_with(&job_with_id(SYDNEY_BACKEND), &australia),
             "Sydney, Auckland, remote"
         );
         assert!(
-            region_ok_with(&job_at(1), &australia),
+            region_ok_with(&job_with_id(THREE_AUSTRALIAN_CITIES), &australia),
             "three Australian cities"
         );
         assert!(
-            region_ok_with(&job_at(4), &australia),
+            region_ok_with(&job_with_id(SYDNEY_SALES), &australia),
             "a Sydney sales role"
         );
-        assert!(!region_ok_with(&job_at(3), &australia), "India");
-        assert!(!region_ok_with(&job_at(5), &australia), "Seattle only");
-        assert!(!region_ok_with(&job_at(6), &australia), "no place at all");
+        assert!(
+            !region_ok_with(&job_with_id(INDIAN_SALES), &australia),
+            "India"
+        );
+        assert!(
+            !region_ok_with(&job_with_id(SEATTLE_ONLY), &australia),
+            "Seattle only"
+        );
+        assert!(
+            !region_ok_with(&job_with_id(NO_PLACE), &australia),
+            "no place at all"
+        );
     }
 
     #[test]
@@ -394,43 +419,44 @@ mod tests {
         assert!(result.jobs.iter().all(|job| job.source == "atlassian"));
     }
 
-    #[tokio::test]
-    async fn fetch_records_skipped_postings_html_and_a_status_error() {
+    async fn fetch_answering(response: ResponseTemplate) -> FetchResult {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/endpoint/careers/listings"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(json!([{"id": 1, "title": "No link"}])),
-            )
-            .up_to_n_times(1)
+            .respond_with(response)
             .mount(&server)
             .await;
-        Mock::given(method("GET"))
-            .and(path("/endpoint/careers/listings"))
-            .respond_with(ResponseTemplate::new(200).set_body_string("<html>blocked</html>"))
-            .up_to_n_times(1)
-            .mount(&server)
-            .await;
-        Mock::given(method("GET"))
-            .and(path("/endpoint/careers/listings"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"jobs": []})))
-            .up_to_n_times(1)
-            .mount(&server)
-            .await;
-        Mock::given(method("GET"))
-            .and(path("/endpoint/careers/listings"))
-            .respond_with(ResponseTemplate::new(500))
-            .mount(&server)
-            .await;
+        source(&server).fetch().await
+    }
 
-        let skipped = source(&server).fetch().await;
-        assert!(skipped.jobs.is_empty());
+    #[tokio::test]
+    async fn fetch_records_a_posting_without_a_link_as_skipped() {
+        let body = json!([{"id": 1, "title": "No link"}]);
+
+        let result = fetch_answering(ResponseTemplate::new(200).set_body_json(body)).await;
+
+        assert!(result.jobs.is_empty());
         assert_eq!(
-            skipped.errors,
+            result.errors,
             [FetchError::skipped("atlassian", "listings", 1)]
         );
-        for what in ["html", "not a list", "status"] {
-            let result = source(&server).fetch().await;
+    }
+
+    #[tokio::test]
+    async fn fetch_records_an_answer_that_is_not_a_list_of_postings() {
+        for (what, response) in [
+            (
+                "html",
+                ResponseTemplate::new(200).set_body_string("<html>blocked</html>"),
+            ),
+            (
+                "not a list",
+                ResponseTemplate::new(200).set_body_json(json!({"jobs": []})),
+            ),
+            ("status", ResponseTemplate::new(500)),
+        ] {
+            let result = fetch_answering(response).await;
+
             assert!(result.jobs.is_empty(), "{what}");
             assert_eq!(result.errors.len(), 1, "{what}: {:?}", result.errors);
             assert!(

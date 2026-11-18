@@ -8,6 +8,8 @@ import { h } from "../core/dom.js";
 import { t } from "../i18n/index.js";
 import { STOPS_META } from "../moments/registry.js";
 import { keysFor } from "./keys.js";
+import { createFocusReturn } from "./focus-return.js";
+import { modalVeil } from "./modal.js";
 
 /** [{ id, display, label, scope }] for a stop, in table order. */
 export const helpRows = (stopId, live = null) => keysFor(stopId, { live }).map((k) => ({ id: k.id, display: k.display, label: k.label, scope: k.scope }));
@@ -31,7 +33,7 @@ export function helpModel(stopId, { live = null, flat = false } = {}) {
 
 export function createHelp({ root, sound, getStop = () => null, live = () => null, flat = () => false, onToggle = () => {} }) {
   let box = null;
-  let from = null;
+  const focusReturn = createFocusReturn();
   const isOpen = () => box !== null;
 
   function close() {
@@ -40,8 +42,7 @@ export function createHelp({ root, sound, getStop = () => null, live = () => nul
     box = null;
     onToggle(false);
     sound.play("close");
-    if (from && from.isConnected && from.focus) from.focus({ preventScroll: true });
-    from = null;
+    focusReturn.restore();
   }
 
   const group = (g) => h("section", { class: "help-group" },
@@ -67,14 +68,12 @@ export function createHelp({ root, sound, getStop = () => null, live = () => nul
 
   function open() {
     if (box) return;
-    from = document.activeElement;
+    focusReturn.remember();
     const closeBtn = h("button", { class: "help-close", type: "button", onclick: close }, t("common.close"));
     const dialog = h("div", { class: "help", role: "dialog", "aria-modal": "true", "aria-labelledby": "help-title", tabindex: -1 },
       h("div", { class: "help-head" }, h("h3", { id: "help-title" }, t("keys.title")), closeBtn),
       body());
-    box = h("div", { class: "help-back", "data-lenis-prevent": "", onmousedown: (e) => { if (e.target === box) close(); } }, dialog);
-    // the wheel is the sheet's or nobody's: over the veil, or over a sheet that has nothing to scroll, it must not move the page behind (the stage's camera)
-    box.addEventListener("wheel", (e) => { if (!dialog.contains(e.target) || dialog.scrollHeight <= dialog.clientHeight) e.preventDefault(); }, { passive: false });
+    box = modalVeil({ cls: "help-back", dialog, onClose: close }); // the wheel is the sheet's or nobody's
     dialog.addEventListener("keydown", (e) => { if (e.key === "Tab") { e.preventDefault(); closeBtn.focus(); } });
     root.append(box);
     sound.play("open");

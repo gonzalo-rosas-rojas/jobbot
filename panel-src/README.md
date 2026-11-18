@@ -70,7 +70,7 @@ pure functions) and `src/ui/keyfilter.js` (when a shortcut stays quiet). The obv
 - `src/stage/` the picture behind the sheet: `sky.js`, `skyline.js`, `dial.js`, `beam.js` and `stage.js` that puts them together on one canvas.
 - `src/moments/registry.js` the six stops; `src/moments/<id>.js` one file each, with the stop's parts in `src/moments/<id>/`
   (prologo, hoy, procesos, cola, aprender, sistema).
-- `src/core/` pure logic (`model`, `session`, `store`, `settings`, `diff`, `format`, `time`, `humanize`, `dom`).
+- `src/core/` pure logic (`model`, `session`, `store`, `route`, `settings`, `diff`, `format`, `time`, `humanize`, `dom`).
 - `src/i18n/{es,en}/` one dictionary per scope (`common`, `shell`, one per moment), identical keys in both languages.
 - `src/sound/` the synthesised sounds; `src/styles/` tokens, base, stage, dial, sheet, moments, `ui/` (one file per moment, `page.css`).
 
@@ -82,12 +82,12 @@ row, event)`, `arrive(opts)` and `drawer(detail, card, ctx)`; the contract is in
 its words in `src/i18n/{es,en}/<id>.js` and its styles in `src/styles/ui/<id>.css` (every file of that folder that does not start with `_` goes into
 the page). Add the ids of the keys it answers to its list in `ui/wired.js`: the help promises nothing else. Build DOM only with `h()`/`sv()`, and mark a
 region that has keys of its own (digits, letters) with `data-local-keys` so the global shortcuts step aside inside it. The drawer's content is
-`renderDetail(detail, card, ctx)` in `ui/detail.js` (signature in its header); a moment may bring its own page of an application with `drawer()`.
+`drawDetail(detail, card, ctx)` in `ui/detail.js` (signature in its header); a moment may bring its own page of an application with `drawer()`.
 
 ## Fonts and images (assets)
 
 The page is one file, but the binary can also serve a few files of its own (`crates/jobbot-panel/src/assets/`, listed in the `ASSETS`
-table of `crates/jobbot-panel/src/http.rs`, each with a row in `THIRD_PARTY_NOTICES.md`; the rule for adding one is in
+table of `crates/jobbot-panel/src/http/page.rs`, each with a row in `THIRD_PARTY_NOTICES.md`; the rule for adding one is in
 `crates/jobbot-panel/src/assets/README.md`). They are reached through the `__ASSETS__` placeholder, which the server fills in at every
 load exactly like `__NONCE__` (it becomes `/a/<launch-id>`, a random segment per start):
 
@@ -96,7 +96,7 @@ load exactly like `__NONCE__` (it becomes `/a/<launch-id>`, a random segment per
 .picture { background: url("__ASSETS__/picture.svg") center / contain no-repeat; }
 ```
 
-Rules: fonts go through `@font-face` inside the nonce'd `<style>` (the page guard forbids `<link`), never `@import`, never
+Rules: fonts go through `@font-face` inside the nonce'd `<style>` (the page guard forbids `<link`; the one exception is the published demo, `node build.mjs demo --publish`, which declares its icon with a relative `<link rel="icon" href="favicon.svg">` because a static host has no server to answer `/favicon.ico`; the real page and the dev demo keep none), never `@import`, never
 an absolute address (a Rust test requires every `url(` in the page to start with `__ASSETS__/` or `#`). The CSP allows
 `font-src 'self'` and `img-src 'self' blob:` and nothing else, and `require-trusted-types-for 'script'` makes a string
 handed to `innerHTML`, `eval` or a script's `src` throw. Scripts cannot see the placeholder (it only exists in text the

@@ -21,7 +21,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "needs chromium"]
-    async fn the_master_cv_fits_two_pages() {
+    async fn the_master_and_a_tailored_cv_fit_two_pages() {
         let dir = tempfile::tempdir().unwrap();
         let out = dir.path().join("master.pdf");
         let md = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/cv/cv-master.md"))

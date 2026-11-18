@@ -7,8 +7,8 @@ import { t, tn, fmtDate, fmtNumber } from "../../i18n/index.js";
 import { stopCounts } from "../../core/model.js";
 import { ago, nextWindowLabel, pointsOf } from "../../core/format.js";
 import { serverDay } from "../../core/time.js";
-import { KEYS } from "../../ui/keys.js";
-import { missingOf, learnOf, eveOf, rejectionsOf, MIN_REJECTED } from "./data.js";
+import { keyShown } from "../../ui/keys.js";
+import { missingOf, learnOf, eveOf, rejectionsOf, whole, MIN_REJECTED } from "./data.js";
 import { clean, safeHref } from "../shared/util.js";
 import { askOf } from "../shared/stops.js";
 
@@ -23,11 +23,21 @@ const WHO_SHOWN = 2;                       // companies named in the line of a q
 /** The number of the headline: a word up to twenty (feminine: it counts questions), the figure after that. */
 export const numWord = (n) => (Number.isInteger(n) && n >= 0 && n <= SPELLED_UP_TO ? t("aprender.num." + n) : String(n));
 
-/** What the key of an action looks like on a button, from the one table of keys.js (a renamed key is renamed here). */
-export function keyShown(id) {
-  const entry = KEYS.find((k) => k.id === id);
-  if (!entry) throw new Error(`aprender: "${id}" is not an action of the key table`);
-  return entry.display === "Enter" ? "↵" : entry.display;
+/** What the key of an action looks like on a button: ui/keys.js's one function, naming APRENDER in the error of an id that is not in the table. */
+export const keyOf = (id) => keyShown(id, { room: "aprender" });
+
+/** The "view the posting" verb of a row, or nothing when the card has no safe link. */
+const linkVerb = (link) => (link ? [{ id: "link", key: keyOf("link"), label: t("act.viewPosting"), primary: false, visible: false, permanent: false }] : []);
+
+const GAP_ROW_PREFIX = "gap:";
+/** The id of the row of a gap, and the test render.js uses to find those rows again: one place writes the prefix. */
+export const gapRowId = (id) => GAP_ROW_PREFIX + id;
+export const isGapRowId = (rowId) => String(rowId).startsWith(GAP_ROW_PREFIX);
+
+/** The engine's window when it is shut: when it opens again, if the snapshot knows. */
+function closedLabel(c, nowMs) {
+  if (!c.next_window) return t("aprender.engine.closed");
+  return t("aprender.engine.closedOpens", { when: nextWindowLabel(c.next_window, serverDay(nowMs)) });
 }
 
 function engineOf(controls, nowMs) {
@@ -35,7 +45,7 @@ function engineOf(controls, nowMs) {
   const parts = [];
   if (c.stopped) parts.push(t("aprender.engine.stop"));
   if (c.window_open === true) parts.push(t("aprender.engine.open"));
-  else if (c.window_open === false) parts.push(c.next_window ? t("aprender.engine.closedOpens", { when: nextWindowLabel(c.next_window, serverDay(nowMs)) }) : t("aprender.engine.closed"));
+  else if (c.window_open === false) parts.push(closedLabel(c, nowMs));
   if (c.last_run_at) parts.push(t("aprender.engine.run", { ago: ago(c.last_run_at, nowMs) }));
   else if (c.engine === "never") parts.push(t("aprender.engine.never"));
   return parts;
@@ -57,9 +67,9 @@ function missingRow(group, forms) {
     : t("aprender.row.blocks", { who: names.join(", ") });
   const link = safeHref(first && first.url);
   const verbs = [
-    { id: "resolve", key: keyShown("resolve"), label: t("aprender.act.answered"), primary: true, visible: true, permanent: true },
-    { id: "open", key: keyShown("open"), label: t("act.open"), primary: false, visible: false, permanent: false },
-    ...(link ? [{ id: "link", key: keyShown("link"), label: t("act.viewPosting"), primary: false, visible: false, permanent: false }] : []),
+    { id: "resolve", key: keyOf("resolve"), label: t("aprender.act.answered"), primary: true, visible: true, permanent: true },
+    { id: "open", key: keyOf("open"), label: t("act.open"), primary: false, visible: false, permanent: false },
+    ...linkVerb(link),
   ];
   return {
     id: "miss:" + group.id,
@@ -98,14 +108,14 @@ function missingBlock(snap, expanded) {
 
 function bankBlock(snap, missing, learn) {
   const p = snap.pipeline || {};
-  const figure = (id, n, label, extra = {}) => {
+  const figure = (id, n, label) => {
     const count = pointsOf(n);
-    return { id, n: count === null ? null : Math.max(0, Math.trunc(count)), label, nodata: count === null, ...extra };
+    return { id, n: count === null ? null : whole(count), label, nodata: count === null };
   };
   return {
     head: t("aprender.bank.head"),
     figures: [
-      figure("complete", p.complete, t("aprender.bank.complete", { days: Math.max(0, Math.trunc(pointsOf(p.days) ?? 0)) })),
+      figure("complete", p.complete, t("aprender.bank.complete", { days: whole(pointsOf(p.days)) })),
       figure("blocked", missing.forms, t("aprender.bank.blocked")),
       figure("seen", learn.known ? learn.seenValue : null, t("aprender.bank.seen", { total: learn.total })),
       // the bank itself: profile/answers.toml is read by the engine alone and is not in the snapshot
@@ -132,12 +142,18 @@ function rejectsBlock(snap) {
   };
 }
 
+/** How the time of the interview reads: the mailed date, the card's own note, or "unknown". */
+function whenLabelOf(when) {
+  if (when.kind === "task") return fmtDate(when.at, "datetime");
+  return when.kind === "note" ? when.text : t("aprender.eve.when.none");
+}
+
 /** `dossiers` is what the moment has fetched: key -> { state: "loading" | "ok" | "error" | "none", parsed?, why? }. */
 function eveBlock(snap, nowMs, learn, dossiers) {
   const eve = eveOf(snap, nowMs);
   if (!eve) return { state: "none", head: t("aprender.eve.head.none"), text: t("aprender.eve.none"), row: null };
   const card = eve.card;
-  const when = eve.when.kind === "task" ? fmtDate(eve.when.at, "datetime") : eve.when.kind === "note" ? eve.when.text : t("aprender.eve.when.none");
+  const when = whenLabelOf(eve.when);
   const loaded = dossiers.get(card.key) || null;
   let state;
   let text = null;
@@ -167,15 +183,27 @@ function eveBlock(snap, nowMs, learn, dossiers) {
       open: String(card.key),
       link,
       actions: [
-        { id: "open", key: keyShown("open"), label: t("aprender.eve.open"), primary: true, visible: true, permanent: false },
-        ...(link ? [{ id: "link", key: keyShown("link"), label: t("act.viewPosting"), primary: false, visible: false, permanent: false }] : []),
+        { id: "open", key: keyOf("open"), label: t("aprender.eve.open"), primary: true, visible: true, permanent: false },
+        ...linkVerb(link),
       ],
     },
   };
 }
 
+/** Where the review stands: nothing in the bank, questions due, or all up to date. */
+function drillStateOf(total, due) {
+  if (total === 0) return "empty";
+  return due > 0 ? "due" : "calm";
+}
+
+/** The line under the review's headline: none while questions are due, because the start button says what to do. */
+function drillTextOf(state) {
+  if (state === "empty") return t("aprender.card.empty");
+  return state === "calm" ? t("aprender.drill.calm") : null;
+}
+
 function drillBlock(snap, learn, due) {
-  const base = { start: { key: keyShown("open"), label: t("aprender.drill.start"), aria: t("aprender.drill.start.aria", { topic: t("aprender.drill.topic.all") }) } };
+  const base = { start: { key: keyOf("open"), label: t("aprender.drill.start"), aria: t("aprender.drill.start.aria", { topic: t("aprender.drill.topic.all") }) } };
   if (!learn.known) return { ...base, state: "nodata", head: t("aprender.drill.head.nodata"), text: t("aprender.drill.nodata"), topics: [], gaps: null };
   const topics = learn.topics.slice(0, TOPIC_ROWS).map((x) => ({
     topic: x.topic,
@@ -190,17 +218,17 @@ function drillBlock(snap, learn, due) {
     aria: t("aprender.topic.aria", { topic: x.topic, due: x.due, seen: x.seen, total: x.total }),
   }));
   const gapRows = learn.gaps.slice(0, GAP_ROWS).map((g) => ({
-    id: "gap:" + g.id, data: g.offerKey ? { card: g.offerKey } : null, open: g.offerKey, topic: g.topic, offer: g.offer, seen: g.seen, state: t(g.seen ? "aprender.gap.seen" : "aprender.gap.todo"),
+    id: gapRowId(g.id), data: g.offerKey ? { card: g.offerKey } : null, open: g.offerKey, topic: g.topic, offer: g.offer, seen: g.seen, state: t(g.seen ? "aprender.gap.seen" : "aprender.gap.todo"),
   }));
+  const state = drillStateOf(learn.total, due);
   return {
     ...base,
-    state: learn.total === 0 ? "empty" : due > 0 ? "due" : "calm",
+    state,
     head: t("aprender.drill.head", { due: tn("aprender.drill.due", due), seen: learn.seen, total: learn.total }),
     due,
-    text: learn.total === 0 ? t("aprender.card.empty") : due > 0 ? null : t("aprender.drill.calm"),
+    text: drillTextOf(state),
     topics,
-    topicsMore: Math.max(0, learn.topics.length - topics.length),
-    gaps: gapRows.length ? { head: t("aprender.gaps.head", { n: learn.gaps.length }), rows: gapRows, more: Math.max(0, learn.gaps.length - gapRows.length) } : null,
+    gaps: gapRows.length ? { head: t("aprender.gaps.head", { n: learn.gaps.length }), rows: gapRows } : null,
   };
 }
 

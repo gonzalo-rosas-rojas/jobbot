@@ -3,4 +3,8 @@
 ignore = [
     # ttf-parser unmaintained; dev-only via pdf-extract -> lopdf, not in the binary. See deny.toml.
     "RUSTSEC-2026-0192",
+    # chrono and chrono-tz unmaintained (2026-11-17); in the binary, no flaw named, no upgrade.
+    # The move to jiff is docs/adr/0015-dates-move-off-chrono.md. See deny.toml.
+    "RUSTSEC-2026-0543",
+    "RUSTSEC-2026-0555",
 ]

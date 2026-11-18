@@ -22,6 +22,10 @@ fn santiago(at: DateTime<Utc>) -> String {
         .to_string()
 }
 
+const HOURS_PER_DAY: i64 = 24;
+/// Up to this many hours away a deadline is told in hours, beyond it in days.
+const SOON_HOURS: i64 = 2 * HOURS_PER_DAY;
+
 /// "vence en 5 h" up to two days away, "vence en 3 días" beyond, "VENCIDA" once it has passed; the
 /// Santiago time follows.
 fn due_phrase(task: &TaskRow, due: DateTime<Utc>, now: DateTime<Utc>) -> String {
@@ -32,8 +36,8 @@ fn due_phrase(task: &TaskRow, due: DateTime<Utc>, now: DateTime<Utc>) -> String 
     let hours = (due - now).num_hours();
     let left = match hours {
         0 => "vence en menos de 1 h".to_string(),
-        1..48 => format!("vence en {hours} h"),
-        _ => format!("vence en {} días", hours / 24),
+        1..SOON_HOURS => format!("vence en {hours} h"),
+        _ => format!("vence en {} días", hours / HOURS_PER_DAY),
     };
     format!("{left} ({when})")
 }
@@ -62,9 +66,11 @@ fn task_line(task: &TaskRow, now: DateTime<Utc>) -> String {
 
 fn email_line(email: &EmailRow) -> String {
     let who = email.company.as_deref().unwrap_or(email.from_addr.expose());
-    let subject = match plain_line(&email.subject) {
-        subject if subject.is_empty() => "(sin asunto)".to_string(),
-        subject => subject,
+    let subject = plain_line(&email.subject);
+    let subject = if subject.is_empty() {
+        "(sin asunto)".to_string()
+    } else {
+        subject
     };
     let summary = match plain_line(&email.summary) {
         summary if summary.is_empty() => String::new(),
@@ -78,19 +84,19 @@ fn email_line(email: &EmailRow) -> String {
     )
 }
 
-/// A heading with the total, the rows (cut at `cap`, with the count of the rest) or the sentence
+/// A heading with the total, the rows (cut at `cap` when there is one, with the count of the rest) or the sentence
 /// for "nothing", and a blank line.
 fn section(
     lines: &mut Vec<String>,
     heading: &str,
     mut rows: Vec<String>,
-    cap: usize,
+    cap: Option<usize>,
     when_empty: &str,
 ) {
     lines.push(format!("{heading} ({})", rows.len()));
     if rows.is_empty() {
         lines.push(format!("  {when_empty}"));
-    } else if rows.len() > cap {
+    } else if let Some(cap) = cap.filter(|&cap| rows.len() > cap) {
         let rest = rows.len() - cap;
         rows.truncate(cap);
         lines.extend(rows);
@@ -121,7 +127,7 @@ pub fn build_today(tracker: &dyn Store, now: DateTime<Utc>) -> Result<String> {
         &mut lines,
         "Tareas abiertas",
         tasks,
-        usize::MAX,
+        None,
         "Sin tareas abiertas.",
     );
 
@@ -134,7 +140,7 @@ pub fn build_today(tracker: &dyn Store, now: DateTime<Utc>) -> Result<String> {
                 plain_line(&row.company),
                 plain_line(&row.title),
                 plain_line(&row.job_key),
-                plain_line(row.waiting_reason().unwrap_or("sin motivo"))
+                plain_line(row.waiting_reason_or_default())
             )
         })
         .collect();
@@ -142,7 +148,7 @@ pub fn build_today(tracker: &dyn Store, now: DateTime<Utc>) -> Result<String> {
         &mut lines,
         "Esperan tu decisión",
         waiting,
-        LIST_CAP,
+        Some(LIST_CAP),
         "Nada pendiente.",
     );
 
@@ -155,7 +161,7 @@ pub fn build_today(tracker: &dyn Store, now: DateTime<Utc>) -> Result<String> {
         &mut lines,
         &format!("Respuestas recientes, últimos {RECENT_DAYS} días"),
         recent,
-        LIST_CAP,
+        Some(LIST_CAP),
         "Sin respuestas nuevas.",
     );
 

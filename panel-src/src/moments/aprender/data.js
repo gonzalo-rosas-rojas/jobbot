@@ -7,14 +7,30 @@
 
 import { clean, safeHref } from "../shared/util.js";
 import { pointsOf } from "../../core/format.js";
+import { HOUR_MS } from "../../core/time.js";
 
 const LABEL_MAX = 120;
+const COMPANY_MAX = 60;
+const TITLE_MAX = 90;                     // a role, and the offer a gap came from
+const TOPIC_MAX = 60;
+const TOPIC_NAME_MAX = 40;                // the topic as it is written on a chip of the review
+const QUESTION_MAX = 600;
 export const MIN_REJECTED = 5;            // fewer rejections than this show no pattern, only how many there are
 const LIVE = ["submitted", "replied", "technical_test", "interview", "offer", "ghosted", "accepted"];
-const EVE_LOOKBACK_MS = 36 * 3600000;     // a mailed interview date older than this is not the eve of anything
+const MIN_PEERS = 3;                      // processes still alive needed to compare the score of the rejected against
+const MIN_SAME_SOURCE = 3;                // rejections from one board needed to call it a pattern
+const EVE_LOOKBACK_MS = 36 * HOUR_MS;     // a mailed interview date older than this is not the eve of anything
+// the headings of the dossier (Spanish or English) and the section each one opens
+const SECTION_HEADINGS = [
+  [/^(qué dice|what the)/, "summary"],
+  [/^(preguntas|likely)/, "questions"],
+  [/^(historias|stories)/, "stories"],
+  [/^(huecos|gaps)/, "gaps"],
+];
 const MARKER = "faltan respuestas:";
 
-const whole = (x) => Math.max(0, Math.trunc(Number(x) || 0));
+/** A count from outside as a whole number, never below zero (nothing, or text, is zero). */
+export const whole = (x) => Math.max(0, Math.trunc(Number(x) || 0));
 const list = (x) => (Array.isArray(x) ? x : []);
 const columnOf = (snap, state) => list(snap && snap.board).find((col) => col && col.state === state) || { total: 0, cards: [] };
 
@@ -54,7 +70,7 @@ export function missingOf(snap) {
   const unnamed = [];
   const stuck = new Set();
   for (const card of cards) {
-    const brief = { key: String(card.key), company: clean(card.company, 60), title: clean(card.title, 90), score: whole(card.score), url: safeHref(card.url) };
+    const brief = { key: String(card.key), company: clean(card.company, COMPANY_MAX), title: clean(card.title, TITLE_MAX), score: whole(card.score), url: safeHref(card.url) };
     const labels = missingLabels(card.reason);
     stuck.add(brief.key);
     if (labels.length === 0) { unnamed.push(brief); continue; }
@@ -79,11 +95,11 @@ export function learnOf(snap) {
   const raw = l || {};
   const average = new Map(list(raw.weak_topics).filter((w) => w && w.topic != null).map((w) => [String(w.topic), pointsOf(w.average)]));
   const topics = list(raw.topics).filter((x) => x && x.topic != null).map((x) => ({
-    topic: clean(x.topic, 40), name: String(x.topic), total: whole(x.total), seen: whole(x.seen), due: whole(x.due), average: average.has(String(x.topic)) ? average.get(String(x.topic)) : null,
+    topic: clean(x.topic, TOPIC_NAME_MAX), name: String(x.topic), total: whole(x.total), seen: whole(x.seen), due: whole(x.due), average: average.has(String(x.topic)) ? average.get(String(x.topic)) : null,
   }));
   topics.sort((a, b) => b.due - a.due || (b.total - b.seen) - (a.total - a.seen) || a.topic.localeCompare(b.topic));
   const gaps = list(raw.gaps).filter((g) => g && g.topic != null).map((g) => ({
-    id: String(g.id), topic: clean(g.topic, 60), offerKey: g.offer_key ? String(g.offer_key) : null, offer: clean(g.offer, 90), seen: !!g.seen,
+    id: String(g.id), topic: clean(g.topic, TOPIC_MAX), offerKey: g.offer_key ? String(g.offer_key) : null, offer: clean(g.offer, TITLE_MAX), seen: !!g.seen,
   }));
   gaps.sort((a, b) => Number(a.seen) - Number(b.seen));
   return { known: !!l, total: whole(raw.total), seen: whole(raw.seen), seenValue: pointsOf(raw.seen), due: whole(raw.due), topics, gaps };
@@ -94,7 +110,7 @@ export function cardOf(raw) {
   if (raw == null) return null;
   if (typeof raw !== "object" || raw.id == null) return undefined;
   return {
-    id: String(raw.id), topic: clean(raw.topic, 60), question: clean(raw.question, 600), offer: raw.offer ? clean(raw.offer, 90) : null,
+    id: String(raw.id), topic: clean(raw.topic, TOPIC_MAX), question: clean(raw.question, QUESTION_MAX), offer: raw.offer ? clean(raw.offer, TITLE_MAX) : null,
   };
 }
 
@@ -115,7 +131,8 @@ export function parseDossier(md) {
     const heading = /^##\s+(.*)$/.exec(line);
     if (heading) {
       const name = heading[1].toLowerCase();
-      current = /^(qué dice|what the)/.test(name) ? "summary" : /^(preguntas|likely)/.test(name) ? "questions" : /^(historias|stories)/.test(name) ? "stories" : /^(huecos|gaps)/.test(name) ? "gaps" : null;
+      const hit = SECTION_HEADINGS.find(([re]) => re.test(name));
+      current = hit ? hit[1] : null;
       if (current) sections.set(current, []);
     } else if (current) {
       sections.get(current).push(line);
@@ -133,10 +150,10 @@ export function parseDossier(md) {
 
   const stories = [];
   for (const line of lines("stories")) {
-    const title = /^###\s+(.*)$/.exec(line);
-    if (title) { stories.push({ title: clean(title[1], 120), evidence: "" }); continue; }
-    const evidence = /[«“](.*)[»”]/.exec(line);
-    if (stories.length && !stories[stories.length - 1].evidence && /evidencia|evidence/i.test(line) && evidence) stories[stories.length - 1].evidence = clean(evidence[1], 200);
+    const heading = /^###\s+(.*)$/.exec(line);
+    if (heading) { stories.push({ title: clean(heading[1], 120), evidence: "" }); continue; }
+    const quote = /[«“](.*)[»”]/.exec(line);
+    if (stories.length && !stories[stories.length - 1].evidence && /evidencia|evidence/i.test(line) && quote) stories[stories.length - 1].evidence = clean(quote[1], 200);
   }
 
   const gaps = [];
@@ -150,6 +167,13 @@ export function parseDossier(md) {
 }
 
 // ---- the eve of an interview
+
+/** When the interview is: the mailed date, else the card's note when it holds a digit, else unknown. */
+function whenOf(invite, note) {
+  if (invite) return { kind: "task", at: invite.due_at };
+  if (/\d/.test(note)) return { kind: "note", text: note };
+  return { kind: "none" };
+}
 
 /**
  * The interview whose dossier is worth reading tonight: { card, when: { kind: "task", at } | { kind: "note", text } | { kind: "none" }, others }, or
@@ -172,9 +196,7 @@ export function eveOf(snap, nowMs) {
     return Date.parse(b.card.updated_at) - Date.parse(a.card.updated_at) || 0;
   });
   const { card, invite } = rows[0];
-  const note = clean(card.note, 80);
-  const when = invite ? { kind: "task", at: invite.due_at } : /\d/.test(note) ? { kind: "note", text: note } : { kind: "none" };
-  return { card, when, others: rows.length - 1 };
+  return { card, when: whenOf(invite, clean(card.note, 80)), others: rows.length - 1 };
 }
 
 // ---- the rejections
@@ -199,10 +221,10 @@ export function rejectionsOf(snap) {
   const out = { total: Math.max(whole(rejected.total), n), n, few: n > 0 && n < MIN_REJECTED, rows: [] };
   if (n < MIN_REJECTED) return out;
   const alive = LIVE.flatMap((state) => scored(columnOf(snap, state).cards)).map((c) => c.score);
-  if (alive.length >= 3) out.rows.push({ id: "score", rejected: Math.round(median(cards.map((c) => c.score))), alive: Math.round(median(alive)), alivePeers: alive.length });
+  if (alive.length >= MIN_PEERS) out.rows.push({ id: "score", rejected: Math.round(median(cards.map((c) => c.score))), alive: Math.round(median(alive)), alivePeers: alive.length });
   const bySource = new Map();
   for (const c of cards) bySource.set(String(c.source), (bySource.get(String(c.source)) || 0) + 1);
   const [source, k] = [...bySource.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
-  if (k >= 3 && k * 2 >= n) out.rows.push({ id: "source", source: clean(source, 24), k, n });
+  if (k >= MIN_SAME_SOURCE && k * 2 >= n) out.rows.push({ id: "source", source: clean(source, 24), k, n });
   return out;
 }

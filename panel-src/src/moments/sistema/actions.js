@@ -7,12 +7,10 @@
 //   actions.settle()   a snapshot arrived: after an answered action it is the truth, so the intent goes   actions.destroy()
 
 import { heldKey } from "../../core/dom.js";
-import { createArmer } from "../shared/armer.js";
-import { createEngineSwitch, REQUESTS } from "../shared/engine.js";
+import { createArmer, REAL_TIMERS } from "../shared/armer.js";
+import { createEngineSwitch } from "../shared/engine.js";
 
-export { REQUESTS };
-
-export function createActions({ session, sound, announce, t, toast = null, onChange = () => {}, now = Date.now, timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (id) => clearTimeout(id) }, held = heldKey }) {
+export function createActions({ session, sound, announce, t, toast = null, onChange = () => {}, now = Date.now, timers = REAL_TIMERS, held = heldKey }) {
   const armer = createArmer({ announce, sound, t, onChange: () => onChange(), now, timers, held });
   const engine = createEngineSwitch({ armer, session, sound, announce, t, toast, onChange: () => onChange() });
 

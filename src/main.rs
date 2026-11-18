@@ -12,7 +12,17 @@ async fn main() {
             std::process::exit(1);
         }
     };
-    let exe = std::env::current_exe().ok();
+    // Without the executable's path only the current folder can be the root, and the refusal
+    // below would blame the folder alone: say why the executable's own folder was not tried.
+    let exe = match std::env::current_exe() {
+        Ok(exe) => Some(exe),
+        Err(err) => {
+            eprintln!(
+                "Aviso: no se pudo leer la ruta del ejecutable ({err}); se usa la carpeta actual."
+            );
+            None
+        }
+    };
     // JOBBOT_HOME, when set, holds all private state instead (profile, data, CV, STOP).
     let var = |name: &str| {
         std::env::var_os(name)

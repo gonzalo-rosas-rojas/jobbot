@@ -14,6 +14,8 @@ pub use crate::ports::Renderer;
 const PLACEHOLDER: char = '⟦';
 /// Separator between the original summary line and the sentence `tailor` appends.
 const RELEVANT: &str = " Relevant to this role: ";
+/// The most skills the appended sentence names.
+const MAX_RELEVANT_SKILLS: usize = 4;
 
 static SKILL_LINE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^\*\*(?P<label>[^*]+?):\*\*\s*(?P<items>.+)$").expect("valid skill-line regex")
@@ -156,39 +158,57 @@ pub fn parse_skills(md: &str) -> Vec<(String, Vec<String>)> {
 }
 
 /// Reorders each skills line (items named in the job first) and appends
-/// ` Relevant to this role: X, Y.` (at most 4 skills) to the first line of `## SUMMARY`.
-/// It never adds a skill. Run `ensure_ready` first: `tailor` itself does not look for placeholders.
+/// ` Relevant to this role: X, Y.` (at most `MAX_RELEVANT_SKILLS` skills) to the first line of
+/// `## SUMMARY`. It never adds a skill. Run `ensure_ready` first: `tailor` itself does not look
+/// for placeholders.
 pub fn tailor(master_md: &str, job: &Job) -> String {
     let text = format!("{}\n{}", job.title, job.description).to_lowercase();
     let mut lines: Vec<String> = master_md.lines().map(str::to_string).collect();
+    let matched = reorder_skill_lines(&mut lines, &text);
+    append_relevant_sentence(&mut lines, &matched);
+    let mut out = lines.join("\n");
+    if master_md.ends_with('\n') {
+        out.push('\n');
+    }
+    out
+}
+
+/// Puts the items the job `text` (lowercased title and description) names first on each skills
+/// line, and returns the names of those items in file order.
+fn reorder_skill_lines(lines: &mut [String], text: &str) -> Vec<String> {
     let mut matched: Vec<String> = Vec::new();
-    if let Some((start, end)) = section_range(&lines, "TECHNICAL SKILLS") {
+    if let Some((start, end)) = section_range(lines, "TECHNICAL SKILLS") {
         for line in &mut lines[start..end] {
             let Some((label, items)) = parse_skill_line(line) else {
                 continue;
             };
             let (hit, rest): (Vec<String>, Vec<String>) = items
                 .into_iter()
-                .partition(|item| contains_term(&text, &item_name(item)));
+                .partition(|item| contains_term(text, &item_name(item)));
             matched.extend(hit.iter().map(|item| item_name(item)));
             let ordered: Vec<String> = hit.into_iter().chain(rest).collect();
             *line = format!("**{label}:** {}", ordered.join(", "));
         }
     }
+    matched
+}
+
+/// Appends the sentence naming the first `MAX_RELEVANT_SKILLS` matched skills to the first
+/// non-empty line of `## SUMMARY`. With no matched skill, or no summary, nothing changes.
+fn append_relevant_sentence(lines: &mut [String], matched: &[String]) {
     if !matched.is_empty()
-        && let Some((start, end)) = section_range(&lines, "SUMMARY")
+        && let Some((start, end)) = section_range(lines, "SUMMARY")
         && let Some(line) = lines[start..end]
             .iter_mut()
             .find(|line| !line.trim().is_empty())
     {
-        let names: Vec<&str> = matched.iter().take(4).map(String::as_str).collect();
+        let names: Vec<&str> = matched
+            .iter()
+            .take(MAX_RELEVANT_SKILLS)
+            .map(String::as_str)
+            .collect();
         *line = format!("{}{RELEVANT}{}.", line.trim_end(), names.join(", "));
     }
-    let mut out = lines.join("\n");
-    if master_md.ends_with('\n') {
-        out.push('\n');
-    }
-    out
 }
 
 /// The master with skills sorted and the appended sentence removed: two CVs with the same

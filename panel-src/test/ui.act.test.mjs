@@ -153,6 +153,26 @@ test("ui/act.js exports actButton, the one action button: a <button type=button 
   assert.deepEqual([seq.getAttribute("id"), seq.getAttribute("title"), seq.getAttribute("aria-label")], ["seq-prev", "t", "Anterior"], "id, title and aria-* go through");
 });
 
+test("ui/act.js exports setActLabel and setActKey: they write the verb and the key cap of an actButton in place, so a stop never reaches into the button's children", async () => {
+  const { actButton, setActLabel, setActKey } = await loadAct();
+  assert.equal(typeof setActLabel, "function", "src/ui/act.js does not export setActLabel");
+  assert.equal(typeof setActKey, "function", "src/ui/act.js does not export setActKey");
+  const b = actButton({ key: "", label: "" });
+  const [k, label] = b.children;
+  setActKey(b, "p");
+  setActLabel(b, "Parar");
+  assert.deepEqual([k.textContent, label.textContent], ["p", "Parar"], "the same two nodes, rewritten");
+  assert.deepEqual(b.children, [k, label], "no node is replaced");
+  const text = label.childNodes[0];
+  setActLabel(b, "Parar");
+  assert.equal(label.childNodes[0], text, "the same words write nothing (a refresh that changes nothing touches nothing)");
+  setActLabel(b, null);
+  assert.equal(label.textContent, "", "null is no words");
+  const keyless = actButton({ label: "Cerrar" });
+  assert.doesNotThrow(() => setActKey(keyless, "x"), "a button with no key cap has nothing to write");
+  assert.equal(keyless.textContent, "Cerrar");
+});
+
 // ---- 2
 
 test("ui/act.js exports outLink, a link with the exit icon after its words, and the drawer's modules draw no bare link", async () => {
@@ -177,14 +197,25 @@ test("ui/act.js exports outLink, a link with the exit icon after its words, and 
 
 // ---- 3
 
-// Per module: the <button>s built by hand that are not verbs and stay. COLA: the steps k and j, the two keys of the batch's confirmation and the retry of the
-// factors; APRENDER: "more", a topic and a grade; HOY: "more". Every other button of these modules is an actButton.
+// Per module: the <button>s built by hand that are not verbs and stay. COLA: the steps k and j of the proposal (the two keys of the batch's confirmation and
+// the retry of the factors are in the files of NO_VERBS below); APRENDER: "more", a topic and a grade; HOY: "more". Every other button of these modules is an actButton.
 const OTHER_BUTTONS = {
-  "src/moments/hoy/rows.js": 0, "src/moments/hoy/prompt.js": 0, "src/moments/hoy/render.js": 1,
-  "src/moments/aprender/render.js": 2, "src/moments/aprender/drillui.js": 1, "src/moments/cola/render.js": 5,
-  "src/moments/sistema/render.js": 0, "src/moments/procesos/drawer-content.js": 0,
+  "src/moments/shared/act-buttons.js": 0, "src/moments/hoy/prompt.js": 0, "src/moments/hoy/render.js": 1,
+  "src/moments/aprender/render.js": 2, "src/moments/aprender/drillui.js": 1, "src/moments/cola/prop.js": 2, "src/moments/cola/foot.js": 0,
+  "src/moments/sistema/engine-block.js": 0, "src/moments/sistema/errors-block.js": 0, "src/moments/procesos/drawer-content.js": 0,
   "src/ui/detail.js": 0, "src/ui/detail/mark.js": 0, "src/ui/detail/shot.js": 0, "src/ui/drawer.js": 0,
 };
+// Parts of COLA that draw no verb (so they have no actButton) and keep their by-hand buttons: the two keys of the lote's confirmation and the retry of the factors.
+const NO_VERBS = { "src/moments/cola/confirm.js": 2, "src/moments/cola/factors.js": 1 };
+test("the parts of COLA that draw no verb build by hand only the buttons they are expected to, and no actButton", () => {
+  const wrong = [];
+  for (const [f, n] of Object.entries(NO_VERBS)) {
+    const src = read(f);
+    const hand = (src.match(/\bh\(\s*["'`]button["'`]/g) || []).length;
+    if (/\bactButton\(/.test(src) || hand !== n) wrong.push(`${f}: ${hand} buttons by hand (expected ${n}), actButton ${/\bactButton\(/.test(src)}`);
+  }
+  assert.deepEqual(wrong, []);
+});
 test("every module that draws verbs imports and calls actButton, and builds by hand only the buttons that are not verbs", () => {
   const wrong = [];
   for (const [f, n] of Object.entries(OTHER_BUTTONS)) {

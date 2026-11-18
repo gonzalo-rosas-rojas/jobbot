@@ -1,10 +1,81 @@
-//! How jobbot starts Chromium. Every launch takes its options from here, so the sandbox, the
-//! deadline and the way out (`egress`) are set in one place.
+//! How jobbot starts Chromium. Every launch goes through `start` or `start_persistent` and takes
+//! its options from here, so the sandbox, the deadline and the way out (`egress`) are set in one
+//! place, and so is the refusal to start where the library would take the sandbox away.
 
+use std::path::Path;
+
+use anyhow::Context;
 use playwright_rs::protocol::ProxySettings;
-use playwright_rs::{BrowserContextOptions, LaunchOptions};
+use playwright_rs::{Browser, BrowserContext, BrowserContextOptions, LaunchOptions, Playwright};
 
 use crate::egress::Egress;
+
+/// The variables that make playwright-rs weaken Chromium on its own. Version 0.20.1, on Windows
+/// (`protocol/browser_type.rs`, "Windows CI stability flags"), adds `--no-sandbox`,
+/// `--disable-web-security` and `--disable-features=IsolateOrigins,site-per-process` to every
+/// launch when either is in the environment, whatever the options ask for. The renderer that
+/// parses strangers' pages would then run with every right the user has, and a page could read
+/// another site's answers.
+const WEAKENING_VARIABLES: [&str; 2] = ["CI", "GITHUB_ACTIONS"];
+
+fn in_the_environment(name: &str) -> bool {
+    std::env::var_os(name).is_some()
+}
+
+/// Fails where a Chromium started now would lose its sandbox to `WEAKENING_VARIABLES`.
+fn refuse_when_set(is_set: impl Fn(&str) -> bool) -> anyhow::Result<()> {
+    if !cfg!(windows) {
+        return Ok(());
+    }
+    match WEAKENING_VARIABLES.into_iter().find(|name| is_set(name)) {
+        Some(name) => anyhow::bail!(
+            "{name} is set, and with it playwright-rs starts Chromium with --no-sandbox and \
+             --disable-web-security on Windows whatever jobbot asks for: jobbot does not start \
+             Chromium like that. Remove {name} from the environment of this run."
+        ),
+        None => Ok(()),
+    }
+}
+
+/// Runs `launch` unless the refusal stands: a refused launch is never begun.
+async fn unless_weakened<T, Launching>(
+    is_set: impl Fn(&str) -> bool,
+    launch: impl FnOnce() -> Launching,
+) -> anyhow::Result<T>
+where
+    Launching: Future<Output = playwright_rs::Result<T>>,
+{
+    refuse_when_set(is_set)?;
+    launch().await.context(
+        "Chromium did not start (if it is not installed yet, playwright_rs::install_browsers installs it)",
+    )
+}
+
+/// Starts a Chromium with `options`, or refuses where the library would take its sandbox away.
+/// Public for the browser tests outside this crate, so that theirs starts the same way.
+pub async fn start(playwright: &Playwright, options: LaunchOptions) -> anyhow::Result<Browser> {
+    unless_weakened(in_the_environment, || {
+        playwright.chromium().launch_with_options(options)
+    })
+    .await
+}
+
+/// Starts a Chromium that keeps its profile in `profile_dir`, or refuses like `start`.
+pub(crate) async fn start_persistent(
+    playwright: &Playwright,
+    profile_dir: &Path,
+    options: BrowserContextOptions,
+) -> anyhow::Result<BrowserContext> {
+    unless_weakened(in_the_environment, || {
+        playwright
+            .chromium()
+            .launch_persistent_context_with_options(
+                profile_dir.to_string_lossy().into_owned(),
+                options,
+            )
+    })
+    .await
+}
 
 /// What a browser that opens strangers' pages adds to its launch, next to the proxy: Chromium makes
 /// no name lookup of its own (a name can only reach the proxy, at 127.0.0.1), WebRTC sends no UDP
@@ -68,6 +139,86 @@ mod tests {
     use crate::egress::SystemResolver;
     use playwright_rs::protocol::AcceptDownloads;
 
+    /// The two names playwright-rs 0.20.1 reads (`std::env::var("CI")` and
+    /// `std::env::var("GITHUB_ACTIONS")` in its `protocol/browser_type.rs`), as literals.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn with_ci_or_github_actions_set_the_launch_is_refused_by_name_and_never_begun() {
+        for name in ["CI", "GITHUB_ACTIONS"] {
+            let begun = std::cell::Cell::new(false);
+            let refusal = unless_weakened(
+                |asked| asked == name,
+                || async {
+                    begun.set(true);
+                    Ok(())
+                },
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+            assert!(!begun.get(), "the launch began with {name} set");
+            assert!(refusal.starts_with(&format!("{name} is set")), "{refusal}");
+            assert!(refusal.contains("--no-sandbox"), "{refusal}");
+        }
+    }
+
+    #[tokio::test]
+    async fn with_neither_set_the_launch_runs_and_its_own_failure_keeps_its_cause() {
+        let started = unless_weakened(|_| false, || async { Ok(7) }).await;
+        assert_eq!(started.unwrap(), 7);
+
+        let failed = unless_weakened(
+            |_| false,
+            || async { Err::<(), _>(playwright_rs::Error::Timeout("no browser".to_string())) },
+        )
+        .await
+        .unwrap_err();
+        let chain = format!("{failed:#}");
+        assert!(chain.starts_with("Chromium did not start"), "{chain}");
+        assert!(chain.contains("no browser"), "{chain}");
+    }
+
+    /// The refusal is in `start` and `start_persistent`; a launch written anywhere else in this
+    /// crate would skip it.
+    #[test]
+    fn chromium_is_launched_only_from_this_file() {
+        fn rust_files(dir: &Path, found: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir).expect("a source folder") {
+                let path = entry.expect("an entry").path();
+                if path.is_dir() {
+                    rust_files(&path, found);
+                } else if path.extension().is_some_and(|ext| ext == "rs") {
+                    found.push(path);
+                }
+            }
+        }
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        rust_files(&src, &mut files);
+        assert!(files.len() > 1, "no sources found under {}", src.display());
+        // Every launch starts from the library's `chromium()`; the two names are there for a
+        // launch written without it (`BrowserType::launch_with_options(..)`).
+        let calls = [
+            "chromium()",
+            "launch_with_options(",
+            "launch_persistent_context",
+        ];
+        let this_file = src.join("launch.rs");
+        let elsewhere: Vec<String> = files
+            .iter()
+            .filter(|path| **path != this_file)
+            .filter(|path| {
+                let text = std::fs::read_to_string(path).expect("a readable source");
+                calls.iter().any(|call| text.contains(call))
+            })
+            .map(|path| path.display().to_string())
+            .collect();
+        assert!(
+            elsewhere.is_empty(),
+            "Chromium launched outside launch.rs: {elsewhere:?}"
+        );
+    }
+
     #[test]
     fn a_plain_launch_asks_for_the_sandbox_and_a_deadline_and_no_proxy() {
         let plain = launch_options();
@@ -79,7 +230,7 @@ mod tests {
     #[tokio::test]
     async fn every_guarded_launch_goes_through_the_proxy() {
         let egress = Egress::start(Arc::new(SystemResolver)).await.unwrap();
-        let switches = Some(EGRESS_ARGS.map(String::from).to_vec());
+        let switches = Some(egress_args());
 
         let plain = guarded_launch_options(&egress);
         let proxy = plain.proxy.as_ref().expect("a proxy");
@@ -145,18 +296,11 @@ mod tests {
         // The filler's browser names its profile folder; the plain one carries a switch Chromium
         // ignores, so both can be found among the running processes.
         let profile = dir.path().join("profile");
-        let context = playwright
-            .chromium()
-            .launch_persistent_context_with_options(
-                profile.to_string_lossy().into_owned(),
-                persistent_options(false, &egress),
-            )
+        let context = start_persistent(&playwright, &profile, persistent_options(false, &egress))
             .await
             .unwrap();
         let marker = format!("--jobbot-test-marker={name}");
-        let browser = playwright
-            .chromium()
-            .launch_with_options(launch_options().args(vec![marker.clone()]))
+        let browser = start(&playwright, launch_options().args(vec![marker.clone()]))
             .await
             .unwrap();
 
@@ -184,24 +328,22 @@ mod tests {
         let playwright = playwright_rs::Playwright::launch().await.unwrap();
         let for_filler = Egress::start(Arc::new(SystemResolver)).await.unwrap();
         let for_inspector = Egress::start(Arc::new(SystemResolver)).await.unwrap();
-        let context = playwright
-            .chromium()
-            .launch_persistent_context_with_options(
-                dir.path().join("profile").to_string_lossy().into_owned(),
-                persistent_options(false, &for_filler),
-            )
-            .await
-            .unwrap();
-        let browser = playwright
-            .chromium()
-            .launch_with_options(guarded_launch_options(&for_inspector))
+        let context = start_persistent(
+            &playwright,
+            &dir.path().join("profile"),
+            persistent_options(false, &for_filler),
+        )
+        .await
+        .unwrap();
+        let browser = start(&playwright, guarded_launch_options(&for_inspector))
             .await
             .unwrap();
 
         // Each browser is found by its proxy's port, which only its own command line carries.
-        let port = |egress: &Egress| egress.server().trim_start_matches("http://").to_string();
-        let filler = chromium_command_lines(&port(&for_filler));
-        let inspector = chromium_command_lines(&port(&for_inspector));
+        let proxy_address =
+            |egress: &Egress| egress.server().trim_start_matches("http://").to_string();
+        let filler = chromium_command_lines(&proxy_address(&for_filler));
+        let inspector = chromium_command_lines(&proxy_address(&for_inspector));
         let _ = context.close().await;
         let _ = browser.close().await;
         for (which, lines) in [("persistent", &filler), ("plain", &inspector)] {

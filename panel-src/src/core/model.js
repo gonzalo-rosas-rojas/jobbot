@@ -4,27 +4,29 @@
 // Ported from the old page.
 
 import { t, tn } from "../i18n/index.js";
+import { HOUR_MS, SOON_HOURS } from "./time.js";
 import { countdown, daysSince, norm, escapeRegExp, reasonShort, reasonGroupTitle, stateLabel } from "./format.js";
 
 // The five stops every application goes through, left to right; ids only (the names are `stage.<id>`).
 export const STAGES = ["submitted", "replied", "technical_test", "interview", "offer"];
 export const LIVE = [...STAGES, "ghosted"];
 export const CLOSED = ["accepted", "rejected", "withdrawn"];
-export const SENT_STATES = ["submitted", "replied", "technical_test", "interview", "offer", "accepted", "rejected", "ghosted"];
+export const SENT_STATES = [...STAGES, "accepted", "rejected", "ghosted"];
 // The kinds of "needs Gonza", in the order they are shown; `approve` is the awaiting-approval list. `may_have_sent` (the form may
 // already have gone out) sits right after `blocked`: it is as visible as the other things that stopped the robot, and always
 // before the generic `other`. A kind that is not in this list is not in the queue at all, so a new kind of the server is added here.
 export const REASON_KINDS = ["approve", "handoff", "missing_answers", "blocked", "may_have_sent", "error", "manual_apply", "other"];
 // The five layers between a posting and a send (the story's); the names are `layer.<id>`.
 export const LAYERS = ["aviso", "puntaje", "cv", "respuestas", "compuerta"];
+// The layers a card can wait in, found by name so reordering LAYERS cannot leave a wrong number behind.
+const CV = LAYERS.indexOf("cv");
+const ANSWERS = LAYERS.indexOf("respuestas");
+const GATE = LAYERS.indexOf("compuerta");
 export const STALE_DAYS = 10;
-const SOON_HOURS = 48;
 // Actions and marks that cannot be undone: the button needs a second, deliberate click (see twoStep in dom.js). `resolve` is here because the server has no way
 // back from it: it clears the capture and the unconfirmed click before the next run fills the form again.
 export const PERMANENT_ACTIONS = ["approve", "confirm", "resolve"];
 export const PERMANENT_MARKS = ["withdrawn", "rejected", "accepted"];
-
-const HOUR = 3600000;
 
 // What each id of a candidate's `kindId` is (the label is T16's, by i18n): a task, a task that came from a technical-test or
 // an interview email, an offer, a proposal to approve, the reasons a posting needs Gonza (REASON_KINDS), and a follow-up.
@@ -93,10 +95,70 @@ function taskStub(task, nowMs) {
   const left = countdown(task, nowMs);
   const ms = Date.parse(task.due_at) - nowMs;
   if (task.overdue || ms < 0) return { big: t("ticket.stub.overdue"), small: true, sub: left.text };
-  const hours = Math.floor(ms / HOUR);
+  const hours = Math.floor(ms / HOUR_MS);
   if (hours < 1) return { big: t("ticket.stub.lessHour"), sub: left.text };
   if (hours < SOON_HOURS) return { big: t("ticket.stub.hours", { n: hours }), sub: left.text };
   return { big: t("ticket.stub.days", { n: Math.floor(hours / 24) }), sub: left.text };
+}
+
+const byDue = (a, b) => Date.parse(a.task.due_at) - Date.parse(b.task.due_at);
+const isSoon = (x, nowMs) => x.task.overdue || Date.parse(x.task.due_at) - nowMs < SOON_HOURS * HOUR_MS;
+
+function ofTask(item, nowMs) {
+  const { task, owner } = item;
+  const late = task.overdue || (task.due_at && Date.parse(task.due_at) < nowMs);
+  return Object.assign({ id: "task:" + task.id, tone: late ? "late" : "turn", kind: t("ticket.kind.task"), title: task.text, task,
+    why: owner ? owner.company + ": " + stateLabel(owner.state) : null,
+    open: owner ? owner.key : null, link: task.link,
+    kindId: TASK_KIND[task.kind] || "task", company: owner ? owner.company : null, role: owner ? owner.title : null }, taskStub(task, nowMs));
+}
+
+const ofCard = (c, { kind, tone, big = null, sub = null, why, small, kindId }) => ({
+  id: "card:" + c.key, tone, kind, big, sub, small, title: c.company + " — " + c.title, key: c.key,
+  why: why || reasonShort(c), actions: c.actions, link: c.url,
+  kindId, company: c.company, role: c.title,
+});
+
+const datedTasks = (built) => built.tasks.filter((x) => x.task.due_at).sort(byDue);
+
+// The groups of the queue, one function each, in the order candidates() lays them out.
+
+const soonTasks = (built) => datedTasks(built).filter((x) => isSoon(x, built.nowMs)).map((x) => ofTask(x, built.nowMs));
+
+function offersWithoutTask(built) {
+  return built.procs
+    .filter((p) => p.card.state === "offer" && !p.task)
+    .map((p) => Object.assign(ofCard(p.card, { kind: t("ticket.kind.offer"), tone: "turn", big: t("ticket.stub.offer"), sub: t("ticket.stub.decide"), why: t("ticket.why.offer"), small: true, kindId: "offer" }), { extra: true }));
+}
+
+const approvals = (s) => s.awaiting_approval.cards.map((c) => ofCard(c, { kind: t("ticket.kind.approve"), tone: "approve", why: reasonShort(c) || t("ticket.why.approve"), kindId: "approve" }));
+
+function reasonGroups(s) {
+  const out = [];
+  for (const kind of REASON_KINDS) {
+    if (kind === "approve") continue;
+    // legacy quirk: a reason kind the page does not know belongs to no group, so it is not in the queue (nor in Hoy's list)
+    for (const c of s.needs_gonza.cards.filter((x) => (x.reason_kind || "other") === kind)) {
+      out.push(ofCard(c, { kind: reasonGroupTitle(kind), tone: "turn", why: reasonShort(c), kindId: kind }));
+    }
+  }
+  return out;
+}
+
+const laterTasks = (built) => datedTasks(built).filter((x) => !isSoon(x, built.nowMs)).map((x) => ofTask(x, built.nowMs));
+
+const undatedTasks = (built) => built.tasks.filter((x) => !x.task.due_at).map((x) => ofTask(x, built.nowMs));
+
+function followUps(built) {
+  const out = [];
+  for (const p of built.procs) {
+    if (p.task || p.card.state === "offer") continue;
+    if (p.turn === "check" || p.stale) {
+      const why = p.card.state === "ghosted" ? t("ticket.why.ghosted") : p.stale ? tn("ticket.why.stale", p.days) : t("ticket.why.nextstep");
+      out.push(Object.assign(ofCard(p.card, { kind: t("ticket.kind.followup"), tone: "turn", big: t("ticket.stub.days", { n: p.days }), sub: t("ticket.stub.silent"), why, kindId: "followup" }), { extra: true }));
+    }
+  }
+  return out;
 }
 
 /**
@@ -107,51 +169,17 @@ function taskStub(task, nowMs) {
  * (an offer or a follow-up with no task), which turnCount adds. `kindId` is one of KIND_IDS; `company` and `role` are
  * null for a task nobody owns.
  */
-export function candidates(m) {
-  const s = m.snap;
-  const byDue = (a, b) => Date.parse(a.task.due_at) - Date.parse(b.task.due_at);
-  const dated = m.tasks.filter((x) => x.task.due_at).sort(byDue);
-  const soon = (x) => x.task.overdue || Date.parse(x.task.due_at) - m.nowMs < SOON_HOURS * HOUR;
-  const out = [];
-  const ofTask = (item) => {
-    const { task, owner } = item;
-    const late = task.overdue || (task.due_at && Date.parse(task.due_at) < m.nowMs);
-    return Object.assign({ id: "task:" + task.id, tone: late ? "late" : "turn", kind: t("ticket.kind.task"), title: task.text, task,
-      why: owner ? owner.company + ": " + stateLabel(owner.state) : null,
-      open: owner ? owner.key : null, link: task.link,
-      kindId: TASK_KIND[task.kind] || "task", company: owner ? owner.company : null, role: owner ? owner.title : null }, taskStub(task, m.nowMs));
-  };
-  const ofCard = (c, kind, tone, big, sub, why, small, kindId) => ({
-    id: "card:" + c.key, tone, kind, big, sub, small, title: c.company + " — " + c.title, key: c.key,
-    why: why || reasonShort(c), actions: c.actions, link: c.url,
-    kindId, company: c.company, role: c.title,
-  });
-  dated.filter(soon).forEach((x) => out.push(ofTask(x)));
-  for (const p of m.procs) {
-    if (p.card.state === "offer" && !p.task) {
-      out.push(Object.assign(ofCard(p.card, t("ticket.kind.offer"), "turn", t("ticket.stub.offer"), t("ticket.stub.decide"), t("ticket.why.offer"), true, "offer"), { extra: true }));
-    }
-  }
-  for (const c of s.awaiting_approval.cards) {
-    out.push(ofCard(c, t("ticket.kind.approve"), "approve", null, null, reasonShort(c) || t("ticket.why.approve"), undefined, "approve"));
-  }
-  for (const kind of REASON_KINDS) {
-    if (kind === "approve") continue;
-    // legacy quirk: a reason kind the page does not know belongs to no group, so it is not in the queue (nor in Hoy's list)
-    for (const c of s.needs_gonza.cards.filter((x) => (x.reason_kind || "other") === kind)) {
-      out.push(ofCard(c, reasonGroupTitle(kind), "turn", null, null, reasonShort(c), undefined, kind));
-    }
-  }
-  dated.filter((x) => !soon(x)).forEach((x) => out.push(ofTask(x)));
-  m.tasks.filter((x) => !x.task.due_at).forEach((x) => out.push(ofTask(x)));
-  for (const p of m.procs) {
-    if (p.task || p.card.state === "offer") continue;
-    if (p.turn === "check" || p.stale) {
-      const why = p.card.state === "ghosted" ? t("ticket.why.ghosted") : p.stale ? tn("ticket.why.stale", p.days) : t("ticket.why.nextstep");
-      out.push(Object.assign(ofCard(p.card, t("ticket.kind.followup"), "turn", t("ticket.stub.days", { n: p.days }), t("ticket.stub.silent"), why, undefined, "followup"), { extra: true }));
-    }
-  }
-  return out;
+export function candidates(built) {
+  const s = built.snap;
+  return [
+    ...soonTasks(built),
+    ...offersWithoutTask(built),
+    ...approvals(s),
+    ...reasonGroups(s),
+    ...laterTasks(built),
+    ...undatedTasks(built),
+    ...followUps(built),
+  ];
 }
 
 /**
@@ -159,9 +187,9 @@ export function candidates(m) {
  * follow-ups that have no task and are only in the ticket queue. It is the number in the nav, the tab title and the
  * favicon.
  */
-export function turnCount(m) {
-  const s = m.snap;
-  const extra = candidates(m).filter((c) => c.extra).length;
+export function turnCount(built) {
+  const s = built.snap;
+  const extra = candidates(built).filter((c) => c.extra).length;
   return s.today.tasks_total + s.awaiting_approval.total + s.needs_gonza.total + extra;
 }
 
@@ -193,8 +221,8 @@ export function nightFigures(snap) {
  * What the bar of stops shows next to each name: the live processes (the five stages and the quiet ones, not what has not
  * been sent), the proposals awaiting approval, the drills due, and the engine's state as "recent", "stale" or "never".
  */
-export function stopCounts(m) {
-  const s = (m && m.snap) || {};          // before the first snapshot the bar draws zeros
+export function stopCounts(built) {
+  const s = (built && built.snap) || {};          // before the first snapshot the bar draws zeros
   return {
     procesos: LIVE.reduce((n, state) => n + whole(countOf(s, state)), 0),
     cola: whole(s.awaiting_approval && s.awaiting_approval.total),
@@ -212,19 +240,26 @@ export function stopCounts(m) {
  */
 export function layerOf(c) {
   if (SENT_STATES.includes(c.state)) return { at: LAYERS.length, who: "done", text: "" };
-  if (c.state === "scored") return { at: 2, who: "robot", text: t("layer.note.scored") };
+  if (c.state === "scored") return { at: CV, who: "robot", text: t("layer.note.scored") };
   if (c.state === "prepared") {
     // "approve" is offered exactly while a dry-run capture waits for Gonza
-    if (c.approved) return { at: 4, who: "robot", text: t("layer.note.approved") };
-    if (c.actions.includes("approve")) return { at: 4, who: "you", text: t("layer.note.awaiting") };
-    return { at: 3, who: "robot", text: t("layer.note.dryrun") };
+    if (c.approved) return { at: GATE, who: "robot", text: t("layer.note.approved") };
+    if (c.actions.includes("approve")) return { at: GATE, who: "you", text: t("layer.note.awaiting") };
+    return { at: ANSWERS, who: "robot", text: t("layer.note.dryrun") };
   }
   if (c.state === "needs_gonza") {
     const kind = c.reason_kind || "other";
-    const at = kind === "missing_answers" || kind === "blocked" || kind === "error" ? 3 : 4;
+    const at = kind === "missing_answers" || kind === "blocked" || kind === "error" ? ANSWERS : GATE;
     return { at, who: "you", text: reasonShort(c) || t("layer.note.look") };
   }
   return { at: -1, who: "closed", text: "" };
+}
+
+// The class of dot `i` on the path of a layer `l`: done before it, "here" on it (marked when it waits for Gonza), empty after.
+function dotClass(i, l) {
+  if (i < l.at) return "done";
+  if (i > l.at) return "";
+  return l.who === "you" ? "here you" : "here";
 }
 
 /**
@@ -237,6 +272,6 @@ export function pathOf(c) {
   const id = LAYERS[l.at];
   return {
     at: l.at, who: l.who, id, name: t("layer." + id), text: l.text,
-    dots: LAYERS.map((_, i) => (i < l.at ? "done" : i === l.at ? (l.who === "you" ? "here you" : "here") : "")),
+    dots: LAYERS.map((_, i) => dotClass(i, l)),
   };
 }

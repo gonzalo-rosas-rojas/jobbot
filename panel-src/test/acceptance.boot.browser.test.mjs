@@ -131,10 +131,10 @@ test("A4: every asset the panel ships has its row in THIRD_PARTY_NOTICES.md with
 const CSP_SPEC = ["default-src 'none'", "script-src 'nonce-X'", "style-src 'nonce-X'", "connect-src 'self'", "img-src 'self' blob:", "font-src 'self'", "base-uri 'none'", "form-action 'none'", "frame-ancestors 'none'", "require-trusted-types-for 'script'"];
 
 test("A5: the CSP of / is exactly the one of spec 9.6 (the page's and Rust's), no script or style lacks the nonce, and every url( is an own asset or a fragment", async () => {
-  // Rust's: the format string in crates/jobbot-panel/src/http.rs, joined (the Rust string breaks its lines with a backslash)
-  const rs = readFileSync(path.join(repo, "crates", "jobbot-panel", "src", "http.rs"), "utf8");
+  // Rust's: the format string in crates/jobbot-panel/src/http/page.rs, joined (the Rust string breaks its lines with a backslash)
+  const rs = readFileSync(path.join(repo, "crates", "jobbot-panel", "src", "http", "page.rs"), "utf8");
   const at = rs.indexOf("\"default-src 'none'; script-src 'nonce-{nonce}'");
-  assert.ok(at > 0, "the CSP of Rust is in crates/jobbot-panel/src/http.rs");
+  assert.ok(at > 0, "the CSP of Rust is in crates/jobbot-panel/src/http/page.rs");
   const literal = rs.slice(at + 1, rs.indexOf("\"", at + 1)).replace(/\\\r?\n\s*/g, "");
   assert.equal(literal.replaceAll("{nonce}", "X"), CSP_SPEC.join("; "), "Rust's header is the spec's, directive by directive");
   const t = await openPage({ query: "?debug=1&clock=9", width: 1440, height: 900 });

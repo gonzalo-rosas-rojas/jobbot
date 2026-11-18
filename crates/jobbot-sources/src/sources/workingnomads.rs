@@ -13,7 +13,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::Source;
-use super::base::{failure, get_json, parse_iso, skipped_error, str_field};
+use super::base::{get_json, parse_all, parse_iso, record, str_field, with_labeled_lines};
 use jobbot_domain::models::{FetchResult, Job};
 use jobbot_domain::text::html_to_text;
 
@@ -75,15 +75,10 @@ impl WorkingNomadsSource {
         let url = format!("{}/api/exposed_jobs/", self.base_url);
         let body = get_json(&self.http, &url, &[]).await?;
         let items = body.as_array().context("response is not a JSON array")?;
-        let mut jobs = Vec::new();
-        let mut skipped = 0;
-        for item in items.iter().filter(|item| self.keeps(item)) {
-            match parse_job(item) {
-                Some(job) => jobs.push(job),
-                None => skipped += 1,
-            }
-        }
-        Ok((jobs, skipped))
+        Ok(parse_all(
+            items.iter().filter(|item| self.keeps(item)),
+            parse_job,
+        ))
     }
 }
 
@@ -95,17 +90,7 @@ impl Source for WorkingNomadsSource {
 
     async fn fetch(&self) -> FetchResult {
         let mut result = FetchResult::default();
-        match self.fetch_feed().await {
-            Ok((jobs, skipped)) => {
-                result.jobs = jobs;
-                if skipped > 0 {
-                    result
-                        .errors
-                        .push(skipped_error("workingnomads", "api", skipped));
-                }
-            }
-            Err(error) => result.errors.push(failure("workingnomads", "api", &error)),
-        }
+        record(&mut result, "workingnomads", "api", self.fetch_feed().await);
         result
     }
 }
@@ -124,15 +109,13 @@ fn parse_job(item: &Value) -> Option<Job> {
     if title.is_empty() {
         return None;
     }
-    let mut description = html_to_text(str_field(item, "description"));
-    for (label, value) in [
-        ("Category", str_field(item, "category_name")),
-        ("Tags", str_field(item, "tags")),
-    ] {
-        if !value.is_empty() {
-            description = format!("{description}\n{label}: {value}");
-        }
-    }
+    let description = with_labeled_lines(
+        html_to_text(str_field(item, "description")),
+        &[
+            ("Category", str_field(item, "category_name")),
+            ("Tags", str_field(item, "tags")),
+        ],
+    );
     Some(Job {
         source: "workingnomads".to_string(),
         external_id: external_id.to_string(),
@@ -219,6 +202,10 @@ mod tests {
         assert!(
             parse_job(&json!({"title": "Dev", "url": "https://www.workingnomads.com/"})).is_none()
         );
+    }
+
+    #[test]
+    fn a_numbered_redirect_link_is_a_job() {
         assert!(parse_job(&json!({"title": "Dev", "url": "https://x.test/job/go/12/"})).is_some());
     }
 
@@ -257,8 +244,12 @@ mod tests {
         assert_eq!(result.jobs.len(), 5);
     }
 
+    fn source_for(base_url: String) -> WorkingNomadsSource {
+        WorkingNomadsSource::new(reqwest::Client::new()).with_base_url(base_url)
+    }
+
     #[tokio::test]
-    async fn fetch_records_skipped_postings_and_failures() {
+    async fn fetch_records_skipped_postings() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/api/exposed_jobs/"))
@@ -268,25 +259,22 @@ mod tests {
             ])))
             .mount(&server)
             .await;
-        let result = WorkingNomadsSource::new(reqwest::Client::new())
-            .with_base_url(server.uri())
-            .fetch()
-            .await;
+        let result = source_for(server.uri()).fetch().await;
         assert_eq!(result.jobs.len(), 1);
         assert_eq!(
             result.errors,
             vec![FetchError::skipped("workingnomads", "api", 1)]
         );
+    }
 
+    #[tokio::test]
+    async fn fetch_records_a_body_that_is_not_json() {
         let blocked = MockServer::start().await;
         Mock::given(method("GET"))
             .respond_with(ResponseTemplate::new(200).set_body_string("<html>blocked</html>"))
             .mount(&blocked)
             .await;
-        let result = WorkingNomadsSource::new(reqwest::Client::new())
-            .with_base_url(blocked.uri())
-            .fetch()
-            .await;
+        let result = source_for(blocked.uri()).fetch().await;
         assert!(result.jobs.is_empty());
         assert!(
             result.errors[0]

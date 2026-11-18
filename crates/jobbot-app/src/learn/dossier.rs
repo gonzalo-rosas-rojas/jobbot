@@ -26,6 +26,18 @@ const MAX_POSTING_CHARS: usize = 12_000;
 const MAX_QUESTIONS: usize = 10;
 const MAX_STORIES: usize = 3;
 const MAX_GAPS: usize = 5;
+// Cuts of the text Claude writes (and of the posting's fields), in characters (see `clean`).
+const MAX_QUESTION_CHARS: usize = 400;
+const MAX_WHY_CHARS: usize = 400;
+const MAX_STORY_TITLE_CHARS: usize = 120;
+const MAX_EVIDENCE_CHARS: usize = 400;
+const MAX_STORY_CHARS: usize = 1200;
+const MAX_GAP_QUESTION_CHARS: usize = 400;
+const MAX_GAP_ANSWER_CHARS: usize = 1500;
+const MAX_SUMMARY_CHARS: usize = 1200;
+/// The company, title and place of the posting, in the prompt and in the Markdown.
+const MAX_POSTING_FIELD_CHARS: usize = 200;
+const MAX_URL_CHARS: usize = 300;
 
 pub const DOSSIER_SYSTEM: &str = "You prepare an interview dossier for one job candidate. \
 Use ONLY the job posting and the CV that the user message contains. Never invent facts about \
@@ -72,9 +84,9 @@ pub fn build_dossier_prompt(job: &Job, cv_md: &str) -> String {
          4. gaps: 3 to 5 topics the posting asks for that the CV does not show. `topic` is lowercase kebab-case \
          (for example kubernetes), `question` an interview question on it, `answer` a reference answer of at most 150 words.\n\
          Write in English.",
-        posting(&job.company, 200),
-        posting(&job.title, 200),
-        posting(&job.location, 200),
+        posting(&job.company, MAX_POSTING_FIELD_CHARS),
+        posting(&job.title, MAX_POSTING_FIELD_CHARS),
+        posting(&job.location, MAX_POSTING_FIELD_CHARS),
         posting(&job.description, MAX_POSTING_CHARS),
         cv_md.trim()
     )
@@ -152,7 +164,12 @@ pub fn assemble(raw: RawDossier, cv_md: &str) -> Dossier {
     let questions = raw
         .likely_questions
         .into_iter()
-        .map(|q| (clean(&q.question, 400), clean(&q.why, 400)))
+        .map(|q| {
+            (
+                clean(&q.question, MAX_QUESTION_CHARS),
+                clean(&q.why, MAX_WHY_CHARS),
+            )
+        })
         .filter(|(question, _)| !question.is_empty())
         .take(MAX_QUESTIONS)
         .collect();
@@ -163,9 +180,9 @@ pub fn assemble(raw: RawDossier, cv_md: &str) -> Dossier {
             dropped_stories += 1;
         } else if stories.len() < MAX_STORIES {
             stories.push(Story {
-                title: clean(&s.title, 120),
-                evidence: clean(&s.evidence, 400),
-                story: clean(&s.story, 1200),
+                title: clean(&s.title, MAX_STORY_TITLE_CHARS),
+                evidence: clean(&s.evidence, MAX_EVIDENCE_CHARS),
+                story: clean(&s.story, MAX_STORY_CHARS),
             });
         }
     }
@@ -178,14 +195,14 @@ pub fn assemble(raw: RawDossier, cv_md: &str) -> Dossier {
             } else {
                 slug(&g.topic)
             },
-            question: clean(&g.question, 400),
-            answer: clean(&g.answer, 1500),
+            question: clean(&g.question, MAX_GAP_QUESTION_CHARS),
+            answer: clean(&g.answer, MAX_GAP_ANSWER_CHARS),
         })
         .filter(|g| !g.question.is_empty() && !g.answer.is_empty())
         .take(MAX_GAPS)
         .collect();
     Dossier {
-        summary: clean(&raw.company_summary, 1200),
+        summary: clean(&raw.company_summary, MAX_SUMMARY_CHARS),
         questions,
         stories,
         dropped_stories,
@@ -199,10 +216,10 @@ pub fn render_markdown(job: &Job, d: &Dossier, now: DateTime<Utc>) -> String {
     let line = |text: &str, max_chars| clean(&plain_line(text), max_chars);
     let mut md = format!(
         "# Dossier — {} · {}\n\nGenerado el {} (hora de Santiago) · aviso: {}\n\n",
-        line(&job.company, 200),
-        line(&job.title, 200),
+        line(&job.company, MAX_POSTING_FIELD_CHARS),
+        line(&job.title, MAX_POSTING_FIELD_CHARS),
         now.with_timezone(&Santiago).format("%Y-%m-%d"),
-        line(&job.url, 300)
+        line(&job.url, MAX_URL_CHARS)
     );
     md.push_str("## Qué dice el aviso de la empresa\n\n");
     md.push_str(if d.summary.is_empty() {
@@ -369,27 +386,23 @@ mod tests {
         let partial = PathBuf::from(partial);
         std::fs::write(&partial, "# Dossier trunc").unwrap();
         assert!(!path.exists(), "a crashed write is not the done mark");
-        write_whole(
-            &path,
-            "# Dossier complete
-",
-        )
-        .unwrap();
-        assert_eq!(
-            std::fs::read_to_string(&path).unwrap(),
-            "# Dossier complete
-"
-        );
+        const COMPLETE_TEXT: &str = "# Dossier complete\n";
+        write_whole(&path, COMPLETE_TEXT).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), COMPLETE_TEXT);
         assert!(!partial.exists());
     }
 
     #[test]
-    fn counts_are_capped_and_missing_lists_are_empty() {
+    fn questions_are_capped_at_ten() {
         let many: Vec<_> = (0..30)
             .map(|i| json!({"question": format!("q{i}"), "why": "w"}))
             .collect();
         let d = assemble(raw(json!({"likely_questions": many})), SAMPLE_CV);
         assert_eq!(d.questions.len(), 10);
+    }
+
+    #[test]
+    fn missing_lists_are_empty() {
         let empty = assemble(raw(json!({})), SAMPLE_CV);
         assert!(empty.questions.is_empty() && empty.stories.is_empty() && empty.gaps.is_empty());
     }

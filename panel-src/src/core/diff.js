@@ -10,10 +10,11 @@ import { kindLabel, stateLabel } from "./format.js";
 
 export const mailId = (mail) => mail.received_at + "|" + mail.subject;
 
-const nothing = () => ({ fresh: new Set(), lines: [], big: false });
+/** The news of a picture that brought none. */
+export const emptyNews = () => ({ fresh: new Set(), lines: [], big: false });
 
 export function diffSnapshots(prev, next) {
-  const out = nothing();
+  const out = emptyNews();
   if (!prev) return out;
   const seenMail = new Set(prev.today.emails.map(mailId));
   const seenTask = new Set(prev.today.tasks.map((x) => x.id));
@@ -59,7 +60,7 @@ export function holdVisit() {
 
 /** On the first picture of a visit: what happened since the last time the page was open (the visit held at boot, when boot held one). */
 export function sinceLastVisit(snap, last = held ?? lastVisit()) {
-  const out = nothing();
+  const out = emptyNews();
   if (!(last > 0)) return out;
   for (const mail of snap.today.emails) if (Date.parse(mail.received_at) > last) out.fresh.add("mail:" + mailId(mail));
   for (const col of snap.board) {

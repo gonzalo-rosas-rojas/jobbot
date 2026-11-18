@@ -402,6 +402,7 @@
     "tasks_total": 0,
     "tasks": [],
     "emails_total": 0,
+    "inbox": { "imported_at": "2026-10-07T13:00:00Z", "waiting": 0 },
     "emails": []
   },
   "needs_gonza": {

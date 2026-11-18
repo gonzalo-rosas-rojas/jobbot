@@ -181,6 +181,28 @@ for (const [w, h] of SIZES) {
   });
 }
 
+test("opened while the data is still on its way, it finds the application as soon as the snapshot is in, without being closed", async () => {
+  const t = await openPage({ query: "?debug=1&clock=9&lang=es&lag=3000", width: 1440, height: 900, wait: false });   // long enough for the palette to be open and typed in before the data, on a busy machine too
+  try {
+    await t.page.waitFor(`!!document.querySelector(".hud-search")`);
+    await open(t);
+    await type(t, "kestrel");
+    let v = await view(t);
+    assert.equal(await ev(t, `document.getElementById("app").getAttribute("aria-busy")`), "true", "the page is still loading");
+    assert.equal(v.options.length, 0, "no application is known yet");
+    await t.page.waitFor(`[...document.querySelectorAll("#palette-list [role=option]")].some((o) => /kestrel/i.test(o.textContent))`, { timeout: 10000 });
+    v = await view(t);
+    assert.equal(v.combo.value, "kestrel", "what he typed is still there");
+    assert.equal(v.options[0].label, "Kestrel Labs");
+    assert.equal(v.empty, null, "and it no longer says that nothing matches");
+    assert.equal(await ev(t, `document.activeElement === document.getElementById("palette-input")`), true, "the keyboard is still in the field");
+    await press(t, "Enter");
+    await closed(t);
+    await t.page.waitFor(`document.getElementById("detail").classList.contains("open") && /kestrel/i.test(document.querySelector("#detail h2")?.textContent || "")`);
+    assert.deepEqual(t.page.problems(), []);
+  } finally { await t.close(); }
+});
+
 test("390: from the prologue or SISTEMA an application opens on PROCESOS, where the applications live", async () => {
   const t = await openPage({ query: "?debug=1&clock=9&lang=es", width: 390, height: 844 });
   try {

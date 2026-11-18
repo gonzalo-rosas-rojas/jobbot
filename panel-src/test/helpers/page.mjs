@@ -61,8 +61,14 @@ async function intercept(page, answer, log) {
   });
 }
 
+// The page a person could use: the moment is drawn AND the first snapshot is in. The moment's heading exists from the start, under the loading
+// state, so the heading alone let a test act some 50 ms before the data: the palette had no applications to find yet, and the stops, wider once
+// they have their counts, moved from under a click at 390 px. Both failed about one run in four.
+const READY = `!!document.querySelector("#app h1") && document.getElementById("app").getAttribute("aria-busy") !== "true"`;
+
 /**
  * Opens the page in a window of `width` x `height`. `kind`: "demo" or "real" (then `answer` serves /api/*). `media`: { reducedMotion, dark }.
+ * `wait` (the default) returns once the page has its first snapshot, or says it could not get one; `wait: false` returns as soon as it is asked for.
  * Returns { page, url, requests (every address the page asked for), api (what the page asked of /api/*), close() }.
  */
 export async function openPage({ kind = "demo", query = "", width = 1920, height = 1080, media = null, answer = null, wait = true } = {}) {
@@ -82,7 +88,7 @@ export async function openPage({ kind = "demo", query = "", width = 1920, height
     if (answer) await intercept(page, answer, api);
     const url = `http://127.0.0.1:${srv.port}/${file}${query}`;
     await page.goto(url);
-    if (wait) await page.waitFor(`!!document.querySelector("#app h1")`, { timeout: 10000 });
+    if (wait) await page.waitFor(READY, { timeout: 10000 });
     return { page, url, port: srv.port, launchId: srv.launchId, requests, api, close: async () => { await browser.close(); srv.close(); } };
   } catch (e) {
     await browser?.close();

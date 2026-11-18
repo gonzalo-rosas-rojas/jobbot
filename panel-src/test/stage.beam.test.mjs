@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { recorder } from "./helpers/canvas.mjs";
-import { FREE_MIN, FADE_PX, BODY_HOURS, bodyKind, clipPolygon, polygonHitsRect, coneOf, beamFor, drawBeam, fadeWidth } from "../src/stage/beam.js";
+import { FREE_MIN, FADE_PX, BODY_HOURS, bodyKind, clipPolygon, coneOf, beamFor, drawBeam, fadeWidth } from "../src/stage/beam.js";
+import { polygonHitsRect } from "./helpers/polygon.mjs";
 import { createSkyline } from "../src/stage/skyline.js";
 import { skyAt } from "../src/stage/sky.js";
 import { layoutOf } from "../src/stage/dial.js";
@@ -126,8 +127,8 @@ test("no beam when the free part of the screen is narrower than 120 px, when the
 test("drawBeam clips the canvas at the sheet's edge before painting, lights additively, and balances save and restore", () => {
   const withCore = recorder(), noCore = recorder();
   const beam = { x: 1600, y: 600, ang: 3.0, len: 500, wid: 300, color: [255, 186, 120], a: 0.5, core: 14, coreColor: [255, 240, 205] };
-  drawBeam(withCore.ctx, beam, 1177);
-  drawBeam(noCore.ctx, { ...beam, core: 0 }, 0);
+  drawBeam(withCore.ctx, beam, { clipLeft: 1177 });
+  drawBeam(noCore.ctx, { ...beam, core: 0 });
   const names = withCore.calls.map((c) => c[0]);
   const clip = names.indexOf("clip");
   assert.ok(clip > 0 && names.indexOf("rect") < clip && names.indexOf("rect") >= 0);
@@ -154,7 +155,7 @@ test("drawBeam paints the first pixels past the sheet on a layer of its own, ram
   const main = recorder(), layer = recorder();
   const asked = [];
   const beam = { x: 1600, y: 600, ang: 3.0, len: 500, wid: 300, color: [255, 186, 120], a: 0.5, core: 14, coreColor: [255, 240, 205] };
-  drawBeam(main.ctx, beam, 1177, (w, h) => { asked.push([w, h]); return { g: layer.ctx, image: "the layer" }; });
+  drawBeam(main.ctx, beam, { clipLeft: 1177, layer: (w, h) => { asked.push([w, h]); return { g: layer.ctx, image: "the layer" }; } });
   assert.equal(asked.length, 1);
   assert.equal(asked[0][0], 72, "the layer is the fade's width");
   const clip = main.calls.find((c) => c[0] === "rect");
@@ -175,24 +176,24 @@ test("drawBeam paints the first pixels past the sheet on a layer of its own, ram
 test("a layer that cannot be made, or no sheet, cuts the beam at the edge as before; a source on the edge needs no layer", () => {
   const beam = { x: 1600, y: 600, ang: 3.0, len: 500, wid: 300, color: [255, 186, 120], a: 0.5 };
   const none = recorder();
-  drawBeam(none.ctx, beam, 1177, () => null);
+  drawBeam(none.ctx, beam, { clipLeft: 1177, layer: () => null });
   assert.equal(none.calls.find((c) => c[0] === "rect")[1], 1177);
   assert.equal(none.count("drawImage"), 0);
   let asked = 0;
   const edge = recorder();
-  drawBeam(edge.ctx, { ...beam, x: 1178 }, 1177, () => { asked++; return null; });
-  drawBeam(recorder().ctx, beam, 0, () => { asked++; return null; });
+  drawBeam(edge.ctx, { ...beam, x: 1178 }, { clipLeft: 1177, layer: () => { asked++; return null; } });
+  drawBeam(recorder().ctx, beam, { clipLeft: 0, layer: () => { asked++; return null; } });
   assert.equal(asked, 0);
 });
 
 test("the two parts of a light can be painted apart: the wide glow first, the rays and the sun's core on their own", () => {
   const beam = { x: 1600, y: 600, ang: 3.0, len: 500, wid: 300, color: [255, 186, 120], a: 0.5, core: 14, coreColor: [255, 240, 205] };
-  const [all, bloom, rays] = [undefined, "bloom", "rays"].map((part) => { const r = recorder(); drawBeam(r.ctx, { ...beam, part }, 0); return r; });
+  const [all, bloom, rays] = [undefined, "bloom", "rays"].map((part) => { const r = recorder(); drawBeam(r.ctx, { ...beam, part }); return r; });
   assert.equal(all.count("createRadialGradient"), 10);
   assert.equal(bloom.count("createRadialGradient"), 3, "three layered ellipses");
   assert.equal(rays.count("createRadialGradient"), 7, "three rays and the four discs of the core");
   const noCore = recorder();
-  drawBeam(noCore.ctx, { ...beam, core: 0, part: "rays" }, 0);
+  drawBeam(noCore.ctx, { ...beam, core: 0, part: "rays" });
   assert.equal(noCore.count("createRadialGradient"), 3);
   assert.equal(bloom.count("save"), bloom.count("restore"));
 });
@@ -211,7 +212,7 @@ test("the drawer is a hole in the light: the canvas is clipped outside its recta
   const beam = { x: 1600, y: 600, ang: 3.0, len: 500, wid: 300, color: [255, 186, 120], a: 0.5, core: 14, coreColor: [255, 240, 205] };
   const holes = [{ left: 1300, top: 78, right: 1700, bottom: 1040 }];
   const main = recorder(), layer = recorder();
-  drawBeam(main.ctx, beam, 1177, (w, h) => ({ g: layer.ctx, image: "the layer" }), holes);
+  drawBeam(main.ctx, beam, { clipLeft: 1177, layer: (w, h) => ({ g: layer.ctx, image: "the layer" }), holes });
   const clips = main.calls.map((c, i) => [c, i]).filter(([c]) => c[0] === "clip");
   assert.equal(clips.length, 3, "the sheet's edge, the hole before the canvas is painted, and the hole again before the fade strip is added");
   assert.deepEqual(main.calls[clips[1][1] - 1], ["rect", 1300, 78, 400, 962], "the hole is a rectangle of the clip path");
@@ -222,7 +223,7 @@ test("the drawer is a hole in the light: the canvas is clipped outside its recta
   assert.ok(clips[2][1] < draw, "before it is drawn");
   assert.equal(main.count("save"), main.count("restore"));
   const plain = recorder();
-  drawBeam(plain.ctx, beam, 1177, () => null);
+  drawBeam(plain.ctx, beam, { clipLeft: 1177, layer: () => null });
   assert.equal(plain.count("clip"), 1, "with no hole nothing changes");
 });
 

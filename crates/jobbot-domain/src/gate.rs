@@ -42,6 +42,15 @@ pub const LISTING_ONLY_HOSTS: &[&str] = &[
     "icims.com",
 ];
 
+/// The gate's reason for a host the bot never submits on (`MANUAL_ONLY_HOSTS`).
+pub const REASON_MANUAL_ONLY: &str = "manual_only_platform";
+
+/// The gate's reason for a page that is only a listing (`LISTING_ONLY_HOSTS`).
+pub const REASON_LISTING_ONLY: &str = "listing_only";
+
+/// The gate's reason for a posting older than the age limit.
+pub const REASON_STALE: &str = "stale_posting";
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct GateDecision {
     pub allowed: bool,
@@ -68,7 +77,7 @@ impl GateDecision {
 }
 
 /// True when the URL's host is one of `hosts` or a subdomain of one.
-fn host_matches(url: &str, hosts: &[&str]) -> bool {
+pub(crate) fn host_matches(url: &str, hosts: &[&str]) -> bool {
     let host = host_of(url);
     hosts
         .iter()
@@ -98,7 +107,7 @@ pub fn is_stale(job: &Job, criteria: &Criteria, now: DateTime<Utc>) -> bool {
 /// discovery prune both write exactly this text.
 pub fn stale_note(criteria: &Criteria) -> String {
     format!(
-        "stale_posting: aviso de más de {} días",
+        "{REASON_STALE}: aviso de más de {} días",
         criteria.max_posting_age_days
     )
 }

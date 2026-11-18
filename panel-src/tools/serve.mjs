@@ -1,6 +1,6 @@
 // Development server for panel-src/dist with the SAME headers the Rust panel sends (spec §9.5 and §9.6), so a CSP violation
 // shows up while building and not later. Pages that contain __NONCE__ get a fresh nonce per request, and __ASSETS__ becomes
-// /a/<launch-id>, exactly as crates/jobbot-panel/src/http.rs does.
+// /a/<launch-id>, exactly as crates/jobbot-panel/src/http/page.rs does.
 //
 //   node tools/serve.mjs [port]      default 8791, 127.0.0.1 only
 //

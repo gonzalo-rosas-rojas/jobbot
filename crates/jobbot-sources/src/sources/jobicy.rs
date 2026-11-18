@@ -12,12 +12,13 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::Source;
-use super::base::{failure, get_json, id_string, parse_time, skipped_error, str_field};
+use super::base::{get_json, id_string, parse_all, parse_time, record, str_field};
 use super::pay::{monthly_usd_range, number};
 use jobbot_domain::models::{FetchResult, Job};
 use jobbot_domain::text::html_to_text;
 
 const DEFAULT_BASE_URL: &str = "https://jobicy.com";
+const SOURCE_NAME: &str = "jobicy";
 
 /// The `[jobicy]` table of `profile/sources.toml`; present (even empty) turns the source on.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -81,35 +82,19 @@ impl JobicySource {
         let items = body["jobs"]
             .as_array()
             .context("response has no `jobs` array")?;
-        let mut jobs = Vec::new();
-        let mut skipped = 0;
-        for item in items {
-            match parse_job(item) {
-                Some(job) => jobs.push(job),
-                None => skipped += 1,
-            }
-        }
-        Ok((jobs, skipped))
+        Ok(parse_all(items, parse_job))
     }
 }
 
 #[async_trait]
 impl Source for JobicySource {
     fn name(&self) -> &str {
-        "jobicy"
+        SOURCE_NAME
     }
 
     async fn fetch(&self) -> FetchResult {
         let mut result = FetchResult::default();
-        match self.fetch_feed().await {
-            Ok((jobs, skipped)) => {
-                result.jobs = jobs;
-                if skipped > 0 {
-                    result.errors.push(skipped_error("jobicy", "api", skipped));
-                }
-            }
-            Err(error) => result.errors.push(failure("jobicy", "api", &error)),
-        }
+        record(&mut result, SOURCE_NAME, "api", self.fetch_feed().await);
         result
     }
 }
@@ -172,7 +157,7 @@ fn parse_job(item: &Value) -> Option<Job> {
         str_field(item, "salaryPeriod"),
     );
     Some(Job {
-        source: "jobicy".to_string(),
+        source: SOURCE_NAME.to_string(),
         external_id,
         company: str_field(item, "companyName").to_string(),
         title: title.to_string(),
@@ -262,6 +247,10 @@ mod tests {
         assert!(parse_job(&json!({"id": 1, "jobTitle": "Dev"})).is_none());
     }
 
+    fn source_for(base_url: String) -> JobicySource {
+        JobicySource::new(reqwest::Client::new()).with_base_url(base_url)
+    }
+
     #[tokio::test]
     async fn fetch_makes_one_request_with_the_filters() {
         let server = MockServer::start().await;
@@ -275,8 +264,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let source = JobicySource::new(reqwest::Client::new()).with_base_url(server.uri());
-        let result = source.fetch().await;
+        let result = source_for(server.uri()).fetch().await;
 
         assert!(result.errors.is_empty(), "{:?}", result.errors);
         assert_eq!(result.jobs.len(), 2);
@@ -294,8 +282,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let source = JobicySource::new(reqwest::Client::new()).with_base_url(server.uri());
-        let result = source.fetch().await;
+        let result = source_for(server.uri()).fetch().await;
 
         assert_eq!(result.jobs.len(), 1);
         assert_eq!(result.errors.len(), 1);
@@ -312,10 +299,7 @@ mod tests {
             .respond_with(ResponseTemplate::new(503))
             .mount(&failing)
             .await;
-        let result = JobicySource::new(reqwest::Client::new())
-            .with_base_url(failing.uri())
-            .fetch()
-            .await;
+        let result = source_for(failing.uri()).fetch().await;
         assert!(result.jobs.is_empty());
         assert!(
             result.errors[0].to_string().starts_with("jobicy:api: "),

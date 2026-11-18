@@ -22,6 +22,12 @@ use jobbot_domain::scoring::{contains_term, parse_salary_monthly_usd};
 use jobbot_domain::text::html_to_text;
 
 const DEFAULT_BASE_URL: &str = "https://hn.algolia.com";
+const SOURCE_NAME: &str = "hackernews";
+/// Recent threads of the "Who is hiring?" account asked for before the title filter keeps the
+/// right ones: the same account posts other kinds of threads too.
+const THREAD_SEARCH_HITS: &str = "8";
+/// The longest header segment that can still be a place: a longer one is a sentence.
+const MAX_PLACE_LEN: usize = 60;
 
 /// Words that mark a header segment as a job title rather than a company, place or stack.
 const ROLE_WORDS: [&str; 17] = [
@@ -93,7 +99,10 @@ impl HackerNewsSource {
     /// "Who wants to be hired?" and "Freelancer?" threads, which are not postings.
     async fn latest_threads(&self) -> anyhow::Result<Vec<String>> {
         let url = format!("{}/api/v1/search_by_date", self.base_url);
-        let query = [("tags", "story,author_whoishiring"), ("hitsPerPage", "8")];
+        let query = [
+            ("tags", "story,author_whoishiring"),
+            ("hitsPerPage", THREAD_SEARCH_HITS),
+        ];
         let body = get_json(&self.http, &url, &query).await?;
         let hits = body["hits"]
             .as_array()
@@ -131,7 +140,7 @@ impl HackerNewsSource {
 #[async_trait]
 impl Source for HackerNewsSource {
     fn name(&self) -> &str {
-        "hackernews"
+        SOURCE_NAME
     }
 
     async fn fetch(&self) -> FetchResult {
@@ -139,13 +148,13 @@ impl Source for HackerNewsSource {
         let threads = match self.latest_threads().await {
             Ok(threads) => threads,
             Err(error) => {
-                result.errors.push(failure("hackernews", "threads", &error));
+                result.errors.push(failure(SOURCE_NAME, "threads", &error));
                 return result;
             }
         };
         for id in threads {
             if let Err(error) = self.fetch_thread(&id, &mut result).await {
-                result.errors.push(failure("hackernews", &id, &error));
+                result.errors.push(failure(SOURCE_NAME, &id, &error));
             }
         }
         result
@@ -195,7 +204,7 @@ fn is_place_segment(segment: &str) -> bool {
         "contract",
     ];
     let lower = segment.to_lowercase();
-    segment.len() <= 60 && !NOT_PLACE.iter().any(|word| lower.contains(word))
+    segment.len() <= MAX_PLACE_LEN && !NOT_PLACE.iter().any(|word| lower.contains(word))
 }
 
 /// Whole words only (a plural counts): "cto" is not in "Victoria".
@@ -238,6 +247,31 @@ fn is_remote(header: &str, description: &str) -> bool {
     !header_says_place && !NOT_REMOTE.is_match(&body) && REMOTE_JOB.is_match(&body)
 }
 
+/// The role a header names (its first segment after the company with a role word, else a generic
+/// "Open roles at {company}") and its place: the company's own note, then the segments that read
+/// as places, comma-separated.
+fn title_and_place(segments: &[String], note: Option<String>, company: &str) -> (String, String) {
+    let title_index = segments
+        .iter()
+        .skip(1)
+        .position(|segment| has_role_word(segment))
+        .map(|index| index + 1);
+    let title = match title_index {
+        Some(index) => segments[index].clone(),
+        None => format!("Open roles at {company}"),
+    };
+    let mut place: Vec<String> = note.into_iter().collect();
+    place.extend(
+        segments
+            .iter()
+            .enumerate()
+            .skip(1)
+            .filter(|(index, segment)| Some(*index) != title_index && is_place_segment(segment))
+            .map(|(_, segment)| segment.clone()),
+    );
+    (title, place.join(", "))
+}
+
 /// One top-level comment as a job, or `None` when it has no text or no `Company | Role` header.
 fn parse_comment(comment: &Value) -> Option<Job> {
     let external_id = id_string(&comment["id"])?;
@@ -261,36 +295,19 @@ fn parse_comment(comment: &Value) -> Option<Job> {
     if company.is_empty() {
         return None;
     }
-    let title_index = segments
-        .iter()
-        .skip(1)
-        .position(|segment| has_role_word(segment))
-        .map(|index| index + 1);
-    let title = match title_index {
-        Some(index) => segments[index].clone(),
-        None => format!("Open roles at {company}"),
-    };
-    let mut place: Vec<String> = note.into_iter().collect();
-    place.extend(
-        segments
-            .iter()
-            .enumerate()
-            .skip(1)
-            .filter(|(index, segment)| Some(*index) != title_index && is_place_segment(segment))
-            .map(|(_, segment)| segment.clone()),
-    );
+    let (title, location) = title_and_place(&segments, note, &company);
     let description = html_to_text(text);
     let remote = is_remote(&header, &description);
     let (salary_min, salary_max) = parse_salary_monthly_usd(&description);
     let url = format!("https://news.ycombinator.com/item?id={external_id}");
     Some(Job {
-        source: "hackernews".to_string(),
+        source: SOURCE_NAME.to_string(),
         external_id,
         company,
         title,
         url: url.clone(),
         apply_url: url,
-        location: place.join(", "),
+        location,
         remote,
         description,
         salary_min_monthly_usd: salary_min,
@@ -342,14 +359,21 @@ mod tests {
     }
 
     #[test]
-    fn an_onsite_posting_is_not_remote_and_a_header_without_role_gets_a_generic_title() {
+    fn an_onsite_posting_is_not_remote() {
+        let thread = real_thread();
+        let job = parse_comment(&thread["children"][1]).unwrap();
+
+        assert!(!job.remote);
+        assert!(job.location.contains("ONSITE"), "{}", job.location);
+    }
+
+    #[test]
+    fn a_header_without_role_gets_a_generic_title() {
         let thread = real_thread();
         let job = parse_comment(&thread["children"][1]).unwrap();
 
         assert_eq!(job.company, "Shepherd");
         assert_eq!(job.title, "Open roles at Shepherd");
-        assert!(!job.remote);
-        assert!(job.location.contains("ONSITE"), "{}", job.location);
     }
 
     #[test]
@@ -485,12 +509,15 @@ mod tests {
             .mount(&server)
             .await;
 
-        let source = HackerNewsSource::new(reqwest::Client::new()).with_base_url(server.uri());
-        let result = source.fetch().await;
+        let result = source_for(server.uri()).fetch().await;
 
         assert!(result.errors.is_empty(), "{:?}", result.errors);
         let companies: Vec<&str> = result.jobs.iter().map(|job| job.company.as_str()).collect();
         assert_eq!(companies, ["PrairieLearn", "We The Flywheel"]);
+    }
+
+    fn source_for(base_url: String) -> HackerNewsSource {
+        HackerNewsSource::new(reqwest::Client::new()).with_base_url(base_url)
     }
 
     #[tokio::test]
@@ -510,12 +537,10 @@ mod tests {
                 .await;
         }
 
-        let source = HackerNewsSource::new(reqwest::Client::new())
-            .with_base_url(server.uri())
-            .with_config(HackerNewsConfig {
-                months: 2,
-                remote_only: false,
-            });
+        let source = source_for(server.uri()).with_config(HackerNewsConfig {
+            months: 2,
+            remote_only: false,
+        });
         let result = source.fetch().await;
 
         assert!(result.errors.is_empty(), "{:?}", result.errors);
@@ -536,10 +561,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let result = HackerNewsSource::new(reqwest::Client::new())
-            .with_base_url(server.uri())
-            .fetch()
-            .await;
+        let result = source_for(server.uri()).fetch().await;
         assert!(result.jobs.is_empty());
         assert!(
             result.errors[0].to_string().starts_with("hackernews:200: "),
@@ -552,10 +574,7 @@ mod tests {
             .respond_with(ResponseTemplate::new(503))
             .mount(&down)
             .await;
-        let result = HackerNewsSource::new(reqwest::Client::new())
-            .with_base_url(down.uri())
-            .fetch()
-            .await;
+        let result = source_for(down.uri()).fetch().await;
         assert!(
             result.errors[0]
                 .to_string()

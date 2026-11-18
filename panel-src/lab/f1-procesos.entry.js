@@ -18,16 +18,17 @@ import { installKeys, KEYS } from "../src/ui/keys.js";
 import { createCursor } from "../src/ui/cursor.js";
 import { createMenu } from "../src/ui/menu.js";
 import { createStage, clockText } from "../src/stage/stage.js";
-import { mulberry32 } from "../src/stage/skyline.js";
+import { mulberry32 } from "../src/core/random.js";
 import { createHud } from "../src/ui/hud.js";
 import { createStops } from "../src/ui/stops.js";
 import { createBar } from "../src/ui/bar.js";
 import { STOP_IDS } from "../src/scene/poses.js";
-import { h, fill } from "../src/core/dom.js";
+import { h, fill, trackHeldKeys } from "../src/core/dom.js";
 import { t, setLang, setTimeZone } from "../src/i18n/index.js";
 import empty from "../test/fixtures/snapshot.empty.json";
 import rich from "../test/fixtures/snapshot.rich.json";
 import heavy from "../test/fixtures/snapshot.heavy.json";
+trackHeldKeys();   // the page does it at boot (src/main.js); a lab has no main
 
 setTimeZone("America/Santiago");
 const FIXTURES = { empty, rich, heavy };

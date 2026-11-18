@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 
 use super::Source;
-use super::base::{failure, get_json, id_string, parse_iso, skipped_error, str_field};
+use super::base::{get_json, id_string, parse_all, parse_iso, record, str_field};
 use jobbot_domain::models::{FetchResult, Job};
 use jobbot_domain::scoring::parse_salary_monthly_usd;
 use jobbot_domain::text::html_to_text;
@@ -43,15 +43,7 @@ impl RemotiveSource {
         let items = body["jobs"]
             .as_array()
             .context("response has no `jobs` array")?;
-        let mut jobs = Vec::new();
-        let mut skipped = 0;
-        for item in items {
-            match parse_listing(item) {
-                Some(job) => jobs.push(job),
-                None => skipped += 1,
-            }
-        }
-        Ok((jobs, skipped))
+        Ok(parse_all(items, parse_listing))
     }
 }
 
@@ -63,17 +55,7 @@ impl Source for RemotiveSource {
 
     async fn fetch(&self) -> FetchResult {
         let mut result = FetchResult::default();
-        match self.fetch_feed().await {
-            Ok((jobs, skipped)) => {
-                result.jobs = jobs;
-                if skipped > 0 {
-                    result
-                        .errors
-                        .push(skipped_error("remotive", "api", skipped));
-                }
-            }
-            Err(error) => result.errors.push(failure("remotive", "api", &error)),
-        }
+        record(&mut result, "remotive", "api", self.fetch_feed().await);
         result
     }
 }

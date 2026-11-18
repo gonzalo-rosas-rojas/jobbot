@@ -39,9 +39,24 @@ export const KEYS = [
   { id: "grade", keys: ["0", "1", "2", "3", "4", "5"], display: "0 – 5", label: "keys.grade", scope: "local", stops: ["aprender"] },
 ];
 
+const SHOWN_ALWAYS = { Enter: "↵" };
+const SHOWN_SHIFTED = { ...SHOWN_ALWAYS, "Shift A": "⇧A" };
+
+/**
+ * What the key of an action looks like on a button, from the one table above (so a renamed key is renamed everywhere). `shiftGlyph` draws
+ * "Shift A" as ⇧A (COLA's batch key; HOY has no shifted key to draw). `room` names the stop in the error of an id that is not in the table.
+ */
+export function keyShown(id, { room = "keys", shiftGlyph = false } = {}) {
+  const entry = KEYS.find((k) => k.id === id);
+  if (!entry) throw new Error(`${room}: "${id}" is not an action of the key table`);
+  return (shiftGlyph ? SHOWN_SHIFTED : SHOWN_ALWAYS)[entry.display] || entry.display;
+}
+
 export const isSequence = (key) => key.trim().includes(" ");
 const norm = (key) => key.trim().toLowerCase();
 const firstPress = (key) => norm(key).split(" ")[0];
+/** `single` is one key and `chord` a sequence that begins with it: the single key would swallow the start of the chord. */
+const startsChord = (single, chord) => !isSequence(single) && isSequence(chord) && firstPress(chord) === norm(single);
 
 /** The keys that work at a stop (null or "prologo": the global ones), in table order. `live`, a Set of ids, hides what is not wired yet. */
 export function keysFor(stopId, { live = null } = {}) {
@@ -50,6 +65,11 @@ export function keysFor(stopId, { live = null } = {}) {
 
 /** Every way the table breaks A19, as sentences; [] when it is sound. Local keys are the one allowed overlap (§3.4). */
 export function conflicts(table = KEYS) {
+  return [...redefinedGlobals(table), ...overlapsInStops(table)];
+}
+
+/** A key of a row that is also the key of a global. */
+function redefinedGlobals(table) {
   const out = [];
   const globals = table.filter((k) => k.scope === "global");
   for (const k of table) {
@@ -58,6 +78,12 @@ export function conflicts(table = KEYS) {
       if (norm(key) === norm(gk)) out.push(`${k.id} (${key}) redefines the global ${g.id} (${gk})`);
     }
   }
+  return out;
+}
+
+/** Two keys of one stop that are the same or whose first presses are. */
+function overlapsInStops(table) {
+  const out = [];
   const stops = new Set(table.flatMap((k) => k.stops || []));
   for (const stop of stops) {
     const live = table.filter((k) => k.scope !== "local" && (k.scope === "global" || (k.stops || []).includes(stop)));
@@ -66,8 +92,9 @@ export function conflicts(table = KEYS) {
       if (a.scope === "global" && b.scope === "global") continue;
       for (const ka of a.keys) for (const kb of b.keys) {
         const same = norm(ka) === norm(kb);
-        const prefix = (!isSequence(ka) && firstPress(kb) === norm(ka) && isSequence(kb)) || (!isSequence(kb) && firstPress(ka) === norm(kb) && isSequence(ka));
-        if (same || prefix) out.push(`${stop}: ${a.id} and ${b.id} both start with ${prefix ? firstPress(isSequence(ka) ? ka : kb) : ka}`);
+        const prefix = startsChord(ka, kb) || startsChord(kb, ka);
+        const chord = isSequence(ka) ? ka : kb;
+        if (same || prefix) out.push(`${stop}: ${a.id} and ${b.id} both start with ${prefix ? firstPress(chord) : ka}`);
       }
     }
   }

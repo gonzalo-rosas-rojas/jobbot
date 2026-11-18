@@ -10,6 +10,11 @@ import { STOP_IDS } from "./poses.js";
 import { sheetView } from "./sheetview.js";
 import { typingIn } from "../ui/keyfilter.js";
 
+const SOLID = 0.999;   // an opacity from here up counts as solid: the sheet then carries no inline opacity at all
+
+/** The mode of the dial for what the stage drew: nothing drawn is "none", else "docked" or "big" by its layout. */
+export const dialModeOf = (drawn) => (drawn ? (drawn.layout.docked ? "docked" : "big") : "none");
+
 /**
  * createCamera({ shell, stage, clock, reduced, canSnap, win }) -> nav. `stage` is stage/stage.js; `clock.hora()` the hour of the sky; `canSnap()` says
  * whether the engine may glide a page that rests between two stops to the nearest one (not while the drawer, a menu or the help is open).
@@ -34,16 +39,17 @@ export function createCamera({ shell, stage, clock, reduced, canSnap = () => tru
     const sheet = sheetView({ pos, job: engine.S.jump, floorHeight: win.innerHeight, reduced: reduced() });
     shell.showStop(STOP_IDS[sheet.index], { fade: reduced() });
     const o = sheet.opacity;
-    const text = o >= 0.999 ? "" : o.toFixed(3);
+    const opacityText = o >= SOLID ? "" : o.toFixed(3);
     const travelling = !!engine.S.jump;
-    if (text !== opacity) {
-      opacity = text;
-      app.style.opacity = text;
+    if (opacityText !== opacity) {
+      opacity = opacityText;
+      app.style.opacity = opacityText;
     }
-    veiled = travelling && o < 0.5;                              // a sheet that is fading is not a place to click...
-    if (!travelling && app.inert !== o < 0.5) app.inert = o < 0.5;   // ...and one that rests faded between two stops is not either
+    const faded = o < 0.5;                                       // below half the sheet is not a place to click
+    veiled = travelling && faded;                                // on a trip a click guard stands in for `inert`...
+    if (!travelling && app.inert !== faded) app.inert = faded;     // ...and a sheet that rests faded between two stops is inert
     const drawn = stage.render({ pos, hora: clock.hora(), reduced: reduced() });
-    shell.setDialBig(drawn ? !drawn.layout.docked : null);
+    shell.setDialMode(dialModeOf(drawn));
   }
 
   function resize() {
@@ -103,13 +109,20 @@ export function createCamera({ shell, stage, clock, reduced, canSnap = () => tru
       opacity = "";
       app.style.opacity = "";
       app.inert = false;
-      shell.setDialBig(null);
+      shell.setDialMode("none");
       win.scrollTo(0, 0);
     },
     go(id, { push = true } = {}) { if (engine) engine.jumpTo(id, { push }); },
     current: () => (engine ? engine.current() : null),
     /** The drawer holds the camera still while it is open (§3.6): the wheel and the touch no longer move the page. */
-    lock(open) { if (!lenis) return; if (open) lenis.stop(); else { lenis.start(); engine.snap(); } },
+    lock(open) {
+      if (!lenis) return;
+      if (open) lenis.stop();
+      else {
+        lenis.start();
+        engine.snap();
+      }
+    },
     /** Something that held the snap back closed (the help): put a page that rests between two stops on the nearest. */
     settle() { if (engine) engine.snap(); },
     cancel() { if (engine) engine.cancelJump(); },

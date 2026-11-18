@@ -35,15 +35,29 @@ import enKeys from "./en/keys.js";
 import enMoments from "./en/moments.js";
 import enSound from "./en/sound.js";
 
-export const LANGS = ["es", "en"];
-const DICTS = {
-  es: Object.assign({}, esCommon, esHoy, esProcesos, esCola, esAprender, esSistema, esShell, esDetail, esStage, esHud, esKeys, esMoments, esSound),
-  en: Object.assign({}, enCommon, enHoy, enProcesos, enCola, enAprender, enSistema, enShell, enDetail, enStage, enHud, enKeys, enMoments, enSound),
-};
+const LANGS = ["es", "en"];
+// One row per scope; a new scope is one import pair and one row here.
+const SCOPES = [
+  { es: esCommon, en: enCommon },
+  { es: esHoy, en: enHoy },
+  { es: esProcesos, en: enProcesos },
+  { es: esCola, en: enCola },
+  { es: esAprender, en: enAprender },
+  { es: esSistema, en: enSistema },
+  { es: esShell, en: enShell },
+  { es: esDetail, en: enDetail },
+  { es: esStage, en: enStage },
+  { es: esHud, en: enHud },
+  { es: esKeys, en: enKeys },
+  { es: esMoments, en: enMoments },
+  { es: esSound, en: enSound },
+];
+const dictOf = (language) => Object.assign({}, ...SCOPES.map((scope) => scope[language]));
+const DICTS = Object.fromEntries(LANGS.map((language) => [language, dictOf(language)]));
 // Number and date rules: es-CL for Spanish (Gonza's), en-GB for English (day before month, 24-hour clock).
 const LOCALES = { es: "es-CL", en: "en-GB" };
 
-export const isLang = (value) => value === "es" || value === "en";
+export const isLang = (value) => LANGS.includes(value);
 
 // The build decides the default: the Rust-served panel is Spanish, the public demo is built with
 // __DEFAULT_LANG__ = "en". "auto" asks the browser. Without a define (tests, labs) it is Spanish.
@@ -114,11 +128,11 @@ export function onLang(fn) {
 
 // ---- Words
 
-const hole = /\{([A-Za-z_]\w*)\}/g;
+const PLACEHOLDER = /\{([A-Za-z_]\w*)\}/g;
 
 function fillIn(text, vars) {
   if (!vars) return text;
-  return text.replace(hole, (whole, name) => (Object.hasOwn(vars, name) && vars[name] != null ? String(vars[name]) : whole));
+  return text.replace(PLACEHOLDER, (whole, name) => (Object.hasOwn(vars, name) && vars[name] != null ? String(vars[name]) : whole));
 }
 
 export function has(key) {
@@ -200,12 +214,15 @@ export function fmtDate(iso, style = "short", tz) {
   }
 }
 
+const HOURS_BEFORE_DAYS = 48;   // up to this many hours ago it is still said in hours
+const HOURS_PER_DAY = 24;
+
 /** How long ago, in words ("3 min ago", "2 days ago"); a time in the future or not a time is "just now". */
 export function fmtRelative(iso, nowMs) {
   const minutes = Math.floor((nowMs - Date.parse(iso)) / 60000);
   if (!(minutes >= 0)) return t("time.ago.now");
   if (minutes < 60) return t("time.ago.min", { n: Math.max(minutes, 1) });
   const hours = Math.floor(minutes / 60);
-  if (hours < 48) return t("time.ago.hours", { n: hours });
-  return tn("time.ago.days", Math.floor(hours / 24));
+  if (hours < HOURS_BEFORE_DAYS) return t("time.ago.hours", { n: hours });
+  return tn("time.ago.days", Math.floor(hours / HOURS_PER_DAY));
 }

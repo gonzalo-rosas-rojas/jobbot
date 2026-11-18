@@ -3,7 +3,7 @@
 // sentence, because the one thing he must not do is apply again by hand before checking.
 //
 // The page only knows a CLOSED list of kinds, and a card whose kind is not in it leaves the queue without a word (model.js, "legacy quirk"),
-// so the first test reads the server's own list (crates/jobbot-panel/src/snapshot.rs, `reason_kind`) and holds the page to it. Fictional data only.
+// so the first test reads the server's own list (crates/jobbot-panel/src/snapshot/cards.rs, `reason_kind`) and holds the page to it. Fictional data only.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -30,7 +30,7 @@ function waiting(...specs) {
     key: `fx:${n}`, company: `Test Co ${n}`, title: "Backend Engineer", score: 70 + n, state: "needs_gonza", source: "greenhouse",
     url: `https://example.com/jobs/${n}`, reason: kind ? `${kind}: text` : "falta email", reason_kind: kind, reason_short: "texto del servidor", note: null,
     approved: false, has_screenshot: false, has_cv: true, has_dossier: false, has_handoff: false, updated_at: s.generated_at,
-    // the server leads with "it went out" when it may have (snapshot.rs), with the retry second
+    // the server leads with "it went out" when it may have (snapshot/cards.rs), with the retry second
     actions: kind === "may_have_sent" ? ["confirm", "resolve"] : ["resolve", "confirm"],
     marks: [], posted_at: s.generated_at, first_seen: s.generated_at, salary_min: null, salary_max: null, days_in_state: 0, snoozed_until: null,
     waiting_since: s.generated_at, age_days: 1, prune_in_days: 10, ...extra,
@@ -44,11 +44,11 @@ function waiting(...specs) {
 
 // ---- the server's list and the page's list are the same list
 
-/** [kind, sentence] for every kind `reason_kind` of snapshot.rs can answer. */
+/** [kind, sentence] for every kind `reason_kind` of snapshot/cards.rs can answer. */
 function serverKinds() {
-  const source = readFileSync(new URL("../../crates/jobbot-panel/src/snapshot.rs", import.meta.url), "utf8");
+  const source = readFileSync(new URL("../../crates/jobbot-panel/src/snapshot/cards.rs", import.meta.url), "utf8");
   const start = source.indexOf("fn reason_kind(");
-  assert.ok(start > 0, "snapshot.rs has reason_kind");
+  assert.ok(start > 0, "snapshot/cards.rs has reason_kind");
   const end = source.slice(start).search(/\r?\n}\r?\n/); // the closing brace of the function (the file may have CRLF line ends)
   const body = source.slice(start, start + end);
   return [...body.matchAll(/\(\s*"([a-z_]+)",\s*"([^"]+)"\s*,?\s*\)/g)].map((m) => [m[1], m[2]]);
@@ -56,7 +56,7 @@ function serverKinds() {
 
 test("every kind the server can write is a kind of the page (or its cards would silently leave the queue), with the server's own sentence", () => {
   const kinds = serverKinds();
-  assert.deepEqual(kinds.map(([k]) => k).sort(), ["blocked", "error", "handoff", "manual_apply", "may_have_sent", "missing_answers", "other"], "the kinds snapshot.rs knows");
+  assert.deepEqual(kinds.map(([k]) => k).sort(), ["blocked", "error", "handoff", "manual_apply", "may_have_sent", "missing_answers", "other"], "the kinds snapshot/cards.rs knows");
   for (const [kind, sentence] of kinds) {
     assert.ok(REASON_KINDS.includes(kind), `${kind} is not in REASON_KINDS`);
     assert.ok(KIND_IDS.includes(kind), `${kind} is not in KIND_IDS`);

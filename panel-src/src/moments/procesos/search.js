@@ -4,24 +4,27 @@
 
 import uFuzzy from "@leeoniya/ufuzzy";
 
-/** The text without accents ("Ámbar" is "Ambar"), one character for one character, so a range found in it fits the original. */
-export function fold(text) {
+const textOf = (x) => String(x == null ? "" : x);
+const SEP = " ";   // what stands between the company and the role in the text that is searched
+
+/** The text with `change` applied to each character, keeping a character as it was when the change would alter the length (so ranges still fit the original). */
+function mapKeepingLength(text, change) {
   let out = "";
-  for (const ch of String(text == null ? "" : text)) {
-    const base = ch.normalize("NFD")[0];
-    out += base.length === ch.length ? base : ch;
+  for (const ch of text) {
+    const next = change(ch);
+    out += next.length === ch.length ? next : ch;
   }
   return out;
 }
 
-// For matching only: no accents and no capitals, still the same length (a letter that would change the length stays as it is).
+/** The text without accents ("Ámbar" is "Ambar"), one character for one character, so a range found in it fits the original. */
+export function fold(text) {
+  return mapKeepingLength(textOf(text), (ch) => ch.normalize("NFD")[0]);
+}
+
+// For matching only: no accents and no capitals, still the same length.
 function plain(text) {
-  let out = "";
-  for (const ch of fold(text)) {
-    const low = ch.toLowerCase();
-    out += low.length === ch.length ? low : ch;
-  }
-  return out;
+  return mapKeepingLength(fold(text), (ch) => ch.toLowerCase());
 }
 
 // `intraMode: 1` forgives one slip inside a word ("kestrl"); the words of the query may come in any order.
@@ -30,7 +33,7 @@ const OUT_OF_ORDER = 4;
 
 /** A text cut at the ranges [from, to, from, to...] of a longer one it begins at `offset` of: [{ text, hit }]. A range outside the text is left out. */
 export function partsOf(text, ranges, offset = 0) {
-  const str = String(text == null ? "" : text);
+  const str = textOf(text);
   if (str === "") return [];
   const parts = [];
   let at = 0;
@@ -52,14 +55,15 @@ export function partsOf(text, ranges, offset = 0) {
  * items that match, in the order of `items` (the field keeps its places; a search only hides). `items` are [{ key, company, title }].
  */
 export function searchOf(items, query) {
-  const needle = plain(String(query == null ? "" : query).trim());
+  const needle = plain(textOf(query).trim());
   if (!needle) return null;
   const list = items || [];
-  const hay = list.map((x) => plain(x.company) + " " + plain(x.title));
+  const hay = list.map((x) => plain(x.company) + SEP + plain(x.title));
   let result = null;
   try {
     result = finder.search(hay, needle, OUT_OF_ORDER);
   } catch (e) {
+    console.error(e);
     result = null; // a query the matcher cannot take finds nothing; it never breaks the page
   }
   const found = new Map();
@@ -70,10 +74,10 @@ export function searchOf(items, query) {
   for (const i of [...idxs].sort((a, b) => a - b)) {
     const item = list[i];
     const own = ranges.get(i) || [];
-    const cut = String(item.company == null ? "" : item.company).length;
+    const titleStart = textOf(item.company).length + SEP.length; // the title follows the company and the separator in the text that was searched
     found.set(item.key, {
       ranges: own,
-      parts: { company: partsOf(item.company, own, 0), title: partsOf(item.title, own, cut + 1) },
+      parts: { company: partsOf(item.company, own, 0), title: partsOf(item.title, own, titleStart) },
     });
   }
   return found;

@@ -88,6 +88,8 @@ export function assetProblems(page) {
 }
 
 // What the build or the server fills in; none of it may reach a file that a static host serves as it is.
+/** The one <link> the published demo carries; build.mjs writes it and publishedProblems accepts exactly it. */
+export const PUBLISHED_ICON_LINK = '<link rel="icon" type="image/svg+xml" href="favicon.svg">';
 const PUBLISHED_MARKERS = ["__ASSETS__", "__NONCE__", "__STYLE__", "__ICONS__", "__SCRIPT__", "__DEFAULT_LANG__"];
 
 /** The inline <script> and <style> as a browser splits them: text inside one is not a tag, so the scan jumps to its close. `body` is null when it never closes. */
@@ -124,6 +126,11 @@ export function publishedProblems(page) {
     if (name && !policy.has(name.toLowerCase())) policy.set(name.toLowerCase(), tokens);
   }
   const elements = inlineElements(page);
+  // The page may hold no <link> but its own icon, by a path relative to the file (a static host has no server to answer /favicon.ico).
+  let markup = page;
+  for (const el of elements) if (el.body !== null) markup = markup.replace(el.open + el.body, "");   // text inside a script or style is not markup
+  const links = markup.match(/<link\b[^>]*>/gi) || [];
+  if (links.length !== 1 || links[0] !== PUBLISHED_ICON_LINK) problems.push(`expected exactly one <link>, ${PUBLISHED_ICON_LINK}; found ${links.length ? links.join(" ") : "none"}`);
   const named = { script: policy.get("script-src") || [], style: policy.get("style-src") || [] };
   const seen = { script: 0, style: 0 };
   const hashes = { script: new Set(), style: new Set() };

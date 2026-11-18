@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createActions, REQUESTS } from "../src/moments/sistema/actions.js";
+import { createActions } from "../src/moments/sistema/actions.js";
+import { REQUESTS } from "../src/moments/shared/engine.js";
 import { ARM_MIN_MS, ARM_MAX_MS } from "../src/core/dom.js";
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));

@@ -4,13 +4,14 @@
 //   title:   __lab.title("rich" | "empty" | null), __lab.icon()  -> the pixels of the icon the tab got
 //   cursor:  __lab.cursor, __lab.view, __lab.redraw(), __lab.keyed()
 //   sheet:   __lab.moment("hoy" | "procesos" | "prologo"), __lab.rows(n)
-import { h } from "../src/core/dom.js";
+import { h, trackHeldKeys } from "../src/core/dom.js";
 import { model } from "../src/core/model.js";
 import { createToast } from "../src/ui/toast.js";
 import { createTitle } from "../src/ui/title.js";
 import { createCursor } from "../src/ui/cursor.js";
 import rich from "../test/fixtures/snapshot.rich.json";
 import empty from "../test/fixtures/snapshot.empty.json";
+trackHeldKeys();   // the page does it at boot (src/main.js); a lab has no main
 
 // Fake timers for the toast: tick(ms) runs what is due.
 const timers = new Map();

@@ -7,7 +7,7 @@
 // To REPLACE a moment: write its module in this folder and change its line in MOMENTS. To ADD a stop that is not enough: MOMENTS and STOPS_META
 // (the table of names, keys and questions that the bar, the dial marks, the palette and the help read; it lives in shared/stops.js and is
 // re-exported below) are two of the places that name a stop;
-// STOP_IDS and MARKS (scene/poses.js), ROOM_IDS (core/store.js and sound/recipes.js), WIRED (ui/wired.js), the key table (ui/keys.js) and the
+// STOP_IDS and MARKS (scene/poses.js), ROOM_IDS (core/route.js and sound/recipes.js), WIRED (ui/wired.js), the key table (ui/keys.js) and the
 // shell's lists of stops (ui/shell.js) are the others. AGENT-RULES.md has the whole list.
 
 import aprender from "./aprender.js";
@@ -26,7 +26,7 @@ export const MOMENTS = {
   sistema,
 };
 
-export const momentOf = (id) => MOMENTS[id] || null;
+export const momentOf = (id) => (Object.hasOwn(MOMENTS, id) ? MOMENTS[id] : null);
 
 // The table lives in shared/stops.js so that the views can read their question from it without importing this file (which imports them).
 export { STOPS_META, askOf } from "./shared/stops.js";

@@ -8,7 +8,7 @@
     "trust",
     "activity.from", "activity.to", "activity.slot_minutes", "activity.slots", "activity.moves", "activity.moves_total", "activity.moves_by_state",
     "claude.spent_24h", "claude.daily_budget", "claude.by_stage",
-    "today.tasks_total", "today.tasks", "today.emails_total", "today.emails",
+    "today.tasks_total", "today.tasks", "today.emails_total", "today.emails", "today.inbox.imported_at", "today.inbox.waiting",
     "needs_gonza.total", "needs_gonza.cards", "awaiting_approval.total", "awaiting_approval.cards", "snoozed.total", "snoozed.cards",
     "board", "learn.total", "learn.seen", "learn.due"
   ],

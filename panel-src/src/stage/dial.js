@@ -5,29 +5,35 @@
 // sv() and then moves a few attributes. The look is in styles/dial.css.
 
 import { sv } from "../core/dom.js";
+import { wrapHour } from "../core/math.js";
 import { MARKS, STOP_IDS } from "../scene/poses.js";
-import { inWindow, nightT } from "../scene/clock.js";
+import { inWindow, nightT, WINDOW_START, WINDOW_END } from "../scene/clock.js";
 
 export const CENTER = 300, R_RING = 262;
 export const VIEW = { min: -60, size: 720 };                 // viewBox "-60 -60 720 720": room for the numerals outside the ring
-const WS = 18, WE = 9;                                       // the bot's window, in hours of the day
+const WINDOW_HOURS = 24 - WINDOW_START + WINDOW_END;         // how long the bot's window is open: 15
+const DEG_PER_HOUR = 360 / 24;
 const MARK_R = R_RING - 6;
-const f = (n) => n.toFixed(2);
+const RUN_R = R_RING - 22;     // the hourly dots of the bot's window, and the path its label follows
+const BUSY_R = R_RING - 52;    // the inner edge of the hatched band of the working day
+const SWEEP_R = R_RING - 54;   // the outer edge of the sweep behind the hand
+const fixed2 = (n) => n.toFixed(2);
 
 // The dial is drawn in SVG units and scaled, so a text of 13 units is 13 x k pixels on the screen, k = box / 720. Below 11 px a mono
 // text is a smudge (spec §4.2), so the dial gives up detail instead of shrinking it: the micro labels (13 units) go first, then
 // the numerals that are not the four cardinal hours, then the cardinal ones grow to the next sizes of the type scale (--fs-4, --fs-5).
 export const LOD_MIN_PX = 11;
+const TEXT_UNITS = { micro: 13, numeral: 15, compact: 22, tiny: 34 };   // the size, in SVG units, of the text each level of detail still shows
 /** "full" every text | "mid" no micro labels | "compact" 00 06 12 18 at 22 units | "tiny" the same at 34 | "bare" no labels but the time. */
 export function detailOf(k) {
-  if (k * 13 >= LOD_MIN_PX) return "full";
-  if (k * 15 >= LOD_MIN_PX) return "mid";
-  if (k * 22 >= LOD_MIN_PX) return "compact";
-  if (k * 34 >= LOD_MIN_PX) return "tiny";
+  if (k * TEXT_UNITS.micro >= LOD_MIN_PX) return "full";
+  if (k * TEXT_UNITS.numeral >= LOD_MIN_PX) return "mid";
+  if (k * TEXT_UNITS.compact >= LOD_MIN_PX) return "compact";
+  if (k * TEXT_UNITS.tiny >= LOD_MIN_PX) return "tiny";
   return "bare";
 }
 
-export const angleOf = (hora) => ((((hora % 24) + 24) % 24) / 24) * 360;
+export const angleOf = (hora) => (wrapHour(hora) / 24) * 360;
 export function polar(r, deg) {
   const a = (deg * Math.PI) / 180;
   return [CENTER + r * Math.sin(a), CENTER - r * Math.cos(a)];
@@ -35,53 +41,53 @@ export function polar(r, deg) {
 export function arcPath(r, d0, d1) {
   const large = d1 - d0 > 180 ? 1 : 0;
   const [x0, y0] = polar(r, d0), [x1, y1] = polar(r, d1);
-  return `M${f(x0)} ${f(y0)} A${r} ${r} 0 ${large} 1 ${f(x1)} ${f(y1)}`;
+  return `M${fixed2(x0)} ${fixed2(y0)} A${r} ${r} 0 ${large} 1 ${fixed2(x1)} ${fixed2(y1)}`;
 }
 /** Annular sector between two radii, clockwise from d0 to d1. */
 export function sectorPath(r0, r1, d0, d1) {
   const large = d1 - d0 > 180 ? 1 : 0;
   const [x0, y0] = polar(r1, d0), [x1, y1] = polar(r1, d1), [x2, y2] = polar(r0, d1), [x3, y3] = polar(r0, d0);
-  return `M${f(x0)} ${f(y0)} A${r1} ${r1} 0 ${large} 1 ${f(x1)} ${f(y1)} L${f(x2)} ${f(y2)} A${r0} ${r0} 0 ${large} 0 ${f(x3)} ${f(y3)}Z`;
+  return `M${fixed2(x0)} ${fixed2(y0)} A${r1} ${r1} 0 ${large} 1 ${fixed2(x1)} ${fixed2(y1)} L${fixed2(x2)} ${fixed2(y2)} A${r0} ${r0} 0 ${large} 0 ${fixed2(x3)} ${fixed2(y3)}Z`;
 }
 
 /** Everything fixed about the dial, as data: ticks, numerals, the hourly runs of the window, the six marks, the busy band. */
 export function dialSpec() {
   const ticks = [], numerals = [], runs = [], marks = [];
   for (let hh = 0; hh < 24; hh++) {
-    const win = hh >= WS || hh < WE, major = hh % 3 === 0, deg = angleOf(hh);
+    const win = inWindow(hh), major = hh % 3 === 0, deg = angleOf(hh);
     const [x1, y1] = polar(R_RING, deg), [x2, y2] = polar(R_RING + (major ? 20 : 12), deg);
     ticks.push({ hh, win, major, quarter: false, x1, y1, x2, y2 });
     if (win) {
       for (let q = 1; q < 4; q++) {
-        const [a, b] = polar(R_RING, deg + q * 3.75), [c, d] = polar(R_RING + 6, deg + q * 3.75);
-        ticks.push({ hh, win: true, major: false, quarter: true, x1: a, y1: b, x2: c, y2: d });
+        const [x1, y1] = polar(R_RING, deg + q * 3.75), [x2, y2] = polar(R_RING + 6, deg + q * 3.75);
+        ticks.push({ hh, win: true, major: false, quarter: true, x1, y1, x2, y2 });
       }
     }
     if (major) { const [x, y] = polar(R_RING + 42, deg); numerals.push({ hh, x, y: y + 5, text: String(hh).padStart(2, "0") }); }
   }
-  for (let k = 0; k <= 15; k++) { const [x, y] = polar(R_RING - 22, angleOf((WS + k) % 24)); runs.push({ k, x, y, big: k % 6 === 0 }); }
+  for (let k = 0; k <= WINDOW_HOURS; k++) { const [x, y] = polar(RUN_R, angleOf((WINDOW_START + k) % 24)); runs.push({ k, x, y, big: k % 6 === 0 }); }
   for (const id of STOP_IDS) { const angle = angleOf(MARKS[id]); const [x, y] = polar(MARK_R, angle); marks.push({ id, hora: MARKS[id], angle, x, y }); }
-  const b0 = angleOf(WE), b1 = angleOf(WS);
-  const [lx0, ly0] = polar(R_RING - 22, b1), [lx1, ly1] = polar(R_RING - 22, b0);
+  const b0 = angleOf(WINDOW_END), b1 = angleOf(WINDOW_START);
+  const [lx0, ly0] = polar(RUN_R, b1), [lx1, ly1] = polar(RUN_R, b0);
   return {
     ticks, numerals, runs, marks,
-    busy: sectorPath(R_RING - 52, R_RING, b0, b1),
-    busyHair: arcPath(R_RING - 52, b0, b1),
-    busyLabel: `M${f(lx0)} ${f(ly0)} A${R_RING - 22} ${R_RING - 22} 0 0 0 ${f(lx1)} ${f(ly1)}`,
-    rail: arcPath(R_RING, angleOf(WS), angleOf(WS) + 225),
+    busy: sectorPath(BUSY_R, R_RING, b0, b1),
+    busyHair: arcPath(BUSY_R, b0, b1),
+    busyLabel: `M${fixed2(lx0)} ${fixed2(ly0)} A${RUN_R} ${RUN_R} 0 0 0 ${fixed2(lx1)} ${fixed2(ly1)}`,
+    rail: arcPath(R_RING, angleOf(WINDOW_START), angleOf(WINDOW_START) + WINDOW_HOURS * DEG_PER_HOUR),
   };
 }
 
 /** What moves with the hour: the lit part of the rail, the sweep behind the hand, how many runs are done and which is 'now'. */
 export function railAt(hora) {
   const inside = inWindow(hora);
-  const n = inside ? nightT(hora) : 15;                      // the night is over: the rail stays full until 18:00 starts another
-  const start = angleOf(WS), end = start + n * 15;
+  const n = inside ? nightT(hora) : WINDOW_HOURS;                     // the night is over: the rail stays full until 18:00 starts another
+  const start = angleOf(WINDOW_START), end = start + n * DEG_PER_HOUR;
   const passed = Math.floor(n + 1e-6);
   return {
     nightT: n,
     lit: n > 0.01 ? arcPath(R_RING, start, end) : "",
-    sweep: inside && n > 0.01 ? sectorPath(30, R_RING - 54, Math.max(start, end - 70), end) : "",
+    sweep: inside && n > 0.01 ? sectorPath(30, SWEEP_R, Math.max(start, end - 70), end) : "",
     passed,
     now: inside ? passed : -1,
     hand: angleOf(hora),
@@ -101,10 +107,10 @@ export function layoutOf(pose, hora, base) {
   return { x, y, cx, cy, size, scale: size / base, ring: (2 * R_RING * size) / VIEW.size, tip: tipOf(x, y, size, hora), docked, detail: detailOf(size / VIEW.size) };
 }
 
-export function createDial(host, { t }) {
-  const spec = dialSpec();
+/** The SVG of the dial, drawn once from its spec (dialSpec): the parts that move afterwards come back by name. */
+function buildFace(spec, t) {
   const ring = (cls, r) => sv("circle", { class: cls, cx: CENTER, cy: CENTER, r });
-  const line = (cls, k) => sv("line", { class: cls, x1: f(k.x1), y1: f(k.y1), x2: f(k.x2), y2: f(k.y2) });
+  const line = (cls, k) => sv("line", { class: cls, x1: fixed2(k.x1), y1: fixed2(k.y1), x2: fixed2(k.x2), y2: fixed2(k.y2) });
 
   const busyText = sv("textPath", { href: "#dial-busy-path", startOffset: "50%" }, t("dial.window"));
   // The time sits 146 units under the hub (and the zone label 180): the sun is born at the hub (stage/beam.js), and its disc and
@@ -113,8 +119,8 @@ export function createDial(host, { t }) {
   const time = sv("text", { class: "dial-time", x: CENTER, y: CENTER + 146, "text-anchor": "middle" }, "");
   const lit = sv("path", { class: "rail-lit", d: "" });
   const sweep = sv("path", { class: "sweep", d: "" });
-  const runs = spec.runs.map((r) => sv("circle", { class: r.big ? "run run-big" : "run", cx: f(r.x), cy: f(r.y), r: r.big ? 6.5 : 3.2 }));
-  const hand = sv("g", { class: "hand", transform: `rotate(${angleOf(WS)} ${CENTER} ${CENTER})` },
+  const runs = spec.runs.map((r) => sv("circle", { class: r.big ? "run run-big" : "run", cx: fixed2(r.x), cy: fixed2(r.y), r: r.big ? 6.5 : 3.2 }));
+  const hand = sv("g", { class: "hand", transform: `rotate(${angleOf(WINDOW_START)} ${CENTER} ${CENTER})` },
     sv("line", { class: "hand-line", x1: CENTER, y1: CENTER + 18, x2: CENTER, y2: CENTER - (R_RING - 6) }),
     sv("circle", { class: "hand-tip", cx: CENTER, cy: CENTER - (R_RING - 6), r: 5.5 }));
   const glowEl = sv("g", { class: "mark-glow", transform: `rotate(0 ${CENTER} ${CENTER})`, opacity: 0 },
@@ -135,10 +141,15 @@ export function createDial(host, { t }) {
     sv("text", { class: "dial-micro busy-label", "text-anchor": "middle" }, busyText),
     sv("path", { class: "rail", d: spec.rail }), lit, sweep,
     ...spec.ticks.map((k) => line(["tick", k.win && "tick-win", k.quarter && "tick-q"].filter(Boolean).join(" "), k)),
-    ...spec.numerals.map((n) => sv("text", { class: n.hh % 6 === 0 ? "dial-num dial-cardinal" : "dial-num", "data-hh": n.hh, x: f(n.x), y: f(n.y), "text-anchor": "middle" }, n.text)),
+    ...spec.numerals.map((n) => sv("text", { class: n.hh % 6 === 0 ? "dial-num dial-cardinal" : "dial-num", "data-hh": n.hh, x: fixed2(n.x), y: fixed2(n.y), "text-anchor": "middle" }, n.text)),
     ...runs,
-    ...spec.marks.map((m) => sv("circle", { class: "mark", "data-stop": m.id, cx: f(m.x), cy: f(m.y), r: 3.5 })),
+    ...spec.marks.map((m) => sv("circle", { class: "mark", "data-stop": m.id, cx: fixed2(m.x), cy: fixed2(m.y), r: 3.5 })),
     glowEl, hand, sv("circle", { class: "hub", cx: CENTER, cy: CENTER, r: 7 }), time, zone);
+  return { svg, hand, glowEl, lit, sweep, runs, time, zone, busyText };
+}
+
+export function createDial(host, { t }) {
+  const { svg, hand, glowEl, lit, sweep, runs, time, zone, busyText } = buildFace(dialSpec(), t);
   host.append(svg);
 
   let baseSize = 600, lastRail = "", lastText = null, lastTransform = "", lastDocked = null, lastDetail = null, lastGlow = "";
@@ -153,7 +164,7 @@ export function createDial(host, { t }) {
       const key = `${r.hand.toFixed(3)}|${r.passed}|${r.now}`;
       if (key !== lastRail) {
         lastRail = key;
-        hand.setAttribute("transform", `rotate(${f(r.hand)} ${CENTER} ${CENTER})`);
+        hand.setAttribute("transform", `rotate(${fixed2(r.hand)} ${CENTER} ${CENTER})`);
         lit.setAttribute("d", r.lit);
         sweep.setAttribute("d", r.sweep);
         runs.forEach((dot, k) => { dot.classList.toggle("run-done", k <= r.passed); dot.classList.toggle("run-now", k === r.now); });
@@ -174,7 +185,7 @@ export function createDial(host, { t }) {
       const key = `${angle.toFixed(2)}|${strength.toFixed(2)}`;
       if (key === lastGlow) return;
       lastGlow = key;
-      glowEl.setAttribute("transform", `rotate(${f(angle)} ${CENTER} ${CENTER})`);
+      glowEl.setAttribute("transform", `rotate(${fixed2(angle)} ${CENTER} ${CENTER})`);
       glowEl.setAttribute("opacity", strength.toFixed(2));
     },
     /** After a language change. */

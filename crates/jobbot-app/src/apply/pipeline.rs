@@ -8,7 +8,7 @@ use anyhow::Context;
 use chrono::{DateTime, Utc};
 use jobbot_domain::answers::{AnswerBank, australian_salary_ask};
 use jobbot_domain::form::{SubmitMode, SubmitStatus};
-use jobbot_domain::gate::stale_note;
+use jobbot_domain::gate::{REASON_LISTING_ONLY, REASON_MANUAL_ONLY, REASON_STALE, stale_note};
 use jobbot_domain::handoff::{
     FormInspection, FormTally, HANDOFF_REASON_PREFIX, is_handoff_job, missing_labels,
     report_from_result,
@@ -250,6 +250,35 @@ fn open_only_through(job: &Job, places: &[String]) -> bool {
     !places.is_empty() && !region_ok(job) && region_ok_with(job, places)
 }
 
+/// The CV master's text, once it has no placeholder left.
+async fn read_master(cv_master: &Path) -> Result<String, CvError> {
+    let master = tokio::fs::read_to_string(cv_master)
+        .await
+        .with_context(|| format!("reading {}", cv_master.display()))?;
+    ensure_ready(&master)?;
+    Ok(master)
+}
+
+/// The posting of a tracked application. A missing one is a broken tracker, not a skipped job.
+fn job_or_missing(tracker: &dyn Store, key: &str) -> anyhow::Result<Job> {
+    tracker
+        .get_job(key)?
+        .with_context(|| format!("job {key} is missing from the tracker"))
+}
+
+/// The master tailored for `job` (relocated first when the job is in the place Gonza would move
+/// to), checked to add no skill the master lacks.
+fn tailored_variant(
+    master: &str,
+    job: &Job,
+    relocation: Relocation<'_>,
+) -> Result<String, CvError> {
+    let base = relocation.master_for(master, job);
+    let variant = tailor(&base, job);
+    assert_no_new_skills(&base, &variant)?;
+    Ok(variant)
+}
+
 /// `prepare_report` for a run that knows where Gonza would move (`Relocation::from_criteria`): the
 /// CV of a job in that place is tailored from the relocated master.
 #[tracing::instrument(name = "prepare", skip_all, fields(prepared = Empty, skipped = Empty))]
@@ -261,10 +290,7 @@ pub async fn prepare_report_relocating(
     relocation: Relocation<'_>,
     now: DateTime<Utc>,
 ) -> Result<PrepareReport, CvError> {
-    let master = tokio::fs::read_to_string(cv_master)
-        .await
-        .with_context(|| format!("reading {}", cv_master.display()))?;
-    ensure_ready(&master)?;
+    let master = read_master(cv_master).await?;
     tokio::fs::create_dir_all(out_dir)
         .await
         .with_context(|| format!("creating {}", out_dir.display()))?;
@@ -274,12 +300,8 @@ pub async fn prepare_report_relocating(
         if skipped.iter().any(|skip| skip.job_key == row.job_key) {
             continue;
         }
-        let job = tracker
-            .get_job(&row.job_key)?
-            .with_context(|| format!("job {} is missing from the tracker", row.job_key))?;
-        let base = relocation.master_for(&master, &job);
-        let variant = tailor(&base, &job);
-        assert_no_new_skills(&base, &variant)?;
+        let job = job_or_missing(tracker, &row.job_key)?;
+        let variant = tailored_variant(&master, &job, relocation)?;
         let pdf_path = out_dir.join(format!("{}.pdf", safe_key(&row.job_key)));
         let pdf = renderer.render(&variant, &pdf_path).await?;
         tracker.set_cv_path(&row.job_key, &pdf)?;
@@ -309,10 +331,7 @@ pub async fn refresh_cvs(
     relocation: Relocation<'_>,
     now: DateTime<Utc>,
 ) -> Result<Vec<String>, CvError> {
-    let master = tokio::fs::read_to_string(cv_master)
-        .await
-        .with_context(|| format!("reading {}", cv_master.display()))?;
-    ensure_ready(&master)?;
+    let master = read_master(cv_master).await?;
     let stamp = now.format("%Y%m%dT%H%M%SZ").to_string();
     let mut refreshed = Vec::new();
     for state in [State::Prepared, State::NeedsGonza] {
@@ -320,12 +339,8 @@ pub async fn refresh_cvs(
             let Some(cv_path) = row.cv_path.as_deref() else {
                 continue;
             };
-            let job = tracker
-                .get_job(&row.job_key)?
-                .with_context(|| format!("job {} is missing from the tracker", row.job_key))?;
-            let base = relocation.master_for(&master, &job);
-            let variant = tailor(&base, &job);
-            assert_no_new_skills(&base, &variant)?;
+            let job = job_or_missing(tracker, &row.job_key)?;
+            let variant = tailored_variant(&master, &job, relocation)?;
             let pdf_path = Path::new(cv_path);
             if pdf_path.exists() {
                 let folder = pdf_path
@@ -476,7 +491,7 @@ pub async fn submit_all_while(
     }
     let capped = cap_skips(tracker, CapStage::Submit)?;
     let mut new_dry_runs: u32 = 0;
-    let mut errors_in_a_row: u32 = 0;
+    let mut errors = FormErrorStreak::default();
     for row in tracker.list_by_state(State::Prepared)? {
         if !keep_going() {
             break; // the execution window closed: what is left waits for the next run
@@ -486,9 +501,7 @@ pub async fn submit_all_while(
             outcomes.push(outcome(&row.job_key, "blocked", Some(&skip.line())));
             continue;
         }
-        let job = tracker
-            .get_job(&row.job_key)?
-            .with_context(|| format!("job {} is missing from the tracker", row.job_key))?;
+        let job = job_or_missing(tracker, &row.job_key)?;
         let gated = check_gate(&job, &row, tracker, criteria, exclusions, stop_file, now)?;
         let gate_reason = gated.decision.reason.as_deref();
         match gate_reason {
@@ -496,7 +509,7 @@ pub async fn submit_all_while(
             // The cap stops the forms, not the bookkeeping: a later posting that is only a
             // listing, or is excluded or stale, is still moved (the gate checks those first).
             Some("daily_cap") => continue,
-            Some(reason @ ("manual_only_platform" | "listing_only")) => {
+            Some(reason @ (REASON_MANUAL_ONLY | REASON_LISTING_ONLY)) => {
                 let note = format!("{reason}: postular a mano desde el enlace del aviso");
                 tracker.transition(&row.job_key, State::NeedsGonza, Some(&note), now)?;
                 outcomes.push(outcome(&row.job_key, "blocked", gate_reason));
@@ -507,7 +520,7 @@ pub async fn submit_all_while(
                 outcomes.push(outcome(&row.job_key, "blocked", gate_reason));
                 continue;
             }
-            Some("stale_posting") => {
+            Some(REASON_STALE) => {
                 let note = stale_note(criteria);
                 tracker.transition(&row.job_key, State::Withdrawn, Some(&note), now)?;
                 outcomes.push(outcome(&row.job_key, "blocked", gate_reason));
@@ -571,13 +584,13 @@ pub async fn submit_all_while(
             .await;
             match handed {
                 Ok(handed) => {
-                    errors_in_a_row = 0;
+                    errors.form_worked();
                     outcomes.push(handed);
                 }
                 Err(err) => {
-                    errors_in_a_row += 1;
                     page_error(tracker, &row.job_key, &err, now, &mut outcomes)?;
-                    if errors_in_a_row >= MAX_ERRORS_IN_A_ROW {
+                    errors.form_failed();
+                    if errors.must_stop() {
                         outcomes.push(stopped_outcome());
                         break;
                     }
@@ -600,16 +613,16 @@ pub async fn submit_all_while(
         };
         let result = match filler.submit(&job, &cv_pdf, bank, fill, &shots_dir).await {
             Ok(result) => {
-                errors_in_a_row = 0;
+                errors.form_worked();
                 result
             }
             Err(err) => {
                 // This form broke (a redirect destroyed the page, a script threw). It goes to
                 // Gonza and the run moves on; only a streak means the browser itself is gone.
-                errors_in_a_row += 1;
                 page_error(tracker, &row.job_key, &err, now, &mut outcomes)?;
                 close_intent(tracker, intent, "error", now)?;
-                if errors_in_a_row >= MAX_ERRORS_IN_A_ROW {
+                errors.form_failed();
+                if errors.must_stop() {
                     outcomes.push(stopped_outcome());
                     break;
                 }
@@ -689,6 +702,26 @@ pub async fn submit_all_while(
 /// Errors from the form side in a row after which the run stops: one page that breaks is that
 /// page's problem, three in a row mean the browser or the driver is gone.
 const MAX_ERRORS_IN_A_ROW: u32 = 3;
+
+/// The form errors in a row of one run: a form that works resets it, and
+/// `MAX_ERRORS_IN_A_ROW` failures in a row mean the run must stop.
+#[derive(Default)]
+struct FormErrorStreak(u32);
+
+impl FormErrorStreak {
+    fn form_worked(&mut self) {
+        self.0 = 0;
+    }
+
+    fn form_failed(&mut self) {
+        self.0 += 1;
+    }
+
+    /// Whether the failures in a row have reached the limit.
+    fn must_stop(&self) -> bool {
+        self.0 >= MAX_ERRORS_IN_A_ROW
+    }
+}
 
 /// Moves an application whose form raised an error to `needs_gonza` with `page_error: <first line>`
 /// (Playwright errors carry a long call log after it) and reports it.

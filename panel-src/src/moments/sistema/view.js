@@ -11,21 +11,24 @@
 
 import { t, tn, fmtDate, fmtMoney, fmtNumber, fmtPercent } from "../../i18n/index.js";
 import { ago, windowLabel, reasonShort } from "../../core/format.js";
-import { serverDay, SERVER_TZ } from "../../core/time.js";
+import { serverDay, SERVER_TZ, HOUR_MS, MINUTE_MS, DAY_MS } from "../../core/time.js";
 import { horaOf, WINDOW_START, WINDOW_END } from "../../scene/clock.js";
 import { KEYS } from "../../ui/keys.js";
 import { clean } from "../shared/util.js";
 import { askOf } from "../shared/stops.js";
 
-const HOUR = 3600000;
-const MIN = 60000;
-/** The server calls the engine "stale" after this many hours without a run (crates/jobbot-panel/src/snapshot.rs, ENGINE_STALE_HOURS): keep in step. */
+/** The server calls the engine "stale" after this many hours without a run (crates/jobbot-panel/src/snapshot/controls.rs, ENGINE_STALE_HOURS): keep in step. */
 export const ENGINE_STALE_HOURS = 36;
 export const STEP_IDS = ["discover", "prepare", "submit", "dossiers"];
 export const ERRORS_SHOWN = 4;
 export const SOURCES_SHOWN = 8;
 /** A snapshot older than this (a poll is every 30 s) says how old it is (spec §9.4). */
-export const OLD_MS = 10 * MIN;
+export const OLD_MS = 10 * MINUTE_MS;
+const DEFAULT_SLOT_MIN = 30; // the length of a slot of the strip when the server does not say
+/** A run that ended badly is recorded as "error: <what happened>". */
+const ERROR_PREFIX = "error:";
+/** A response rate is only said when this many were sent in the week (spec §5.5): fewer is noise. */
+const MIN_SENT_FOR_RATE = 10;
 const SKIP_REASONS = new Set(["cooldown", "stop", "window_closed", "after_error", "error", "not_due"]);
 const ENGINES = new Set(["never", "stale", "recent"]);
 
@@ -57,35 +60,48 @@ const signedHours = (a, b) => ((a - b + 36) % 24) - 12;      // a - b on the 24-
  * by an hour, which is corrected once.
  */
 export function nightOf(nowMs) {
-  const base = Math.floor(nowMs / MIN) * MIN;
+  const base = Math.floor(nowMs / MINUTE_MS) * MINUTE_MS;
   const hora = horaOf(base);
-  let from = base - (hora >= WINDOW_START ? hora - WINDOW_START : hora + 24 - WINDOW_START) * HOUR;
-  from -= signedHours(horaOf(from), WINDOW_START) * HOUR;
-  let to = from + SPAN_H * HOUR;
-  to -= signedHours(horaOf(to), WINDOW_END) * HOUR;
+  let from = base - (hora >= WINDOW_START ? hora - WINDOW_START : hora + 24 - WINDOW_START) * HOUR_MS;
+  from -= signedHours(horaOf(from), WINDOW_START) * HOUR_MS;
+  let to = from + SPAN_H * HOUR_MS;
+  to -= signedHours(horaOf(to), WINDOW_END) * HOUR_MS;
   return { from, to, tonight: nowMs >= from && nowMs <= to };
 }
 
+/** Where a moment falls on the strip of `night`, as a share (0-100) of its length. */
+const pctOf = (night, ms) => ((ms - night.from) / (night.to - night.from)) * 100;
+
+/** The marks of the strip: the last run and the next one when they fall inside the night, and now while it is on. */
+function marksOf(night, { nowMs, lastMs, nextMs }) {
+  const inside = (ms) => ms != null && ms >= night.from && ms <= night.to;
+  const marks = [];
+  if (inside(lastMs)) marks.push({ id: "last", pct: pctOf(night, lastMs), label: t("sistema.strip.last", { hora: hhmm(lastMs) }) });
+  if (inside(nextMs)) marks.push({ id: "next", pct: pctOf(night, nextMs), label: t("sistema.strip.next", { hora: hhmm(nextMs) }) });
+  if (night.tonight) marks.push({ id: "now", pct: pctOf(night, nowMs), label: t("sistema.strip.now") });
+  return marks;
+}
+
 /** The strip: the hours of the night, the half hours with postings read, the closed ones, and the marks (last run, next run, now). */
-function stripOf(snap, nowMs, lastMs, nextMs) {
+function stripOf(snap, { nowMs, lastMs, nextMs }) {
   const night = nightOf(nowMs);
   const span = night.to - night.from;
-  const at = (ms) => ((ms - night.from) / span) * 100;
-  const inside = (ms) => ms != null && ms >= night.from && ms <= night.to;
+  const at = (ms) => pctOf(night, ms);
   const a = isRecord(snap.activity) ? snap.activity : {};
-  const slotMs = Math.max(1, num(a.slot_minutes) || 30) * MIN;
-  const slots = (Array.isArray(a.slots) ? a.slots : []).filter(isRecord).map((s) => ({ ms: momentOf(s.at), seen: whole(s.seen), open: s.open })).filter((s) => s.ms != null && s.ms >= night.from && s.ms < night.to);
+  const slotMs = Math.max(1, num(a.slot_minutes) || DEFAULT_SLOT_MIN) * MINUTE_MS;
+  const recorded = (Array.isArray(a.slots) ? a.slots : []).filter(isRecord).map((s) => ({ ms: momentOf(s.at), seen: whole(s.seen), open: s.open }));
+  const slots = recorded.filter((s) => s.ms != null && s.ms >= night.from && s.ms < night.to);
   const max = slots.reduce((m, s) => Math.max(m, s.seen), 0);
-  const marks = [];
-  if (inside(lastMs)) marks.push({ id: "last", pct: at(lastMs), label: t("sistema.strip.last", { hora: hhmm(lastMs) }) });
-  if (inside(nextMs)) marks.push({ id: "next", pct: at(nextMs), label: t("sistema.strip.next", { hora: hhmm(nextMs) }) });
-  if (night.tonight) marks.push({ id: "now", pct: at(nowMs), label: t("sistema.strip.now") });
+  const marks = marksOf(night, { nowMs, lastMs, nextMs });
   const from = hhmm(night.from);
   const to = hhmm(night.to);
   return {
     title: t(night.tonight ? "sistema.strip.title.tonight" : "sistema.strip.title.last", { from, to }),
     aria: t("sistema.strip.aria", { from, to }),
-    hours: [0, 1, 2, 3, 4, 5].map((k) => { const ms = night.from + k * 3 * HOUR; return { pct: Math.min(100, Math.max(0, at(ms))), label: String(Math.round(horaOf(ms)) % 24).padStart(2, "0") }; }),
+    hours: [0, 1, 2, 3, 4, 5].map((k) => {
+      const ms = night.from + k * 3 * HOUR_MS;
+      return { pct: Math.min(100, Math.max(0, at(ms))), label: String(Math.round(horaOf(ms)) % 24).padStart(2, "0") };
+    }),
     bars: max > 0 ? slots.filter((s) => s.seen > 0).map((s) => ({ pct: at(s.ms), w: (slotMs / span) * 100, h: s.seen / max })) : [],
     busy: slots.filter((s) => s.open === false).map((s) => ({ pct: at(s.ms), w: (slotMs / span) * 100 })),
     marks,
@@ -100,7 +116,7 @@ function resultOf(c, hasRun) {
   const raw = typeof c.last_run_result === "string" ? c.last_run_result.trim() : "";
   if (raw === "ok") return { tone: "ok", text: t("sistema.result.ok"), detail: null };
   if (raw === "stopped" || raw === "window_closed") return { tone: "warn", text: t("sistema.result." + raw), detail: null };
-  if (/^error:/.test(raw)) return { tone: "bad", text: t("sistema.result.error"), detail: clean(raw.slice(6), 160) || null };
+  if (raw.startsWith(ERROR_PREFIX)) return { tone: "bad", text: t("sistema.result.error"), detail: clean(raw.slice(ERROR_PREFIX.length), 160) || null };
   if (raw) return { tone: "none", text: clean(raw, 160), detail: null };
   return { tone: "none", text: t(hasRun ? "sistema.result.norecord" : "sistema.result.nodata"), detail: null };
 }
@@ -154,7 +170,17 @@ function maskEmail(x) {
   if (!local || !domain) return null;
   return (local.includes("***") ? clean(local, 40) : local.charAt(0) + "***") + "@" + domain;
 }
-const shortId = (x) => { const s = clean(x, 80); return s.length > 12 ? s.slice(0, 6) + "…" + s.slice(-4) : s; };
+const ORG_ID_MAX = 12;   // an id this long or shorter is shown whole; a longer one keeps its head and its tail
+const ORG_ID_HEAD = 6;
+const ORG_ID_TAIL = 4;
+const shortId = (x) => { const s = clean(x, 80); return s.length > ORG_ID_MAX ? s.slice(0, ORG_ID_HEAD) + "…" + s.slice(-ORG_ID_TAIL) : s; };
+
+/** Whether anything pins the account down: a warning when it is false, a quiet note when true, and nothing for any other value. */
+function anchorOf(anchored) {
+  if (anchored === false) return { state: "loose", text: t("sistema.account.unanchored"), why: t("sistema.account.unanchored.why") };
+  if (anchored === true) return { state: "ok", text: t("sistema.account.anchored") };
+  return null;
+}
 
 function accountOf(raw, nowMs) {
   if (!isRecord(raw)) {
@@ -164,19 +190,20 @@ function accountOf(raw, nowMs) {
   const text = (x, max) => (typeof x === "string" && x.trim() ? clean(x, max) : "");
   const checked = momentOf(raw.checked_at);
   const join = (parts) => parts.filter(Boolean).join(" · ") || null;
+  const plan = text(raw.subscription, 24);
+  const cli = text(raw.cli_version, 24);
   return {
     state: ok ? "ok" : "bad",
     text: t(ok ? "sistema.account.ok" : "sistema.account.bad"),
     detail: ok ? null : text(raw.message, 200) || null,
-    who: join([maskEmail(raw.email), text(raw.subscription, 24) ? t("sistema.account.plan", { plan: text(raw.subscription, 24) }) : ""]),
+    who: join([maskEmail(raw.email), plan ? t("sistema.account.plan", { plan }) : ""]),
     folder: text(raw.config_dir, 120) || null,
     access: join([text(raw.auth_method, 24), text(raw.api_provider, 24), text(raw.org_id, 80) ? t("sistema.account.org", { org: shortId(raw.org_id) }) : ""]),
-    version: join([text(raw.cli_version, 24) ? t("sistema.account.cli", { version: text(raw.cli_version, 24) }) : "", checked != null ? t("sistema.account.checked", { ago: ago(raw.checked_at, nowMs) }) : ""]),
+    version: join([cli ? t("sistema.account.cli", { version: cli }) : "", checked != null ? t("sistema.account.checked", { ago: ago(raw.checked_at, nowMs) }) : ""]),
     fix: ok ? null : t("sistema.account.fix.bad"),
     // whether anything pins the account down (expected_email and expected_org_id both set in the local profile): a false is a real warning, a
     // true is said quietly, and a field the server did not send says nothing
-    anchor: raw.anchored === false ? { state: "loose", text: t("sistema.account.unanchored"), why: t("sistema.account.unanchored.why") }
-      : raw.anchored === true ? { state: "ok", text: t("sistema.account.anchored") } : null,
+    anchor: anchorOf(raw.anchored),
   };
 }
 
@@ -200,31 +227,40 @@ function spendOf(claude) {
 
 // ---- the figures, the limits, the sources and the errors
 
+/** One figure of the head: `isWords` says the value is words ("sin dato") rather than a number or an hour, which the page sets smaller. */
+const figure = (id, value, isWords, label) => ({ id, value, words: isWords, label });
+
+/** The sends of the last 24 hours against the cap, as "n de cap", with the record they came from; null when the server does not say both. */
+function sendsOf(snap) {
+  const trust = isRecord(snap.trust) ? snap.trust : null;
+  if (!trust || num(trust.sent_24h) == null || num(trust.cap) == null) return null;
+  return { text: t("sistema.fig.of", { n: whole(trust.sent_24h), of: whole(trust.cap) }), trust };
+}
+
 function figuresOf(snap, task, nowMs) {
-  const words = (value) => ({ value, words: true });
   let next;
   if (task.state === "registered" && task.nextMs != null) {
-    next = { value: hhmm(task.nextMs), words: false, label: t(sameDay(task.nextMs, nowMs) ? "sistema.fig.next" : "sistema.fig.next.day", { day: fmtDate(task.nextMs, "day", SERVER_TZ) }) };
+    next = figure("next", hhmm(task.nextMs), false, t(sameDay(task.nextMs, nowMs) ? "sistema.fig.next" : "sistema.fig.next.day", { day: fmtDate(task.nextMs, "day", SERVER_TZ) }));
   } else {
-    next = { ...words(t(task.state === "registered" ? "sistema.fig.scheduled" : task.state === "missing" ? "sistema.fig.notask" : "sistema.fig.nodata")), label: t("sistema.fig.next") };
+    const wordKey = { registered: "sistema.fig.scheduled", missing: "sistema.fig.notask" }[task.state] ?? "sistema.fig.nodata";
+    next = figure("next", t(wordKey), true, t("sistema.fig.next"));
   }
-  const trust = isRecord(snap.trust) ? snap.trust : null;
-  const sends = trust && num(trust.sent_24h) != null && num(trust.cap) != null
-    ? { value: t("sistema.fig.of", { n: whole(trust.sent_24h), of: whole(trust.cap) }), words: false, label: t("sistema.fig.sends") }
-    : { ...words(t("sistema.fig.nodata")), label: t("sistema.fig.sends") };
+  const sent = sendsOf(snap);
+  const sends = sent ? figure("sends", sent.text, false, t("sistema.fig.sends")) : figure("sends", t("sistema.fig.nodata"), true, t("sistema.fig.sends"));
   // the Claude spend is not a figure: the account's row says it once, with its meter and its warning
-  return [{ id: "next", ...next }, { id: "sends", ...sends }];
+  return [next, sends];
 }
 
 function limitsOf(snap, batchMin) {
-  const trust = isRecord(snap.trust) ? snap.trust : null;
   const p = isRecord(snap.pipeline) ? snap.pipeline : {};
   const nodata = t("sistema.fig.nodata");
+  const sent = sendsOf(snap);
   let sends = { id: "sends", label: t("sistema.limit.sends"), value: nodata, sub: null };
-  if (trust && num(trust.sent_24h) != null && num(trust.cap) != null) {
+  if (sent) {
+    const trust = sent.trust;
     const first = whole(trust.first_n);
     sends = {
-      id: "sends", label: t("sistema.limit.sends"), value: t("sistema.fig.of", { n: whole(trust.sent_24h), of: whole(trust.cap) }),
+      id: "sends", label: t("sistema.limit.sends"), value: sent.text,
       sub: trust.review_phase === true ? t("sistema.limit.sends.review", { reviewed: whole(trust.reviewed), first, after: whole(trust.cap_after) }) : t("sistema.limit.sends.after", { first }),
     };
   }
@@ -235,7 +271,10 @@ function limitsOf(snap, batchMin) {
   const c = isRecord(snap.controls) ? snap.controls : {};
   const minRaw = c.auto_approve_min;
   const autoOn = Number.isInteger(minRaw) && minRaw >= 1 && minRaw <= 100;
-  const auto = { id: "auto", label: t("sistema.limit.auto"), value: minRaw === null ? t("sistema.limit.auto.off") : autoOn ? tn("sistema.limit.auto.from", minRaw) : nodata, sub: t("sistema.limit.auto.sub") };
+  let autoValue = nodata;
+  if (minRaw === null) autoValue = t("sistema.limit.auto.off");
+  else if (autoOn) autoValue = tn("sistema.limit.auto.from", minRaw);
+  const auto = { id: "auto", label: t("sistema.limit.auto"), value: autoValue, sub: t("sistema.limit.auto.sub") };
   return {
     rows: [
       sends,
@@ -254,13 +293,12 @@ function sourcesOf(snap, shown) {
     .sort((a, b) => b.n - a.n || a.name.localeCompare(b.name));
   const top = all[0] ? all[0].n : 0;
   const rows = all.slice(0, shown).map((r) => ({ ...r, w: top > 0 ? r.n / top : 0 }));
-  const m = isRecord(snap.metrics) ? snap.metrics : {};
-  const sentWeek = whole(m.sent_week);
+  const metrics = isRecord(snap.metrics) ? snap.metrics : {};
+  const sentWeek = whole(metrics.sent_week);
   let week = null;
   if (sentWeek > 0) {
-    week = tn("sistema.sources.week", sentWeek, { a: whole(m.responses_week) });
-    // a rate is only said when there are ten or more to take it from (spec §5.5): fewer is noise
-    if (sentWeek >= 10 && num(m.response_rate) != null) week += " · " + fmtPercent(m.response_rate);
+    week = tn("sistema.sources.week", sentWeek, { a: whole(metrics.responses_week) });
+    if (sentWeek >= MIN_SENT_FOR_RATE && num(metrics.response_rate) != null) week += " · " + fmtPercent(metrics.response_rate);
   }
   return {
     rows,
@@ -271,9 +309,9 @@ function sourcesOf(snap, shown) {
   };
 }
 
-function errorsOf(snap, nowMs, lastMs, runResult, shown) {
+function errorsOf(snap, { nowMs, lastMs, runResult, shown }) {
   const a = isRecord(snap.activity) ? snap.activity : {};
-  const since = momentOf(a.from) ?? nowMs - 24 * HOUR;
+  const since = momentOf(a.from) ?? nowMs - DAY_MS;
   const cards = isRecord(snap.needs_gonza) && Array.isArray(snap.needs_gonza.cards) ? snap.needs_gonza.cards : [];
   const stuck = cards.filter(isRecord).map((card, i) => ({ card, i, at: momentOf(card.waiting_since) ?? momentOf(card.updated_at) }))
     .filter((x) => x.at != null && x.at >= since)
@@ -281,10 +319,11 @@ function errorsOf(snap, nowMs, lastMs, runResult, shown) {
     .map(({ card, at, i }) => {
       const co = clean(card.company, 50);
       const role = clean(card.title, 90);
+      const key = typeof card.key === "string" && card.key ? card.key : null;
       return {
-        id: "err:" + (typeof card.key === "string" && card.key ? card.key : i), hour: hhmm(at),
+        id: "err:" + (key ?? i), hour: hhmm(at),
         text: [co, role].filter(Boolean).join(" · ") || t("sistema.errors.unnamed"),
-        why: reasonShort(card) || null, open: typeof card.key === "string" && card.key ? card.key : null,
+        why: reasonShort(card) || null, open: key,
       };
     });
   const rows = [];
@@ -304,7 +343,7 @@ function errorsOf(snap, nowMs, lastMs, runResult, shown) {
  *   { engine, eyebrow, status, old, head: { lead, tail }, chip: { tone, text, stop }, figures[2], strip, run: { last, result, steps[4], window },
  *     task, stop, account, spend, limits, sources, errors, foot }
  * `intent` is what the person asked for before the server has answered (true: STOP on, false: STOP off, null: ask the snapshot): the page
- * shows it at once. `batchMin` is the batch threshold when something stores it; none does yet, so it is "sin dato" until one does.
+ * shows it at once. `batchMin` is the lote's threshold from the page's settings; null when there is no setting, which the stop shows as "sin dato".
  * `show` ({ sources, errors }) says how many boards and errors to list when the sheet has no room for all: the rest is "y N más".
  */
 export function sistemaView(m, { nowMs, intent = null, batchMin = null, show = null } = {}) {
@@ -331,7 +370,7 @@ export function sistemaView(m, { nowMs, intent = null, batchMin = null, show = n
     head,
     chip: { tone: engine, text: engine === "stale" ? t("sistema.chip.stale", { hours: ENGINE_STALE_HOURS }) : t("sistema.chip." + engine), stop: stopped },
     figures: figuresOf(snap, task, nowMs),
-    strip: stripOf(snap, nowMs, lastMs, task.nextMs),
+    strip: stripOf(snap, { nowMs, lastMs, nextMs: task.nextMs }),
     run: {
       last: lastMs == null ? null : { at: lastMs, text: t("sistema.row.last.value", { when: whenOf(lastMs, nowMs), ago: ago(c.last_run_at, nowMs) }) },
       result,
@@ -340,7 +379,7 @@ export function sistemaView(m, { nowMs, intent = null, batchMin = null, show = n
     },
     task: { state: task.state, text: task.text, hint: task.hint },
     stop: {
-      on: stopped, action: stopped ? "resume" : "stop", key: keyOf("engine"),
+      on: stopped, key: keyOf("engine"),
       label: t(stopped ? "sistema.stop.act.resume" : "sistema.stop.act.stop"),
       text: t(stopped ? "sistema.stop.on" : "sistema.stop.off"),
       hint: t(stopped ? "sistema.stop.hint.resume" : "sistema.stop.hint.stop"),
@@ -349,7 +388,7 @@ export function sistemaView(m, { nowMs, intent = null, batchMin = null, show = n
     spend: spendOf(snap.claude),
     limits: limitsOf(snap, batchMin),
     sources: sourcesOf(snap, shownSources),
-    errors: errorsOf(snap, nowMs, lastMs, result, shownErrors),
+    errors: errorsOf(snap, { nowMs, lastMs, runResult: result, shown: shownErrors }),
     foot: {
       title: t("sistema.foot.prefs"),
       keys: [["lang", "sistema.foot.lang"], ["theme", "sistema.foot.theme"], ["sound", "sistema.foot.sound"]].map(([id, label]) => ({ key: keyOf(id), label: t(label) })),

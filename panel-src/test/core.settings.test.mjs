@@ -49,6 +49,30 @@ test("settings: defaults, saving, bad values, change events and address override
   assert.equal(none.get("motion"), "calm");
 });
 
+test("settings: a patch is written to the store once, whatever number of settings it names, and a patch that names none writes nothing", () => {
+  const box = new Map();
+  let writes = 0;
+  const store = { get: (k) => (box.has(k) ? box.get(k) : null), set: (k, v) => { writes += 1; box.set(k, v); } };
+  const s = createSettings({ store });
+  const heard = [];
+  s.onChange((c) => heard.push([c.key, c.value, c.previous]));
+  s.set({ motion: "calm", sound: true, nothing: 1 });
+  assert.equal(writes, 1, "two changed keys, one write");
+  assert.deepEqual(JSON.parse(box.get("settings")), { motion: "calm", sound: true });
+  assert.deepEqual(heard, [["motion", "calm", "auto"], ["sound", true, false]]);
+  s.set("nothing", 1);
+  s.set({});
+  assert.equal(writes, 1, "no setting named, nothing written");
+  box.set("settings", JSON.stringify({ motion: "calm", sound: true, world: "old" }));
+  s.set({ motion: "calm", sound: true });
+  assert.equal(writes, 2, "the same values are written again: a write that failed is retried and a leftover key leaves");
+  assert.deepEqual(JSON.parse(box.get("settings")), { motion: "calm", sound: true });
+  assert.equal(heard.length, 2, "and nobody hears a change that was none");
+  s.set({ motion: "full", sound: true });
+  assert.equal(writes, 3);
+  assert.deepEqual(JSON.parse(box.get("settings")), { motion: "full", sound: true });
+});
+
 test("settings: the `world` an earlier page saved, or an address asks for, is ignored without error and dropped on the next save", () => {
   for (const old of ["off", "high", 5, null, { deep: true }]) {
     const { box, store } = memory();

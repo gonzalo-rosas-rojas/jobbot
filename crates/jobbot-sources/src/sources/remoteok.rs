@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 
 use super::Source;
-use super::base::{failure, from_epoch, get_json, id_string, parse_iso, skipped_error, str_field};
+use super::base::{from_epoch, get_json, id_string, parse_iso, record, str_field};
 use jobbot_domain::models::{FetchResult, Job};
 use jobbot_domain::text::html_to_text;
 
@@ -66,17 +66,7 @@ impl Source for RemoteOkSource {
 
     async fn fetch(&self) -> FetchResult {
         let mut result = FetchResult::default();
-        match self.fetch_feed().await {
-            Ok((jobs, skipped)) => {
-                result.jobs = jobs;
-                if skipped > 0 {
-                    result
-                        .errors
-                        .push(skipped_error("remoteok", "api", skipped));
-                }
-            }
-            Err(error) => result.errors.push(failure("remoteok", "api", &error)),
-        }
+        record(&mut result, "remoteok", "api", self.fetch_feed().await);
         result
     }
 }

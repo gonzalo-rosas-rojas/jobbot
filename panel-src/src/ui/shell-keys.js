@@ -11,9 +11,10 @@
 
 import { momentOf } from "../moments/registry.js";
 import { STOP_IDS } from "../scene/poses.js";
+import { KEYS } from "./keys.js";
 
 // The verbs of a row or of a stop (spec §3.4): all of them travel to the moment.
-export const MOMENT_VERBS = ["move", "open", "approve", "confirm", "resolve", "withdraw", "snooze", "register", "done", "newtask", "link", "filter", "find", "field", "batch", "engine"];
+export const MOMENT_VERBS = KEYS.filter((k) => k.scope === "row" || k.scope === "stop").map((k) => k.id);
 
 /**
  * createKeyHandlers({ stop, cursor, drawer, help, menu, palette, tools, sheet, go, cancelJump }) -> { [verb]: (key, event) => void }
@@ -21,8 +22,11 @@ export const MOMENT_VERBS = ["move", "open", "approve", "confirm", "resolve", "w
  * `stop()` is the stop on screen; `go(id)` travels; `cancelJump()` stops a trip in the air.
  */
 export function createKeyHandlers({ stop, cursor, drawer, help, menu, palette, tools, sheet = null, go, cancelJump }) {
+  /** j goes down the list (and to the next application with the drawer open), k goes up. */
+  const directionOf = (key) => (key === "j" ? 1 : -1);
+
   function byDefault(verb, key) {
-    if (verb === "move") cursor.move(key === "j" ? 1 : -1);
+    if (verb === "move") cursor.move(directionOf(key));
     else if (verb === "open") {
       const row = cursor.current();
       const job = cursor.jobOf(row);
@@ -31,7 +35,6 @@ export function createKeyHandlers({ stop, cursor, drawer, help, menu, palette, t
   }
 
   const toMoment = (verb) => (key, event) => {
-    if (verb === "move" && drawer.isOpen()) { drawer.step(key === "j" ? 1 : -1); return; }
     const moment = momentOf(stop());
     if (moment && typeof moment.onKey === "function" && moment.onKey(verb, cursor.current(), event) === true) return;
     byDefault(verb, key);
@@ -56,10 +59,16 @@ export function createKeyHandlers({ stop, cursor, drawer, help, menu, palette, t
       else if (help.isOpen()) help.close();
       else if (palette.isOpen()) palette.close();
       else if (menu.isOpen()) menu.close();
-      else if (drawer.isOpen()) drawer.close();
+      else if (drawer.isOpen()) drawer.closeAndRestore();
       else cursor.clear();
     },
   };
-  for (const verb of MOMENT_VERBS) handlers[verb] = toMoment(verb);
+  // with the drawer open, j and k change the application it shows instead of moving the cursor
+  const moveInMoment = toMoment("move");
+  for (const verb of MOMENT_VERBS) if (verb !== "move") handlers[verb] = toMoment(verb);
+  handlers.move = (key, event) => {
+    if (drawer.isOpen()) drawer.step(directionOf(key));
+    else moveInMoment(key, event);
+  };
   return handlers;
 }

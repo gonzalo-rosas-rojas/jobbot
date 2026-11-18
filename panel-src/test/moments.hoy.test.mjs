@@ -5,7 +5,8 @@ import { setLang, setTimeZone } from "../src/i18n/index.js";
 import esHoy from "../src/i18n/es/hoy.js";
 import enHoy from "../src/i18n/en/hoy.js";
 import { model, candidates, turnCount, nightFigures } from "../src/core/model.js";
-import { hoyView, turnWord, NEXT_ROWS, SINCE_ROWS, SPELLED_UP_TO, ACTION_LABEL, keyShown } from "../src/moments/hoy/view.js";
+import { hoyView, turnWord, NEXT_ROWS, SINCE_ROWS, SPELLED_UP_TO, ACTION_LABEL } from "../src/moments/hoy/view.js";
+import { keyShown } from "../src/ui/keys.js";
 import { clean, safeHref } from "../src/moments/shared/util.js";
 import { KEYS } from "../src/ui/keys.js";
 
@@ -303,4 +304,44 @@ test("a partial snapshot (no activity, no threshold, a card with no score, more 
     for (const s of strings(shown)) assert.doesNotMatch(s, /NaN|undefined|\bnull\b|−|\[object|⟦/, `${lang}: ${s}`);
   }
   fresh();
+});
+
+test("the mailbox warning: said only when applications wait and the last import is missing or over 48 hours old at generated_at", () => {
+  fresh();
+  const warn = (mutate, lang = "es") => {
+    fresh(lang);
+    const snap = fixture("rich");
+    mutate(snap);
+    return view(snap).mailWarn;
+  };
+  const at = (snap, hours) => new Date(Date.parse(snap.generated_at) - hours * HOUR).toISOString();
+  assert.equal(warn(() => {}), null, "an import two hours old: no warning");
+  assert.equal(warn((s) => { s.today.inbox.imported_at = at(s, 48); }), null, "exactly 48 hours is still fine");
+  assert.equal(
+    warn((s) => { s.today.inbox = { imported_at: at(s, 72), waiting: 6 }; }),
+    "El correo no se lee hace 3 días. Hay 6 postulaciones esperando respuesta y lo que hayan contestado no está aquí.",
+  );
+  assert.equal(
+    warn((s) => { s.today.inbox = { imported_at: at(s, 72), waiting: 6 }; }, "en"),
+    "The mailbox has not been read for 3 days. 6 applications are waiting for an answer, and whatever the companies replied is not here.",
+  );
+  assert.equal(
+    warn((s) => { s.today.inbox = { imported_at: null, waiting: 1 }; }),
+    "El correo nunca se ha leído. Hay 1 postulación esperando respuesta y lo que hayan contestado no está aquí.",
+  );
+  assert.match(warn((s) => { s.today.inbox = { imported_at: null, waiting: 2 }; }, "en"), /^The mailbox has never been read\. 2 applications are waiting/);
+  assert.equal(warn((s) => { s.today.inbox = { imported_at: null, waiting: 0 }; }), null, "nothing waits: no warning, even if never imported");
+  assert.equal(warn((s) => { delete s.today.inbox; }), null, "a snapshot from an older binary has no inbox: no warning, no error");
+});
+
+test("the mailbox days are counted against generated_at, not against the browser clock", () => {
+  fresh();
+  const snap = fixture("rich");
+  snap.today.inbox = { imported_at: new Date(Date.parse(snap.generated_at) - 60 * HOUR).toISOString(), waiting: 3 };
+  const early = view(snap, { nowMs: Date.parse(snap.generated_at) });
+  const late = view(snap, { nowMs: Date.parse(snap.generated_at) + 30 * 24 * HOUR });
+  assert.match(early.mailWarn, /hace 2 días/);
+  assert.equal(late.mailWarn, early.mailWarn, "a browser clock a month ahead changes nothing");
+  snap.today.inbox.imported_at = new Date(Date.parse(snap.generated_at) + HOUR).toISOString();
+  assert.equal(view(snap).mailWarn, null, "an import dated after the snapshot (clock skew) is not old");
 });

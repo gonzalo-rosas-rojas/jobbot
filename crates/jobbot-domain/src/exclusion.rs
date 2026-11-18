@@ -33,49 +33,59 @@ impl ExclusionResult {
 /// the title and description (names), and finally the category phrases. Empty fields
 /// never match anything.
 pub fn check_exclusion(job: &Job, rules: &Exclusions) -> ExclusionResult {
+    excluded_by_domain(job, rules)
+        .or_else(|| excluded_by_name(job, rules))
+        .or_else(|| excluded_by_category(job, rules))
+        .map_or_else(ExclusionResult::allowed, ExclusionResult::excluded)
+}
+
+/// Both sides are read with look-alike letters folded, so a name or phrase spelled with
+/// Cyrillic or Greek letters that look Latin still matches.
+fn folded(text: &str) -> String {
+    fold_look_alikes(&as_read(text))
+}
+
+/// `domain:<d>` when the apply or posting URL is on an excluded domain or one of its subdomains.
+fn excluded_by_domain(job: &Job, rules: &Exclusions) -> Option<String> {
     let hosts: Vec<String> = [host_of(&job.url), host_of(&job.apply_url)]
         .into_iter()
         .filter(|host| !host.is_empty())
         .collect();
-    for domain in &rules.domains {
+    rules.domains.iter().find_map(|domain| {
         let domain = domain.trim().to_lowercase();
-        if domain.is_empty() {
-            continue;
-        }
         let subdomain_suffix = format!(".{domain}");
-        if hosts
-            .iter()
-            .any(|host| *host == domain || host.ends_with(&subdomain_suffix))
-        {
-            return ExclusionResult::excluded(format!("domain:{domain}"));
-        }
-    }
+        let on_domain = !domain.is_empty()
+            && hosts
+                .iter()
+                .any(|host| *host == domain || host.ends_with(&subdomain_suffix));
+        on_domain.then(|| format!("domain:{domain}"))
+    })
+}
 
-    // Both sides are read with look-alike letters folded, so a name or phrase spelled with
-    // Cyrillic or Greek letters that look Latin still matches.
-    let folded = |text: &str| fold_look_alikes(&as_read(text));
+/// `name:<n>` when an excluded name is the company or appears in the title or description.
+fn excluded_by_name(job: &Job, rules: &Exclusions) -> Option<String> {
     let company = normalize(&folded(&job.company));
     let body = normalize(&folded(&format!("{} {}", job.title, job.description)));
-    for name in &rules.names {
+    rules.names.iter().find_map(|name| {
         let wanted = normalize(&folded(name));
-        if !wanted.is_empty()
-            && (contains_word_lc(&company, &wanted) || contains_word_lc(&body, &wanted))
-        {
-            return ExclusionResult::excluded(format!("name:{name}"));
-        }
-    }
+        let named = !wanted.is_empty()
+            && (contains_word_lc(&company, &wanted) || contains_word_lc(&body, &wanted));
+        named.then(|| format!("name:{name}"))
+    })
+}
 
+/// `category:<c>` when an excluded category phrase appears in the title, company or description.
+fn excluded_by_category(job: &Job, rules: &Exclusions) -> Option<String> {
     let text = folded(&format!(
         "{}\n{}\n{}",
         job.title, job.company, job.description
     ))
     .to_lowercase();
-    for category in &rules.categories {
-        if contains_word_lc(&text, &folded(category).to_lowercase()) {
-            return ExclusionResult::excluded(format!("category:{category}"));
-        }
-    }
-    ExclusionResult::allowed()
+    rules
+        .categories
+        .iter()
+        .find(|category| contains_word_lc(&text, &folded(category).to_lowercase()))
+        .map(|category| format!("category:{category}"))
 }
 
 #[cfg(test)]
@@ -88,6 +98,15 @@ mod tests {
     use crate::shipped;
 
     static RULES: LazyLock<Exclusions> = LazyLock::new(shipped::exclusions);
+
+    /// A small rule set of one made-up name and one category, to test the matching itself.
+    fn blocked_rules() -> Exclusions {
+        Exclusions {
+            names: vec!["Blocked Industries".into()],
+            domains: vec![],
+            categories: vec!["gambling".into()],
+        }
+    }
 
     #[test]
     fn group_companies_excluded_by_name() {
@@ -203,11 +222,7 @@ mod tests {
 
     #[test]
     fn a_name_or_category_split_by_an_invisible_character_or_written_wide_is_still_excluded() {
-        let rules = Exclusions {
-            names: vec!["Blocked Industries".into()],
-            domains: vec![],
-            categories: vec!["gambling".into()],
-        };
+        let rules = blocked_rules();
         for company in ["Blo\u{200B}cked Industries", "Ｂｌｏｃｋｅｄ Industries"] {
             let job = make_job_with(|j| j.company = company.into());
             assert!(check_exclusion(&job, &rules).excluded, "{company:?}");
@@ -220,11 +235,7 @@ mod tests {
 
     #[test]
     fn a_name_or_category_spelled_with_look_alike_letters_is_still_excluded() {
-        let rules = Exclusions {
-            names: vec!["Blocked Industries".into()],
-            domains: vec![],
-            categories: vec!["gambling".into()],
-        };
+        let rules = blocked_rules();
         // Cyrillic Ve; Cyrillic o, es and ie; Greek Beta; mathematical bold B.
         for company in [
             "\u{0412}locked Industries",

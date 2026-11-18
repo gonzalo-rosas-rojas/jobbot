@@ -12,10 +12,11 @@ import { local } from "../core/store.js";
 
 const DEFAULT_PREFS = Object.freeze({ actions: true, background: true, muteUntil: 0, work: true });
 
+const onUnlessFalse = (v) => v !== false;
 const CLEAN = {
-  actions: (v) => v !== false,
-  background: (v) => v !== false,
-  work: (v) => v !== false,
+  actions: onUnlessFalse,
+  background: onUnlessFalse,
+  work: onUnlessFalse,
   muteUntil: (v) => (Number.isFinite(v) && v > 0 ? Math.round(v) : 0),
 };
 const KEYS = Object.keys(DEFAULT_PREFS);

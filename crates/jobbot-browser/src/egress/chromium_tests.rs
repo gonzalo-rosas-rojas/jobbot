@@ -23,11 +23,7 @@ use crate::test_support::fixtures_dir;
 /// The driver and a Chromium started with `options`.
 async fn chromium(options: LaunchOptions) -> (Playwright, Browser) {
     let playwright = Playwright::launch().await.unwrap();
-    let browser = playwright
-        .chromium()
-        .launch_with_options(options)
-        .await
-        .unwrap();
+    let browser = crate::launch::start(&playwright, options).await.unwrap();
     (playwright, browser)
 }
 
@@ -39,9 +35,9 @@ struct Counter {
 }
 
 impl Counter {
-    async fn on(ip: IpAddr) -> Option<Counter> {
-        let listener = TcpListener::bind((ip, 0)).await.ok()?;
-        let port = listener.local_addr().ok()?.port();
+    async fn on(ip: IpAddr) -> std::io::Result<Counter> {
+        let listener = TcpListener::bind((ip, 0)).await?;
+        let port = listener.local_addr()?.port();
         let seen = Arc::new(AtomicUsize::new(0));
         let count = Arc::clone(&seen);
         let accept = tokio::spawn(async move {
@@ -50,7 +46,7 @@ impl Counter {
                 drop(stream);
             }
         });
-        Some(Counter { port, seen, accept })
+        Ok(Counter { port, seen, accept })
     }
 
     fn seen(&self) -> usize {
@@ -79,18 +75,39 @@ async fn run_probe(browser: &Browser, v4: &Counter, v6: Option<&Counter>) {
     let _ = page.close().await;
 }
 
+/// Listeners on this machine's loopback addresses; the IPv6 one only where the machine has it.
+async fn loopback_counters() -> (Counter, Option<Counter>) {
+    let v4 = Counter::on(IpAddr::V4(Ipv4Addr::LOCALHOST))
+        .await
+        .expect("listening on 127.0.0.1");
+    // Only "this machine has no IPv6 loopback" skips the IPv6 half; any other failure to bind
+    // fails the test instead of passing it without having looked at [::1].
+    let v6 = match Counter::on(IpAddr::V6(Ipv6Addr::LOCALHOST)).await {
+        Ok(counter) => Some(counter),
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::AddrNotAvailable | std::io::ErrorKind::Unsupported
+            ) =>
+        {
+            None
+        }
+        Err(error) => panic!("could not listen on [::1]: {error}"),
+    };
+    (v4, v6)
+}
+
 fn hosts(refusals: &[Refusal]) -> Vec<&str> {
     refusals
         .iter()
-        .map(|refusal| refusal.host.as_str())
+        .map(|refusal| refusal.shown_host())
         .collect()
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs chromium"]
 async fn a_page_cannot_reach_this_machine_through_the_proxy() {
-    let v4 = Counter::on(IpAddr::V4(Ipv4Addr::LOCALHOST)).await.unwrap();
-    let v6 = Counter::on(IpAddr::V6(Ipv6Addr::LOCALHOST)).await;
+    let (v4, v6) = loopback_counters().await;
 
     // Control: without the proxy the probe does reach the listener, so zero below means something.
     let (_driver, plain) = chromium(launch_options()).await;
@@ -102,8 +119,7 @@ async fn a_page_cannot_reach_this_machine_through_the_proxy() {
         "the probe reached nothing even without the proxy"
     );
 
-    let v4 = Counter::on(IpAddr::V4(Ipv4Addr::LOCALHOST)).await.unwrap();
-    let v6 = Counter::on(IpAddr::V6(Ipv6Addr::LOCALHOST)).await;
+    let (v4, v6) = loopback_counters().await;
     let egress = Egress::start(Arc::new(SystemResolver)).await.unwrap();
     let (_driver, guarded) = chromium(guarded_launch_options(&egress)).await;
     run_probe(&guarded, &v4, v6.as_ref()).await;
@@ -134,7 +150,11 @@ async fn a_page_cannot_reach_this_machine_through_the_proxy() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs chromium"]
 async fn the_resolver_rule_leaves_chromium_no_lookups_of_its_own() {
-    let rule = crate::launch::EGRESS_ARGS[0].to_string();
+    let rule = crate::launch::EGRESS_ARGS
+        .iter()
+        .find(|arg| arg.starts_with("--host-resolver-rules="))
+        .expect("the egress arguments carry the resolver rule")
+        .to_string();
     let (_driver, browser) = chromium(launch_options().args(vec![rule])).await;
     let page = browser.new_page().await.unwrap();
     let error = page
@@ -232,6 +252,9 @@ async fn a_browser_whose_proxy_stopped_opens_nothing() {
     );
 }
 
+/// Bytes the listener keeps of each datagram (an Ethernet MTU); it counts datagrams, whatever their size.
+const RECV_BUFFER_BYTES: usize = 1500;
+
 /// Opens the WebRTC probe aimed at a UDP socket on 127.0.0.1 and returns what the page said and
 /// how many datagrams the socket got while ICE gathered its candidates.
 async fn webrtc_datagrams(browser: &Browser) -> (String, usize) {
@@ -242,7 +265,7 @@ async fn webrtc_datagrams(browser: &Browser) -> (String, usize) {
     let seen = Arc::new(AtomicUsize::new(0));
     let count = Arc::clone(&seen);
     let listen = tokio::spawn(async move {
-        let mut datagram = [0u8; 1500];
+        let mut datagram = [0u8; RECV_BUFFER_BYTES];
         while socket.recv_from(&mut datagram).await.is_ok() {
             count.fetch_add(1, Ordering::SeqCst);
         }

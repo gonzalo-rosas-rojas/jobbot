@@ -12,7 +12,8 @@ import { pointsOf, stageLabel, stateLabel, statusWord } from "../../core/format.
 import { say } from "./now.js";
 
 /** The class a dot of `pathOf` stands for, as a state of the list. */
-const stateOfDot = (dot) => (dot === "done" ? "done" : dot === "here you" ? "you" : dot === "here" ? "robot" : "todo");
+const STATE_OF_DOT = { done: "done", "here you": "you", here: "robot" };
+const stateOfDot = (dot) => STATE_OF_DOT[dot] ?? "todo";
 
 /** What a finished layer says about how it went. */
 function doneLines(detail, card, m) {
@@ -44,17 +45,18 @@ function stepper(card) {
  * `m` is the model (for the threshold of the week); without it the score line has no threshold.
  */
 export function journeyView(detail, card, m, answer) {
-  const l = layerOf(card);
-  if (l.at < 0) return null;
-  const beyond = l.who === "done";
+  const layer = layerOf(card);
+  if (layer.at < 0) return null;
+  const beyond = layer.who === "done";
   const dots = beyond ? null : pathOf(card).dots;
   const lines = doneLines(detail, card, m);
   const items = LAYERS.map((id, i) => {
     const st = beyond ? "done" : stateOfDot(dots[i]);
-    const current = !beyond && i === l.at;
-    const said = current ? say(l.text) : null;
+    const current = !beyond && i === layer.at;
+    const layerSentence = current ? say(layer.text) : null;
     // the answer above may already say it in the same words (a stuck form says why once)
-    const line = st === "done" ? lines[id] : said && !(answer && answer.sentence === said) ? said : null;
+    const ownSentence = layerSentence && !(answer && answer.sentence === layerSentence) ? layerSentence : null;
+    const line = st === "done" ? lines[id] : ownSentence;
     return h("li", { class: "j-" + st, "data-layer": id, "aria-current": current ? "step" : null },
       h("span", { class: "d-node", "aria-hidden": "true" }),
       h("div", { class: "d-lbody" },

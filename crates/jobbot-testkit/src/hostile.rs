@@ -135,7 +135,8 @@ pub fn postings() -> Vec<(&'static str, Job)> {
         .into_iter()
         .zip(LINKS.iter().cycle())
         .enumerate()
-        .map(|(i, ((name, text), (_, link)))| {
+        .map(|(i, ((name, text), link_entry))| {
+            let link = link_entry.1;
             let job = make_job_with(|job| {
                 job.external_id = format!("{i}-{}", text.chars().take(60).collect::<String>());
                 job.company = text.clone();
@@ -143,12 +144,15 @@ pub fn postings() -> Vec<(&'static str, Job)> {
                 job.location = text.clone();
                 job.description = format!("<p>{text}</p>");
                 job.url = format!("https://jobs.example/{i}");
-                job.apply_url = (*link).to_string();
+                job.apply_url = link.to_string();
             });
             (name, job)
         })
         .collect()
 }
+
+/// The distance between an ASCII character (`!` to `~`) and its full-width form.
+const FULL_WIDTH_OFFSET: u32 = 0xFEE0;
 
 /// `name` written so that a plain comparison misses it: an invisible character or a soft hyphen
 /// inside a word, a non-breaking space, bidirectional marks around it, full-width letters, other
@@ -162,7 +166,7 @@ pub fn disguises(name: &str) -> Vec<(&'static str, String)> {
     let wide: String = name
         .chars()
         .map(|c| match c {
-            '!'..='~' => char::from_u32(c as u32 + 0xFEE0).unwrap(),
+            '!'..='~' => char::from_u32(c as u32 + FULL_WIDTH_OFFSET).unwrap(),
             ' ' => '\u{3000}',
             other => other,
         })

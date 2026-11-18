@@ -6,10 +6,13 @@
 //
 //   const engine = createEngineSwitch({ armer, session, sound, announce, t, toast, onChange });
 //   await engine.press(stopped)  -> "armed" | "fired" | "ignored"      engine.state() -> { intent, pending }
+// "fired" means the request was sent, not that the server accepted it: a refusal also returns "fired" (the sound, the intent and the toast tell the difference).
 //   engine.settle()   a snapshot arrived: after an answered request it is the truth, so the intent goes       engine.reset()
 // `armer` is the moment's own (createArmer): the switch is armed under the ref "engine", so arming a row disarms it and the other way round.
 // `intent` is STOP as the page should show it before the server's snapshot: true on, false off, null whatever the snapshot says.
 
+/** The ref the switch is armed under in the moment's armer (and the row id its changes are announced with). */
+export const ENGINE_REF = "engine";
 export const REQUESTS = Object.freeze({ stop: { path: "/api/stop" }, resume: { path: "/api/resume" } });
 const DONE = Object.freeze({ stop: "sistema.stop.done", resume: "sistema.resume.done" });
 
@@ -63,10 +66,10 @@ export function createEngineSwitch({ armer, session, sound, announce, t, toast =
     async press(stopped) {
       if (pending) return "ignored";
       if (!stopped) {
-        armer.release("engine");              // only the switch's own arming: a row armed in the same stop stays armed
+        armer.release(ENGINE_REF);              // only the switch's own arming: a row armed in the same stop stays armed
         return send("stop");
       }
-      const step = armer.press("engine", "engine");
+      const step = armer.press(ENGINE_REF, ENGINE_REF);
       if (step !== "confirmed") return step;
       return send("resume");
     },

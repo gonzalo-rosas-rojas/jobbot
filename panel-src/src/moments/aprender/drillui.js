@@ -3,14 +3,23 @@
 // Enter or Space show the answer, 0-5 grade it and Esc leaves. Once the answer is out the box marks itself `data-local-keys`, so the
 // page's own single-key shortcuts step aside until the next card (before that, 1-5 still travel: a person who got here by key is
 // never stuck). The card is built ONCE per question and patched after, so what he is typing and where the caret is survive every
-// snapshot (the shell calls `update` every 30 s).
+// snapshot (the shell calls `update` when the data changes, and at least every ten minutes).
 //
-//   const ui = createDrillUi({ drill, t, reduced, onLeave });   ui.el   ui.paint()   ui.focusStart()   ui.contains(node)
+//   const ui = createDrillUi({ drill, t, reduced, onLeave });   ui.el   ui.paint()   ui.focusStart()
 
 import { h } from "../../core/dom.js";
 import { setHidden, setData } from "../shared/util.js";
 import { GRADES } from "./drill.js";
 import { actButton } from "../../ui/act.js";
+
+const SHORT_MAX = 90;    // a question up to this many characters is set in the largest display type
+const MID_MAX = 190;     // up to this, in the middle one; longer, in the smallest
+
+/** Which display size a question is set in, by its length. */
+function sizeOf(text) {
+  if (text.length <= SHORT_MAX) return "short";
+  return text.length <= MID_MAX ? "mid" : "long";
+}
 
 export function createDrillUi({ drill, t, reduced = () => false, onLeave = () => {} }) {
   const { state } = drill;
@@ -48,7 +57,7 @@ export function createDrillUi({ drill, t, reduced = () => false, onLeave = () =>
 
   // ---- the card: built once per question
   function buildCard(card) {
-    const question = h("p", { class: "ap-bigq", id: "ap-question", tabindex: "-1", "data-size": card.question.length <= 90 ? "short" : card.question.length <= 190 ? "mid" : "long" }, card.question);
+    const question = h("p", { class: "ap-bigq", id: "ap-question", tabindex: "-1", "data-size": sizeOf(card.question) }, card.question);
     const mine = h("textarea", { class: "ap-mine", id: "ap-mine", rows: 4, "aria-describedby": "ap-mine-hint", spellcheck: "false" });
     const act = h("div", { class: "ap-act" });
     const root = h("div", { class: "ap-card" },
@@ -59,7 +68,7 @@ export function createDrillUi({ drill, t, reduced = () => false, onLeave = () =>
         h("span", { class: "ap-hint", id: "ap-mine-hint" }, t("aprender.card.mine.hint")),
         mine),
       act);
-    refs = { root, question, mine, act, shownBuilt: null };
+    refs = { root, question, mine, act, actKey: null };
     return root;
   }
 
@@ -70,8 +79,8 @@ export function createDrillUi({ drill, t, reduced = () => false, onLeave = () =>
   function paintAct() {
     if (!refs) return;
     const key = state.shown ? "answer" : "question";
-    if (refs.shownBuilt === key + ":" + state.answer) return;
-    refs.shownBuilt = key + ":" + state.answer;
+    if (refs.actKey === key + ":" + state.answer) return;
+    refs.actKey = key + ":" + state.answer;
     if (!state.shown) { refs.act.replaceChildren(revealButton()); return; }
     const grades = GRADES.map((g) => h("button", { class: "ap-grade", type: "button", "data-grade": g, onclick: () => grade(g) }, h("span", { class: "g-n num" }, String(g)), h("span", { class: "g-w" }, t("aprender.grade." + g))));
     refs.act.replaceChildren(
@@ -85,6 +94,18 @@ export function createDrillUi({ drill, t, reduced = () => false, onLeave = () =>
 
   function note(text, kind) {
     return h("p", { class: "ap-note-line", "data-kind": kind, tabindex: "-1" }, text);
+  }
+
+  /** What stands where the card would be when there is none: a failed fetch, the end of the queue, or the wait. */
+  function noteKindOf(s) {
+    if (s.waiting) return "waiting";
+    if (s.failed) return "failed";
+    return s.empty ? "done" : "waiting";
+  }
+
+  function noteTextOf(kind) {
+    if (kind === "done") return t("aprender.card.done");
+    return kind === "failed" ? t("aprender.err.next") : t("aprender.card.waiting");
   }
 
   let noteKind = null;
@@ -107,11 +128,10 @@ export function createDrillUi({ drill, t, reduced = () => false, onLeave = () =>
     }
     builtFor = null;
     refs = null;
-    const kind = state.waiting ? "waiting" : state.failed ? "failed" : state.empty ? "done" : "waiting";
+    const kind = noteKindOf(state);
     if (noteKind === kind) return;
     noteKind = kind;
-    const text = kind === "done" ? t("aprender.card.done") : kind === "failed" ? t("aprender.err.next") : t("aprender.card.waiting");
-    parts.body.replaceChildren(note(text, kind));
+    parts.body.replaceChildren(note(noteTextOf(kind), kind));
     if (kind === "failed") parts.body.append(actButton({ key: "↵", label: t("common.retry"), primary: true, onclick: () => drill.start(state.topic) }));
   }
 
@@ -143,8 +163,6 @@ export function createDrillUi({ drill, t, reduced = () => false, onLeave = () =>
     paint,
     focusStart,
     reveal,
-    contains: (node) => !!node && el.contains(node),
-    setLabel: (text) => el.setAttribute("aria-label", text),
     /** A language change: the card is built again in the new words (what he typed in it is gone, and that is rare). */
     relabel() { parts.keys.replaceChildren(); builtFor = null; noteKind = null; if (state.active) paint(); },
   };

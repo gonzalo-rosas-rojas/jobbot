@@ -137,11 +137,11 @@ It was written by hand from the code; every mitigation names the file that holds
 
 - Every line the command line prints on standard output passes one filter: control characters
   other than the newline become spaces and invisible characters are removed, so an escape sequence
-  in a posting cannot move the cursor, recolour or hide text (`src/cli.rs`, `PlainText`).
+  in a posting cannot move the cursor, recolour or hide text (`src/cli/trace.rs`, `PlainText`).
 - Standard error is not filtered. The lines written there carry the program's own words, hosts and
   URLs (`aviso:` from the HTTP stack and the database); the two that carry page text, the
   `--assist` line (company, title, questions left) and the `[omitido]` line (a field's label),
-  clean it where they are built (`crates/jobbot-browser/src/form.rs`, `plain`, `plain_line`). The
+  clean it where they are built (`crates/jobbot-browser/src/form/leftover.rs`, `crates/jobbot-browser/src/form/apply.rs`, `plain`, `plain_line`). The
   scheduled task logs standard error with standard output (`scripts/run-daily.cmd`), so its
   warnings skip the privacy filter; none carries personal data today.
 - Output that is not a terminal (the scheduled task's log) and the trace go through the privacy

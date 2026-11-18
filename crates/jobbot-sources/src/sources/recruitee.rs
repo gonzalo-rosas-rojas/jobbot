@@ -12,7 +12,7 @@ use chrono::{DateTime, NaiveDateTime, Utc};
 use serde_json::Value;
 
 use super::Source;
-use super::base::{failure, get_json, id_string, parse_iso, skipped_error, str_field};
+use super::base::{get_json, id_string, or_if_empty, parse_iso, record, str_field};
 use jobbot_domain::models::{FetchResult, Job};
 use jobbot_domain::scoring::parse_salary_monthly_usd;
 use jobbot_domain::text::html_to_text;
@@ -81,17 +81,12 @@ impl Source for RecruiteeSource {
     async fn fetch(&self) -> FetchResult {
         let mut result = FetchResult::default();
         for company in &self.companies {
-            match self.fetch_company(company).await {
-                Ok((jobs, skipped)) => {
-                    result.jobs.extend(jobs);
-                    if skipped > 0 {
-                        result
-                            .errors
-                            .push(skipped_error("recruitee", company, skipped));
-                    }
-                }
-                Err(error) => result.errors.push(failure("recruitee", company, &error)),
-            }
+            record(
+                &mut result,
+                "recruitee",
+                company,
+                self.fetch_company(company).await,
+            );
         }
         result
     }
@@ -142,10 +137,7 @@ fn parse_offer(company: &str, offer: &Value) -> Option<Job> {
     let (salary_min, salary_max) = parse_salary_monthly_usd(&description);
     let posted_at = parse_recruitee_time(str_field(offer, "published_at"))
         .or_else(|| parse_recruitee_time(str_field(offer, "created_at")));
-    let company_name = match str_field(offer, "company_name") {
-        "" => company,
-        name => name,
-    };
+    let company_name = or_if_empty(str_field(offer, "company_name"), company);
     Some(Job {
         source: "recruitee".to_string(),
         external_id,

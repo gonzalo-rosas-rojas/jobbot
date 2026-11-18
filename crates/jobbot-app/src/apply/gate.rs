@@ -99,10 +99,10 @@ fn decide(
         return Ok(GateDecision::block("stop_file"));
     }
     if is_manual_only(&job.apply_url) || is_manual_only(&job.url) {
-        return Ok(GateDecision::block("manual_only_platform"));
+        return Ok(GateDecision::block(REASON_MANUAL_ONLY));
     }
     if is_listing_only(&job.apply_url) {
-        return Ok(GateDecision::block("listing_only"));
+        return Ok(GateDecision::block(REASON_LISTING_ONLY));
     }
     let exclusion = check_exclusion(job, exclusions);
     if exclusion.excluded {
@@ -113,7 +113,7 @@ fn decide(
     }
     // An old posting is probably filled, and applying would also burn the company cooldown.
     if is_stale_stored(job, tracker, criteria, now)? {
-        return Ok(GateDecision::block("stale_posting"));
+        return Ok(GateDecision::block(REASON_STALE));
     }
     // Until the first N submissions are approved the lower daily cap applies. The cap counts a
     // rolling 24 hours: the evening run window crosses midnight in UTC, Santiago and New York

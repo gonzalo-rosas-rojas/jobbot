@@ -16,7 +16,8 @@ pub struct Paths {
     pub cv_master: PathBuf,
     pub stop_file: PathBuf,
     /// Where `claude -p` runs: never under the repository when the run knows `%LOCALAPPDATA%`, so
-    /// no `CLAUDE.md` above it can reach the child (finding F4). When the run does not, the folder
+    /// no `CLAUDE.md` above it can reach the child (an instruction file above the repository would
+    /// otherwise steer the `claude` process). When the run does not, the folder
     /// is `data/claude-cwd` and `CliClaude::locate` refuses it if an instruction file sits above.
     pub claude_work: PathBuf,
 }
@@ -46,12 +47,17 @@ impl Paths {
     }
 }
 
+/// A folder is a project when it holds the `profile` folder.
+fn is_project(dir: &Path) -> bool {
+    dir.join("profile").is_dir()
+}
+
 /// The root of a run: the folder `JOBBOT_HOME` names when it is set (it must hold `profile/`; a
 /// wrong override stops the run rather than falling back to another folder's data), otherwise
 /// what `find_root` finds.
 pub fn run_root(home: Option<&Path>, cwd: &Path, exe: Option<&Path>) -> Option<PathBuf> {
     match home {
-        Some(home) => home.join("profile").is_dir().then(|| home.to_path_buf()),
+        Some(home) => is_project(home).then(|| home.to_path_buf()),
         None => find_root(cwd, exe),
     }
 }
@@ -61,7 +67,6 @@ pub fn run_root(home: Option<&Path>, cwd: &Path, exe: Option<&Path>) -> Option<P
 /// `<root>/target/release`). `None` when neither is a project, so a run from the wrong folder
 /// stops instead of opening a fresh database and a STOP file nobody reads.
 pub fn find_root(cwd: &Path, exe: Option<&Path>) -> Option<PathBuf> {
-    let is_project = |dir: &Path| dir.join("profile").is_dir();
     if is_project(cwd) {
         return Some(cwd.to_path_buf());
     }

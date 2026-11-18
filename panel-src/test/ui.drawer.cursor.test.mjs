@@ -92,7 +92,7 @@ function drawerRig({ keys = ["A", "B", "C"], failOn = [] } = {}) {
       },
       said: (r, fallback) => fallback,
     },
-    router: { write: (stop, key, opts) => { log.writes.push([stop, key, !!(opts && opts.push)]); return true; }, back() {} },
+    router: { pushStop: (stop, key) => { log.writes.push([stop, key, true]); return true; }, replaceStop: (stop, key) => { log.writes.push([stop, key, false]); return false; }, back() {} },
     stop: () => "procesos",
     sound: { play() {} },
     getCtx: () => ({ announce() {}, reduced: () => true }),

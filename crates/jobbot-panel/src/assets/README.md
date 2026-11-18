@@ -1,6 +1,6 @@
 # crates/jobbot-panel/src/assets: what the binary serves besides the page
 
-Every file here is embedded with `include_bytes!` through the `ASSETS` table in `../http.rs` and served at
+Every file here is embedded with `include_bytes!` through the `ASSETS` table in `../http/page.rs` and served at
 `GET /a/<launch-id>/<name>`, where `<launch-id>` is a random hex value chosen once per start (like the token, but
 it is not a secret: it only makes every start a new cache key, so the replies may say `max-age=31536000, immutable`).
 The page gets the prefix the way it gets the nonce: `__ASSETS__` in `page.html` becomes `/a/<launch-id>`, so a
@@ -15,7 +15,7 @@ the MIME type is the one written in the table, never guessed, and anything else 
 1. Add the file here and a row to `ASSETS` with its name, its explicit MIME type and `include_bytes!`.
 2. Add a row to `THIRD_PARTY_NOTICES.md` (repo root) with the origin, the licence (`own` for something drawn here,
    SPDX id or `LicenseRef-...` otherwise), the URL it came from and its sha256 (`sha256sum <file>`; the hash goes last,
-   in backticks). No row, no asset: a Rust test (`every_asset_has_a_row_...` in `http.rs`) fails when an `ASSETS` entry
+   in backticks). No row, no asset: a Rust test (`every_asset_has_a_row_...` in `http/page.rs`) fails when an `ASSETS` entry
    has no row, when the row does not name its MIME type or does not end in a 64-digit hash, and when a row for an
    image or a font has no entry in the table.
 3. A font (`.woff2`, `.ttf`, `.otf`) goes through `ots-sanitize` first (the same sanitiser the browsers use) and only

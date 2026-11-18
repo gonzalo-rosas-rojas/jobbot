@@ -97,6 +97,16 @@ const OPTIONS: [&str; 8] = [
     "Chile",
 ];
 
+/// The flags byte of a fuzzed field: bit 0 is `required`, bit 1 is `checked`, bits 4 and 5 pick
+/// the group name.
+const REQUIRED_BIT: usize = 1;
+const CHECKED_BIT: usize = 2;
+const GROUP_SHIFT: usize = 4;
+const GROUP_MASK: usize = 3;
+
+/// The CV file the plan attaches to a file input.
+const CV_PATH: &str = "cv.pdf";
+
 /// The fields a page scan could return, read from fuzzer bytes: records split by `0xFF`; in each,
 /// the first five bytes pick the tag, the type, the label, the option and the flags (required,
 /// checked, group), and the rest is free text used when a pick falls past its list.
@@ -106,6 +116,7 @@ pub fn fields(data: &[u8]) -> Vec<FieldInfo> {
         .enumerate()
         .map(|(idx, record)| {
             let byte = |i: usize| usize::from(record.get(i).copied().unwrap_or(0));
+            let flags = byte(4);
             let free = String::from_utf8_lossy(record.get(5..).unwrap_or_default()).into_owned();
             let label = LABELS
                 .get(byte(2) % (LABELS.len() + 1))
@@ -118,10 +129,10 @@ pub fn fields(data: &[u8]) -> Vec<FieldInfo> {
                 tag: TAGS[byte(0) % TAGS.len()].to_string(),
                 kind: KINDS[byte(1) % KINDS.len()].to_string(),
                 label,
-                required: byte(4) & 1 == 1,
+                required: flags & REQUIRED_BIT != 0,
                 option,
-                name: format!("group-{}", (byte(4) >> 4) & 3),
-                checked: byte(4) & 2 == 2,
+                name: format!("group-{}", (flags >> GROUP_SHIFT) & GROUP_MASK),
+                checked: flags & CHECKED_BIT != 0,
             }
         })
         .collect()
@@ -133,7 +144,7 @@ pub fn fields(data: &[u8]) -> Vec<FieldInfo> {
 /// untick was ticked by the page.
 pub fn form_plan(data: &[u8]) {
     let fields = fields(data);
-    let plan = plan_fields(&fields, &BANK, Path::new("cv.pdf"));
+    let plan = plan_fields(&fields, &BANK, Path::new(CV_PATH));
     let field = |idx: usize| {
         fields
             .iter()
@@ -151,7 +162,7 @@ pub fn form_plan(data: &[u8]) {
         match &action.value {
             FillValue::File(path) => {
                 assert_eq!(target.kind, "file", "{target:?}");
-                assert_eq!(path, Path::new("cv.pdf"));
+                assert_eq!(path, Path::new(CV_PATH));
             }
             FillValue::Check => {
                 assert!(

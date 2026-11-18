@@ -14,7 +14,10 @@
 
 import { ARM_MIN_MS, ARM_MAX_MS, heldKey } from "../../core/dom.js";
 
-export function createArmer({ announce, sound, t, onChange = () => {}, now = Date.now, timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (id) => clearTimeout(id) }, held = heldKey }) {
+/** The real timers, as `{ set, clear }`: the default of every `timers` a moment's actions take (a test hands in a fake clock instead). */
+export const REAL_TIMERS = { set: (fn, ms) => setTimeout(fn, ms), clear: (id) => clearTimeout(id) };
+
+export function createArmer({ announce, sound, t, onChange = () => {}, now = Date.now, timers = REAL_TIMERS, held = heldKey }) {
   let armed = null; // { ref, id, at, timer }
 
   function disarm() {

@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 
 use super::Source;
-use super::base::{failure, get_json, id_string, parse_time, skipped_error, str_field};
+use super::base::{get_json, id_string, or_if_empty, parse_all, parse_time, record, str_field};
 use jobbot_domain::models::{FetchResult, Job};
 use jobbot_domain::scoring::parse_salary_monthly_usd;
 use jobbot_domain::text::html_to_text;
@@ -49,19 +49,10 @@ impl WorkableSource {
         let postings = body["jobs"]
             .as_array()
             .context("response has no `jobs` array")?;
-        let company = match str_field(&body, "name") {
-            "" => account,
-            name => name,
-        };
-        let mut jobs = Vec::new();
-        let mut skipped = 0;
-        for posting in postings {
-            match parse_posting(company, posting) {
-                Some(job) => jobs.push(job),
-                None => skipped += 1,
-            }
-        }
-        Ok((jobs, skipped))
+        let company = or_if_empty(str_field(&body, "name"), account);
+        Ok(parse_all(postings, |posting| {
+            parse_posting(company, posting)
+        }))
     }
 }
 
@@ -74,17 +65,12 @@ impl Source for WorkableSource {
     async fn fetch(&self) -> FetchResult {
         let mut result = FetchResult::default();
         for account in &self.accounts {
-            match self.fetch_account(account).await {
-                Ok((jobs, skipped)) => {
-                    result.jobs.extend(jobs);
-                    if skipped > 0 {
-                        result
-                            .errors
-                            .push(skipped_error("workable", account, skipped));
-                    }
-                }
-                Err(error) => result.errors.push(failure("workable", account, &error)),
-            }
+            record(
+                &mut result,
+                "workable",
+                account,
+                self.fetch_account(account).await,
+            );
         }
         result
     }
@@ -99,10 +85,7 @@ fn parse_posting(company: &str, posting: &Value) -> Option<Job> {
     if title.is_empty() || url.is_empty() {
         return None;
     }
-    let apply_url = match str_field(posting, "application_url") {
-        "" => url,
-        apply_url => apply_url,
-    };
+    let apply_url = or_if_empty(str_field(posting, "application_url"), url);
     let location = [str_field(posting, "city"), str_field(posting, "country")]
         .into_iter()
         .filter(|part| !part.is_empty())

@@ -41,6 +41,26 @@ test("both languages have exactly the same keys, scope by scope", () => {
   }
 });
 
+// The dictionaries are merged into one per language (src/i18n/index.js), where the LAST scope to define a key wins without a word.
+// So a key written in two scopes is a text that one of them never shows. Keys listed here are known and kept as they are.
+const KEYS_IN_TWO_SCOPES = {};
+
+test("no key is defined in two scopes of the same language (the merge would hide one silently)", () => {
+  for (const l of ["es", "en"]) {
+    const seen = new Map();
+    const repeated = [];
+    for (const scope of SCOPES) {
+      for (const key of Object.keys(dicts[l][scope])) {
+        if (seen.has(key)) repeated.push(`${key} (${seen.get(key)} and ${scope})`);
+        else seen.set(key, scope);
+      }
+    }
+    const allowed = KEYS_IN_TWO_SCOPES[l] || [];
+    assert.deepEqual(repeated.filter((r) => !allowed.includes(r)), [], `${l}: keys defined in two scopes`);
+    assert.deepEqual(allowed.filter((r) => !repeated.includes(r)), [], `${l}: listed as repeated but no longer is; delete it from KEYS_IN_TWO_SCOPES`);
+  }
+});
+
 test("a {variable} set is the same in es and en for every key", () => {
   const es = flat("es");
   const en = flat("en");

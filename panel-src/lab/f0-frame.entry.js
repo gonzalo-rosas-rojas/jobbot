@@ -5,7 +5,7 @@
 //   __lab.texts()                { text, cls, color, rect }[] of every run of text of the HUD and the bar     __lab.notext(on)  makes them transparent
 //   __lab.seen()                 { picked: ids chosen by click or arrow, help: n presses of "? atajos", search: n presses of Ctrl K }
 import { createStage, clockText } from "../src/stage/stage.js";
-import { mulberry32 } from "../src/stage/skyline.js";
+import { mulberry32 } from "../src/core/random.js";
 import { createHud } from "../src/ui/hud.js";
 import { createStops } from "../src/ui/stops.js";
 import { createBar } from "../src/ui/bar.js";
@@ -16,6 +16,8 @@ import { sound as engine } from "../src/sound/index.js";
 import { icon } from "../src/ui/icons.js";
 import { STOP_IDS } from "../src/scene/poses.js";
 import { t, setLang } from "../src/i18n/index.js";
+import { trackHeldKeys } from "../src/core/dom.js";
+trackHeldKeys();   // the page does it at boot (src/main.js); a lab has no main
 
 const NOW = Date.parse("2026-10-07T12:00:00Z");
 const seen = { picked: [], help: 0, search: 0 };

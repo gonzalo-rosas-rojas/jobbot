@@ -18,17 +18,22 @@
 // and read by the engine alone. The page says how he gives an answer today ("how"), and does not pretend to save one.
 
 import { t } from "../i18n/index.js";
+import { MINUTE_MS } from "../core/time.js";
 import { aprenderView } from "./aprender/view.js";
 import { eveOf, parseDossier } from "./aprender/data.js";
 import { createActions } from "./aprender/actions.js";
 import { createDrill } from "./aprender/drill.js";
 import { createDrillUi } from "./aprender/drillui.js";
 import { createPage } from "./aprender/render.js";
+import { openInNewTab } from "./shared/util.js";
 
-const RETRY_MS = 60 * 1000;          // a dossier that failed to load is asked for again after this, at the next refresh
-const REFRESH_MS = 10 * 60 * 1000;   // and one that loaded is read again after this (the engine may have written a better one)
+const RETRY_MS = MINUTE_MS;          // a dossier that failed to load is asked for again after this, at the next refresh
+const REFRESH_MS = 10 * MINUTE_MS;   // and one that loaded is read again after this (the engine may have written a better one)
 
 let S = null;
+
+/** What the server said about a failed request, in the session's words, or `fallback` when the session cannot say it. */
+const sayOf = (session, r, fallback) => (typeof session.said === "function" ? session.said(r || {}, fallback) : fallback);
 
 /** The dossier of the card of the eve, fetched once and kept: key -> { state: "loading" | "ok" | "error" | "none", parsed, why, at }. */
 function ensureDossier(me, nowMs) {
@@ -44,18 +49,23 @@ function ensureDossier(me, nowMs) {
   Promise.resolve(api.call(me.ctx.session, "/api/job?key=" + encodeURIComponent(key))).then((r) => {
     if (S !== me) return;
     const at = me.ctx.now();
-    if (!r || !r.ok || !r.data) me.dossiers.set(key, { state: "error", why: me.ctx.session.said ? me.ctx.session.said(r || {}, t("err.job")) : t("err.job"), at });
+    if (!r || !r.ok || !r.data) me.dossiers.set(key, { state: "error", why: sayOf(me.ctx.session, r, t("err.job")), at });
     else if (typeof r.data.dossier !== "string" || !r.data.dossier.trim()) me.dossiers.set(key, { state: "none", at });
     else me.dossiers.set(key, { state: "ok", parsed: parseDossier(r.data.dossier), at });
     paint(me);
-  }, () => {
+  }, (e) => {
     if (S !== me) return;
+    console.error(e);
     me.dossiers.set(key, { state: "error", why: t("err.network"), at: me.ctx.now() });
     paint(me);
   });
 }
 
-/** Works the view out again and draws it: from `update` (a new model), the actions (an armed or pending row), the review and the dossier. */
+/**
+ * Works the view out again and draws it: from `update` (a new model), the actions (an armed or pending row), the review and the dossier.
+ * It also asks for the dossier of the eve when one is due (ensureDossier returns at once otherwise): every repaint is a chance to retry,
+ * and `update` alone comes too seldom for that.
+ */
 function paint(me) {
   if (!me.model) return;
   const nowMs = me.ctx.now();
@@ -70,7 +80,7 @@ function mount(host, ctx) {
   if (S) unmount();
   const me = { ctx, host, model: null, view: null, expanded: false, dossiers: new Map() };
   const session = ctx.session;
-  const openUrl = ctx.openUrl || ((url) => window.open(url, "_blank", "noopener,noreferrer"));
+  const openUrl = ctx.openUrl || openInNewTab;
   const toast = (text, ok) => { if (typeof ctx.toast === "function") ctx.toast(text, ok); else ctx.announce(text); };
   me.actions = createActions({
     session,
@@ -84,7 +94,7 @@ function mount(host, ctx) {
   me.drill = createDrill({
     api: (path) => session.api(path),
     act: (path, body, opts) => session.act(path, body, opts),
-    said: (r, fallback) => (typeof session.said === "function" ? session.said(r, fallback) : fallback),
+    said: (r, fallback) => sayOf(session, r, fallback),
     toast,
     t,
     sound: ctx.sound,
@@ -134,7 +144,10 @@ function onKey(actionId, row, event) {
   const handled = (fn) => { if (event && event.preventDefault) event.preventDefault(); fn(); return true; };
   if (actionId === "open" && !rowEl) {
     // Enter with the cursor on no row: the review, and once it is open Enter shows the answer (the box has its own keys too)
-    if (me.drill.state.active) return me.drill.state.card && !me.drill.state.shown ? handled(() => me.drillUi.reveal && me.drillUi.reveal()) : false;
+    if (me.drill.state.active) {
+      const canReveal = !!me.drill.state.card && !me.drill.state.shown;
+      return canReveal ? handled(() => me.drillUi.reveal()) : false;
+    }
     if (me.view && me.view.drill.state === "due") return handled(() => begin(me, ""));
     const eve = me.view && me.view.eve.row;
     if (eve) return handled(() => me.actions.run("open", eve));

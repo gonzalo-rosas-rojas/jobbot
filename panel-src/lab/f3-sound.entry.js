@@ -9,6 +9,8 @@ import { createPlayer } from "../src/sound/player.js";
 import { createPrefs } from "../src/sound/prefs.js";
 import { sound as engine } from "../src/sound/index.js";
 import { setLang } from "../src/i18n/index.js";
+import { trackHeldKeys } from "../src/core/dom.js";
+trackHeldKeys();   // the page does it at boot (src/main.js); a lab has no main
 
 const params = new URLSearchParams(location.search);
 if (params.get("lang")) setLang(params.get("lang"));

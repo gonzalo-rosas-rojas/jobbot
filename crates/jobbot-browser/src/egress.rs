@@ -64,7 +64,9 @@ impl Resolve for SystemResolver {
 /// `403`), otherwise the site could not be reached (answered `502`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Refusal {
-    pub host: String,
+    /// The host the request named; `None` when it named none (a request too broken to read, or
+    /// one whose host came out empty). Never `Some("")`: the constructors see to it.
+    pub host: Option<String>,
     pub why: String,
     pub blocked: bool,
 }
@@ -72,7 +74,16 @@ pub(crate) struct Refusal {
 impl Refusal {
     fn blocked(host: &str, why: impl Into<String>) -> Refusal {
         Refusal {
-            host: host.to_string(),
+            host: Self::named(host),
+            why: why.into(),
+            blocked: true,
+        }
+    }
+
+    /// A refusal of a request that named no host at all.
+    fn blocked_without_host(why: impl Into<String>) -> Refusal {
+        Refusal {
+            host: None,
             why: why.into(),
             blocked: true,
         }
@@ -80,20 +91,31 @@ impl Refusal {
 
     fn unreachable(host: &str, why: impl Into<String>) -> Refusal {
         Refusal {
-            host: host.to_string(),
+            host: Self::named(host),
             why: why.into(),
             blocked: false,
         }
+    }
+
+    /// "No host" has one form: an empty name is no name.
+    fn named(host: &str) -> Option<String> {
+        (!host.is_empty()).then(|| host.to_string())
+    }
+
+    /// The host as it is written in messages: empty when the request named none.
+    pub(crate) fn shown_host(&self) -> &str {
+        self.host.as_deref().unwrap_or_default()
     }
 }
 
 /// The refusals of one session, each kept once, the newest `REFUSALS_KEPT`, numbered in the order
 /// they last happened.
 #[derive(Debug, Clone, Default)]
-struct RefusalLog(Arc<Mutex<Numbered>>);
+struct RefusalLog(Arc<Mutex<RefusalState>>);
 
+/// What the log keeps: the next number, the refusals kept and how many got a notice.
 #[derive(Debug, Default)]
-struct Numbered {
+struct RefusalState {
     next: u64,
     kept: VecDeque<(u64, Refusal)>,
     /// How many refusals got a notice this session.
@@ -103,7 +125,8 @@ struct Numbered {
 /// What a refusal is worth on stderr.
 #[derive(Debug, PartialEq, Eq)]
 enum Notice {
-    /// The address check refused this host for this reason for the first time.
+    /// The address check refused this host for this reason, and that refusal was not among the
+    /// `REFUSALS_KEPT` newest ones (so one that fell out of them is said again).
     Line,
     /// As `Line`, but the session has printed `NOTICES_PER_SESSION`: one last line says so.
     Last,
@@ -118,7 +141,7 @@ impl RefusalLog {
         let mut log = self.0.lock().unwrap();
         let before = log.kept.len();
         log.kept.retain(|(_, kept)| kept != &refusal);
-        let new = log.kept.len() == before;
+        let already_kept = log.kept.len() != before;
         if log.kept.len() == REFUSALS_KEPT {
             log.kept.pop_front();
         }
@@ -126,7 +149,7 @@ impl RefusalLog {
         log.next += 1;
         let blocked = refusal.blocked;
         log.kept.push_back((number, refusal));
-        if !new || !blocked {
+        if already_kept || !blocked {
             return Notice::Quiet;
         }
         log.noticed += 1;
@@ -210,7 +233,12 @@ pub(crate) fn explain_tunnel_failure(
     });
     let fresh = egress.refusals_since(mark);
     let refusal = named
-        .and_then(|host| fresh.iter().rev().find(|refusal| refusal.host == host))
+        .and_then(|host| {
+            fresh
+                .iter()
+                .rev()
+                .find(|refusal| refusal.host.as_deref() == Some(host.as_str()))
+        })
         .or_else(|| fresh.last());
     let Some(refusal) = refusal else {
         return result;
@@ -218,12 +246,14 @@ pub(crate) fn explain_tunnel_failure(
     let reason = if refusal.blocked {
         format!(
             "unsafe_url: the address check refused {} ({})",
-            refusal.host, refusal.why
+            refusal.shown_host(),
+            refusal.why
         )
     } else {
         format!(
             "page_error: {} could not be reached ({})",
-            refusal.host, refusal.why
+            refusal.shown_host(),
+            refusal.why
         )
     };
     SubmitResult {
@@ -242,7 +272,15 @@ async fn accept(listener: TcpListener, resolver: Arc<dyn Resolve>, log: RefusalL
     // Dropped with this task when the session ends, which aborts every tunnel still open.
     let mut connections = JoinSet::new();
     loop {
-        while connections.try_join_next().is_some() {}
+        // Reaps the finished tunnels; one that panicked is told on the same channel as a refusal.
+        while let Some(joined) = connections.try_join_next() {
+            if let Err(error) = joined {
+                eprintln!(
+                    "aviso: una conexión del proxy terminó mal: {}",
+                    plain_line(&error.to_string())
+                );
+            }
+        }
         match listener.accept().await {
             Ok((client, _)) => {
                 connections.spawn(serve(client, Arc::clone(&resolver), log.clone()));
@@ -256,7 +294,7 @@ async fn serve(mut client: TcpStream, resolver: Arc<dyn Resolve>, log: RefusalLo
     let (head, rest) = match read_head(&mut client, HEAD_DEADLINE).await {
         Head::Complete { text, rest } => (text, rest),
         Head::TooLong => {
-            let refusal = Refusal::blocked("", "the request head is longer than 8 KiB");
+            let refusal = Refusal::blocked_without_host("the request head is longer than 8 KiB");
             refuse(&mut client, &log, refusal).await;
             return;
         }
@@ -317,10 +355,10 @@ fn parse_connect(head: &str) -> Result<(String, u16), Refusal> {
     let (Some(method), Some(target), Some(version), None) =
         (parts.next(), parts.next(), parts.next(), parts.next())
     else {
-        return Err(Refusal::blocked("", "not an HTTP request"));
+        return Err(Refusal::blocked_without_host("not an HTTP request"));
     };
     if !version.starts_with("HTTP/1.") {
-        return Err(Refusal::blocked("", "not an HTTP/1 request"));
+        return Err(Refusal::blocked_without_host("not an HTTP/1 request"));
     }
     if method != "CONNECT" {
         let host = url::Url::parse(target)
@@ -372,10 +410,18 @@ async fn decide(host: &str, port: u16, resolver: &dyn Resolve) -> Result<Vec<Soc
         Err(_) => {
             return Err(Refusal::unreachable(
                 host,
-                "the name lookup did not answer in 10 s",
+                format!(
+                    "the name lookup did not answer in {} s",
+                    LOOKUP_DEADLINE.as_secs()
+                ),
             ));
         }
     };
+    judge_answers(host, port, answers)
+}
+
+/// The addresses a name answered, all of them or none: one that is not public refuses the name.
+fn judge_answers(host: &str, port: u16, answers: Vec<IpAddr>) -> Result<Vec<SocketAddr>, Refusal> {
     let local: Vec<String> = answers
         .iter()
         .filter(|ip| !is_public_ip(**ip))
@@ -473,7 +519,10 @@ async fn tunnel(
         Err(_) => {
             return Err(Refusal::unreachable(
                 host,
-                "the site did not take the connection in 10 s",
+                format!(
+                    "the site did not take the connection in {} s",
+                    CONNECT_DEADLINE.as_secs()
+                ),
             ));
         }
     };
@@ -484,6 +533,9 @@ async fn tunnel(
         site.write_all(rest).await?;
         tokio::io::copy_bidirectional(client, &mut site).await
     };
+    // A cut tunnel is how a connection normally ends (either side closes) and the page already got
+    // its answer, so there is nothing to report; the `aviso` in `accept` is for a tunnel task that
+    // panicked, which is a different case.
     let _ = opened.await;
     Ok(())
 }
@@ -493,7 +545,7 @@ async fn tunnel(
 fn notice_line(refusal: &Refusal) -> String {
     format!(
         "aviso: el navegador quiso conectarse a {} y la revisión de direcciones lo impidió ({})",
-        plain_line(&refusal.host),
+        plain_line(refusal.shown_host()),
         plain_line(&refusal.why)
     )
 }
@@ -560,10 +612,10 @@ mod tests {
                 .iter()
                 .map(|(name, answers)| (name.to_string(), ips(answers)))
                 .collect();
-            FakeResolver::new(move |asked, _| {
+            FakeResolver::new(move |wanted, _| {
                 names
                     .iter()
-                    .find(|(name, _)| name == asked)
+                    .find(|(name, _)| name == wanted)
                     .map(|(_, answers)| answers.clone())
                     .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no such name"))
             })
@@ -596,7 +648,7 @@ mod tests {
             .refusals_since(0)
             .into_iter()
             .rev()
-            .find(|refusal| refusal.host == host)
+            .find(|refusal| refusal.shown_host() == host)
     }
 
     /// Sends `request` to the proxy and returns what it answers before it closes.
@@ -636,7 +688,7 @@ mod tests {
         let refusal =
             parse_connect("GET http://192.168.1.1/admin?token=abc HTTP/1.1\r\n\r\n").unwrap_err();
         assert!(refusal.blocked);
-        assert_eq!(refusal.host, "192.168.1.1");
+        assert_eq!(refusal.shown_host(), "192.168.1.1");
         assert!(refusal.why.contains("GET"), "{}", refusal.why);
         assert!(
             !refusal.why.contains("token"),
@@ -673,7 +725,7 @@ mod tests {
             FakeResolver::fixed(&[("rebind.example", &["93.184.216.34", "192.168.1.1"])]);
         let refusal = decide("rebind.example", 443, &resolver).await.unwrap_err();
         assert!(refusal.blocked);
-        assert_eq!(refusal.host, "rebind.example");
+        assert_eq!(refusal.shown_host(), "rebind.example");
         assert!(refusal.why.contains("192.168.1.1"), "{}", refusal.why);
         assert!(
             !refusal.why.contains("93.184.216.34"),
@@ -708,7 +760,7 @@ mod tests {
         for host in ["empty.example", "missing.example"] {
             let refusal = decide(host, 443, &resolver).await.unwrap_err();
             assert!(!refusal.blocked, "{host}: {}", refusal.why);
-            assert_eq!(refusal.host, host);
+            assert_eq!(refusal.shown_host(), host);
         }
     }
 
@@ -844,7 +896,6 @@ mod tests {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
         let reachable = listener.local_addr().unwrap();
         let silent: SocketAddr = "[2606:2800::1]:443".parse().unwrap();
-        let started = std::time::Instant::now();
         let candidates = [silent, reachable];
         let connecting = first_connection(&candidates, move |addr| async move {
             if addr == silent {
@@ -852,16 +903,12 @@ mod tests {
             }
             TcpStream::connect(addr).await
         });
-        let stream = timeout(Duration::from_secs(5), connecting)
+        // Far below the connect deadline: only trying the next address in time gets through.
+        let stream = timeout(Duration::from_secs(2), connecting)
             .await
             .expect("the next address is tried while the first hangs")
             .unwrap();
         assert_eq!(stream.peer_addr().unwrap(), reachable);
-        assert!(
-            started.elapsed() < Duration::from_secs(2),
-            "took {:?}",
-            started.elapsed()
-        );
     }
 
     #[tokio::test]
@@ -889,7 +936,7 @@ mod tests {
             .await
             .unwrap_err();
         assert!(!refusal.blocked, "{}", refusal.why);
-        assert_eq!(refusal.host, "gone.example");
+        assert_eq!(refusal.shown_host(), "gone.example");
     }
 
     #[tokio::test]
@@ -948,7 +995,7 @@ mod tests {
     fn the_refusal_log_keeps_each_refusal_once_and_only_the_newest() {
         let log = RefusalLog::default();
         let refusal = |host: String| Refusal {
-            host,
+            host: Some(host),
             why: "local".into(),
             blocked: true,
         };
@@ -959,9 +1006,9 @@ mod tests {
         }
         let kept = log.since(0);
         assert_eq!(kept.len(), REFUSALS_KEPT);
-        assert_eq!(kept[0].host, "h5");
+        assert_eq!(kept[0].shown_host(), "h5");
         assert_eq!(
-            kept[REFUSALS_KEPT - 1].host,
+            kept[REFUSALS_KEPT - 1].shown_host(),
             format!("h{}", REFUSALS_KEPT + 4)
         );
 
@@ -1013,6 +1060,56 @@ mod tests {
         assert!(
             line.ends_with("(the name answered 192.168.1.1, a local or private address)"),
             "{line}"
+        );
+    }
+
+    #[test]
+    fn no_host_has_one_form_whether_the_request_was_unreadable_or_its_host_came_out_empty() {
+        let unreadable = parse_connect("not http\r\n\r\n").unwrap_err();
+        let get_without_a_host = parse_connect("GET not-a-url HTTP/1.1\r\n\r\n").unwrap_err();
+        let connect_without_a_host = Refusal::blocked("", "not a host name or an address");
+        let unreachable_without_a_host = Refusal::unreachable("", "the name has no address");
+
+        for refusal in [
+            unreadable,
+            get_without_a_host,
+            connect_without_a_host,
+            unreachable_without_a_host,
+        ] {
+            assert_eq!(refusal.host, None, "{}", refusal.why);
+        }
+        assert_eq!(
+            Refusal::blocked("jobs.example", "local").host.as_deref(),
+            Some("jobs.example")
+        );
+    }
+
+    #[test]
+    fn a_refusal_without_a_host_prints_an_empty_host_in_its_notice() {
+        let refusal = parse_connect("not http\r\n\r\n").unwrap_err();
+        assert_eq!(
+            notice_line(&refusal),
+            "aviso: el navegador quiso conectarse a  y la revisión de direcciones lo impidió \
+             (not an HTTP request)"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refusal_without_a_host_explains_a_tunnel_failure_with_an_empty_host() {
+        let egress = Egress::start(Arc::new(FakeResolver::fixed(&[])))
+            .await
+            .unwrap();
+        let since = egress.mark();
+        ask(&egress, b"not http\r\n\r\n").await;
+        let failed = page_error(
+            "page_error: Protocol error (Page.goto): net::ERR_TUNNEL_CONNECTION_FAILED at \
+             https://first.example/apply",
+        );
+        assert_eq!(
+            explain_tunnel_failure(failed, &egress, since)
+                .reason
+                .as_deref(),
+            Some("unsafe_url: the address check refused  (not an HTTP request)")
         );
     }
 

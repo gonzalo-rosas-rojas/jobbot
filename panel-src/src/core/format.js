@@ -1,7 +1,9 @@
 // Small functions that turn data into words, on top of the i18n dictionaries and formatters: no Spanish or English
 // is written here. Ported from the old page; the wording moved to the dictionaries, the arithmetic is the same.
 
+import { pointsOf } from "./points.js";
 import { t, tn, has, fmtNumber, fmtPercent, fmtMoney, fmtDate, fmtRelative } from "../i18n/index.js";
+import { HOUR_MS, DAY_MS, SOON_HOURS } from "./time.js";
 
 export const pct = fmtPercent;
 export const usd = fmtMoney;
@@ -21,11 +23,7 @@ export const factorPoints = (value) => { const n = pointsOf(value); return n ===
 export const FACTOR_WEIGHTS = [["fit", 30], ["compensation", 15], ["interview_style", 10], ["stability", 20], ["learning", 15], ["other", 10]];
 const FACTOR_MAX = new Map(FACTOR_WEIGHTS);
 
-/** The points of a factor as the number the server meant, or null when it sent anything else (text, a boolean, nothing): never a made-up zero. */
-export function pointsOf(value) {
-  const n = typeof value === "number" || (typeof value === "string" && value.trim() !== "") ? Number(value) : NaN;
-  return Number.isFinite(n) ? n : null;
-}
+export { pointsOf };
 
 /**
  * The bars of a score breakdown ({ factor: points }) as data, the same for every place that draws one: the factors the page knows in the order of
@@ -58,7 +56,7 @@ export function scoreText(score) {
   return n === null ? "" : t("common.score", { score: Math.round(n) });
 }
 
-export const daysSince = (iso, nowMs) => Math.max(0, Math.floor((nowMs - Date.parse(iso)) / 86400000));
+export const daysSince = (iso, nowMs) => Math.max(0, Math.floor((nowMs - Date.parse(iso)) / DAY_MS));
 export const norm = (text) => String(text || "").toLowerCase();
 export const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 /** Up to three letters or digits of a name, for a small badge: "Alpha Test Co" gives "ALP". legacy quirk: no name gives "", not "?" (the fallback is stripped as a symbol). */
@@ -71,20 +69,20 @@ export function asSentence(text) {
 }
 
 /**
- * The time left to a task, or how late it is, with a tone for the page to colour: "late", "soon" (under 48 h) or "".
+ * The time left to a task, or how late it is, with a tone for the page to colour: "late", "soon" (under SOON_HOURS) or "".
  * No date is no countdown (null).
  */
 export function countdown(task, nowMs) {
   if (!task.due_at) return null;
   const ms = Date.parse(task.due_at) - nowMs;
   if (task.overdue || ms < 0) {
-    const hours = Math.floor(-ms / 3600000);
-    const text = hours < 48 ? t("time.due.late.hours", { n: Math.max(hours, 1) }) : tn("time.due.late.days", Math.floor(hours / 24));
+    const hours = Math.floor(-ms / HOUR_MS);
+    const text = hours < SOON_HOURS ? t("time.due.late.hours", { n: Math.max(hours, 1) }) : tn("time.due.late.days", Math.floor(hours / 24));
     return { text, tone: "late" };
   }
-  const hours = Math.floor(ms / 3600000);
+  const hours = Math.floor(ms / HOUR_MS);
   if (hours < 1) return { text: t("time.due.lessHour"), tone: "soon" };
-  if (hours < 48) return { text: t("time.due.hours", { n: hours }), tone: "soon" };
+  if (hours < SOON_HOURS) return { text: t("time.due.hours", { n: hours }), tone: "soon" };
   return { text: tn("time.due.days", Math.floor(hours / 24)), tone: "" };
 }
 

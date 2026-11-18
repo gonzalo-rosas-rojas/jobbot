@@ -17,11 +17,24 @@ fn reply(result: &str) -> String {
     .to_string()
 }
 
+/// What the version flag and the `version` mode answer.
+const FAKE_VERSION: &str = "2.1.284 (Claude Code)";
+
+/// The config folder the child was given, as the environment holds it (empty when unset).
+fn config_dir() -> String {
+    std::env::var("CLAUDE_CONFIG_DIR").unwrap_or_default()
+}
+
+/// The folder the fake runs in, as text (empty when it cannot be read).
+fn work_dir() -> String {
+    std::env::current_dir()
+        .map(|p| p.display().to_string())
+        .unwrap_or_default()
+}
+
 /// What the child was told its config folder is, with the slashes the real CLI prints.
 fn config_dir_seen() -> String {
-    std::env::var("CLAUDE_CONFIG_DIR")
-        .unwrap_or_default()
-        .replace('\\', "/")
+    config_dir().replace('\\', "/")
 }
 
 /// `claude auth status` for `mode`: the JSON and the exit code.
@@ -58,67 +71,73 @@ fn main() {
         None => (String::new(), &args[..]),
     };
     if rest.first().map(String::as_str) == Some("--version") {
-        println!("2.1.284 (Claude Code)");
+        println!("{FAKE_VERSION}");
         return;
     }
     if rest.first().map(String::as_str) == Some("auth") {
-        match rest.get(1).map(String::as_str) {
-            Some("status") => {
-                // One line per call in the work folder, so a test can count the preflights.
-                if let Ok(mut log) = std::fs::OpenOptions::new()
-                    .append(true)
-                    .create(true)
-                    .open("auth-status-calls")
-                {
-                    let _ = writeln!(log, "{mode}");
-                }
-                if mode == "auth-noisy" {
-                    // No JSON, and a whole address in what it does say.
-                    eprintln!("no se pudo leer la sesión de persona@corp.example");
-                    std::process::exit(1);
-                }
-                let (status, code) = auth_status(&mode);
-                print!("{status}");
-                let _ = std::io::stdout().flush();
-                std::process::exit(code);
+        run_auth(&mode, rest);
+        return;
+    }
+    run_prompt(&mode, rest);
+}
+
+/// `claude auth status|login|logout`: answers and leaves the traces the tests look for.
+fn run_auth(mode: &str, rest: &[String]) {
+    match rest.get(1).map(String::as_str) {
+        Some("status") => {
+            // One line per call in the work folder, so a test can count the preflights.
+            if let Ok(mut log) = std::fs::OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open("auth-status-calls")
+            {
+                let _ = writeln!(log, "{mode}");
             }
-            Some("login") => {
-                // The real login writes its credentials in the config folder: leave a trace
-                // there so a test can see which folder the login was pointed at.
-                let dir = std::env::var("CLAUDE_CONFIG_DIR").unwrap_or_default();
-                let _ = std::fs::write(std::path::Path::new(&dir).join("fake-login.txt"), b"ok");
-                // What it was asked, so a test can see the flags.
-                let _ = std::fs::write(
-                    std::path::Path::new(&dir).join("fake-login-args.txt"),
-                    rest.join("|"),
-                );
-                println!("fake login ok");
-                return;
+            if mode == "auth-noisy" {
+                // No JSON, and a whole address in what it does say.
+                eprintln!("no se pudo leer la sesión de persona@corp.example");
+                std::process::exit(1);
             }
-            Some("logout") => {
-                if mode == "logout-fails" {
-                    eprintln!("no se pudo cerrar la sesión de persona@corp.example");
-                    std::process::exit(1);
-                }
-                // The credentials go; a note of where it ran says with which folder.
-                let dir = std::env::var("CLAUDE_CONFIG_DIR").unwrap_or_default();
-                let _ = std::fs::remove_file(std::path::Path::new(&dir).join("fake-login.txt"));
-                let cwd = std::env::current_dir()
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_default();
-                let _ = std::fs::write(
-                    std::path::Path::new(&dir).join("fake-logout.txt"),
-                    format!("{cwd}|{dir}"),
-                );
-                println!("fake logout ok");
-                return;
+            let (status, code) = auth_status(mode);
+            print!("{status}");
+            let _ = std::io::stdout().flush();
+            std::process::exit(code);
+        }
+        Some("login") => {
+            // The real login writes its credentials in the config folder: leave a trace
+            // there so a test can see which folder the login was pointed at.
+            let dir = config_dir();
+            let _ = std::fs::write(std::path::Path::new(&dir).join("fake-login.txt"), b"ok");
+            // What it was asked, so a test can see the flags.
+            let _ = std::fs::write(
+                std::path::Path::new(&dir).join("fake-login-args.txt"),
+                rest.join("|"),
+            );
+            println!("fake login ok");
+        }
+        Some("logout") => {
+            if mode == "logout-fails" {
+                eprintln!("no se pudo cerrar la sesión de persona@corp.example");
+                std::process::exit(1);
             }
-            _ => {
-                eprintln!("fake_claude: unknown auth command");
-                std::process::exit(2);
-            }
+            // The credentials go; a note of where it ran says with which folder.
+            let dir = config_dir();
+            let _ = std::fs::remove_file(std::path::Path::new(&dir).join("fake-login.txt"));
+            let _ = std::fs::write(
+                std::path::Path::new(&dir).join("fake-logout.txt"),
+                format!("{}|{dir}", work_dir()),
+            );
+            println!("fake logout ok");
+        }
+        _ => {
+            eprintln!("fake_claude: unknown auth command");
+            std::process::exit(2);
         }
     }
+}
+
+/// A `-p` call: reads the prompt from stdin and answers as `mode` says.
+fn run_prompt(mode: &str, rest: &[String]) {
     if mode.starts_with("auth-") {
         // A `-p` call after a refused preflight is the bug the tests look for.
         let _ = std::fs::write("p-was-called", b"x");
@@ -127,25 +146,23 @@ fn main() {
     if mode != "version" {
         let _ = std::io::stdin().read_to_string(&mut prompt);
     }
-    match mode.as_str() {
+    match mode {
         "ok" => print!("{}", reply(&format!("echo:{prompt}"))),
         "len" => print!("{}", reply(&format!("len:{}", prompt.len()))),
         "env" => {
             let flag = std::env::var("CLAUDE_CODE_DISABLE_CLAUDE_MDS").unwrap_or_default();
-            let cwd = std::env::current_dir()
-                .map(|p| p.display().to_string())
-                .unwrap_or_default();
-            let config_dir = std::env::var("CLAUDE_CONFIG_DIR").unwrap_or_default();
+            let cwd = work_dir();
+            let config = config_dir();
             let telemetry = std::env::var("DISABLE_TELEMETRY").unwrap_or_default();
             print!(
                 "{}",
                 reply(&format!(
-                    "env={flag}|cwd={cwd}|config_dir={config_dir}|telemetry={telemetry}"
+                    "env={flag}|cwd={cwd}|config_dir={config}|telemetry={telemetry}"
                 ))
             );
         }
         "args" => print!("{}", reply(&rest.join("|"))),
-        "version" => println!("2.1.284 (Claude Code)"),
+        "version" => println!("{FAKE_VERSION}"),
         "reported" => {
             print!(
                 "{}",

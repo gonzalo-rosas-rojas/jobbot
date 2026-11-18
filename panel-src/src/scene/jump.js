@@ -6,6 +6,9 @@ export const ADJACENT_MS = 420; // one floor
 export const STEP_MS = 120;     // each further floor
 export const MAX_MS = 800;      // the longest jump
 export const SNAP_MAX_MS = 400; // the glide to the nearest stop when a scroll comes to rest between two (R7 "Snap propio")
+const SNAP_BASE_MS = 140;       // a glide takes this much plus...
+const SNAP_PER_FLOOR_MS = 520;  // ...this much per floor to cover...
+const SNAP_MIN_MS = 160;        // ...and never less than this
 
 /** How long a jump that crosses `floors` floors takes: min(800, 420 + 120 * (N - 1)); under one floor counts as one. */
 export function jumpDuration(floors) {
@@ -43,17 +46,17 @@ export function stepJump(job, now) {
 
 /**
  * The short glide that puts a page that came to rest between two stops on the nearest one: null if already there, otherwise a
- * job for stepJump of 140 ms plus 520 ms per floor to cover (half a floor is the longest way, so 400 ms at most). Never a cut:
+ * job for stepJump of 140 ms plus 520 ms per floor to cover, from 160 ms up (half a floor is the longest way, so 400 ms at most). Never a cut:
  * the caller does not snap at all under reduced motion.
  */
 export function planSnap({ from, to, floorHeight, now = 0, speed = 0 }) {
   const dist = Math.abs(to - from);
   if (dist < 0.5) return null;
-  const ms = Math.round(Math.min(SNAP_MAX_MS, Math.max(160, 140 + 520 * (dist / floorHeight))));
+  const ms = Math.round(Math.min(SNAP_MAX_MS, Math.max(SNAP_MIN_MS, SNAP_BASE_MS + SNAP_PER_FLOOR_MS * (dist / floorHeight))));
   const job = { cut: false, from, to, t0: now, ms };
   // `speed` (px per ms, signed) is how fast the page is moving as the glide begins. It is carried into the glide, so that the end of a wheel
   // gesture is one movement and not a stop followed by a start; kept within what the curve can take without overshooting the mark
-  // (2.5 times the way, which is monotone) and, when it points away from the mark, to a fifth of it, so the page gives way only a little.
+  // (2.5 times the way, which is monotone) and, when it points away from the mark, to six tenths of it, so the page gives way only a little.
   if (Math.abs(speed) > 0.02) {
     const way = to - from;
     const carry = speed * ms;

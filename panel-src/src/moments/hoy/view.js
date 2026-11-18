@@ -5,14 +5,19 @@
 
 import { t, tn, lang, fmtDate, fmtMoney } from "../../i18n/index.js";
 import { candidates, turnCount, nightFigures, PERMANENT_ACTIONS } from "../../core/model.js";
-import { ago, kindLabel, stateLabel, windowLabel, spendLabel, scoreText, pointsOf } from "../../core/format.js";
-import { dayOf, serverDay } from "../../core/time.js";
+import { ago, daysSince, kindLabel, stateLabel, windowLabel, spendLabel, scoreText, pointsOf } from "../../core/format.js";
+import { dayOf, serverDay, HOUR_MS } from "../../core/time.js";
 import { mailId } from "../../core/diff.js";
-import { KEYS } from "../../ui/keys.js";
+import { keyShown } from "../../ui/keys.js";
 import { safeHref, clean } from "../shared/util.js";
 import { askOf } from "../shared/stops.js";
+import { indexCards } from "../shared/cards.js";
 
 export const NEXT_ROWS = 6;                 // "Y después · 6": with LO SIGUIENTE, at most seven items have an action (R7 rule 14)
+const NEXT_BUTTONS = 3;                    // buttons on LO SIGUIENTE
+const ROW_BUTTONS = 1;                     // buttons on a line of "Y después"
+const COMPANY_MAX = 60;                    // characters of a company in a row and in the snoozed strip
+const COMPANY_SHORT_MAX = 50;              // characters of a company in the "since your last visit" list (shorter than the row's limit; kept as it was)
 export const SINCE_ROWS = 5;
 export const SPELLED_UP_TO = 20;            // the headline spells the number as a word up to here ("Te tocan siete."), a figure above it
 
@@ -32,21 +37,10 @@ const SAYS_NOTHING = /\b(?:null|undefined|NaN)\b/;
 const sane = (text) => (SAYS_NOTHING.test(text) ? "" : text);
 const whole = (x) => Math.max(0, Math.trunc(Number(x) || 0));
 
-// What the key of an action looks like on a button, from the one table of keys.js (so a renamed key is renamed here).
-export function keyShown(id) {
-  const entry = KEYS.find((k) => k.id === id);
-  if (!entry) throw new Error(`hoy: "${id}" is not an action of the key table`);
-  return entry.display === "Enter" ? "↵" : entry.display;
-}
+// The key of an action as HOY draws it (ui/keys.js, which also names this room in its error).
+const keyOf = (id) => keyShown(id, { room: "hoy" });
 
-function indexCards(snap) {
-  const map = new Map();
-  for (const col of snap.board || []) for (const c of col.cards) map.set(c.key, c);
-  for (const c of [...((snap.awaiting_approval || {}).cards || []), ...((snap.needs_gonza || {}).cards || [])]) map.set(c.key, c);
-  return map;
-}
-
-/** The ids of what can be done to a candidate, in the order the keys are listed; `first` leads. */
+/** The ids of what can be done to a candidate, in the order the keys are listed. */
 function actionIds(c, card) {
   const ids = [];
   if (c.task) ids.push("done");
@@ -62,32 +56,43 @@ function actionIds(c, card) {
   return ids;
 }
 
+/** The verb that leads a row: the one its kind of item is for, or the first it accepts. */
+const primaryOf = (ids, kindId) => (ids.includes(PRIMARY[kindId]) ? PRIMARY[kindId] : ids[0]);
+
+/** The verbs drawn as buttons, at most `shown`: the primary, then (when the row has room for more than one) open and snooze, then whatever else fits. */
+function drawnVerbs(ids, first, shown) {
+  const wanted = [first, ...(shown > 1 ? ["open", "snooze"] : [])].filter((id, i, all) => id && ids.includes(id) && all.indexOf(id) === i);
+  for (const id of ids) if (wanted.length < shown && !wanted.includes(id)) wanted.push(id);
+  return wanted.slice(0, shown);
+}
+
 /** [{ id, key, label, primary, visible, permanent }]: the primary first; `visible` are the buttons drawn, the rest work by key only. */
 function actionsOf(c, card, shown) {
   const ids = actionIds(c, card);
-  const first = ids.includes(PRIMARY[c.kindId]) ? PRIMARY[c.kindId] : ids[0];
-  const wanted = [first, ...(shown > 1 ? ["open", "snooze"] : [])].filter((id, i, all) => id && ids.includes(id) && all.indexOf(id) === i);
-  for (const id of ids) if (wanted.length < shown && !wanted.includes(id)) wanted.push(id);
-  const visible = wanted.slice(0, shown);
+  const first = primaryOf(ids, c.kindId);
+  const visible = drawnVerbs(ids, first, shown);
   const order = [...visible, ...ids.filter((id) => !visible.includes(id))];
-  return order.map((id) => ({ id, key: keyShown(id), label: t(ACTION_LABEL[id]), primary: id === first, visible: visible.includes(id), permanent: PERMANENT.has(id) }));
+  return order.map((id) => ({ id, key: keyOf(id), label: t(ACTION_LABEL[id]), primary: id === first, visible: visible.includes(id), permanent: PERMANENT.has(id) }));
 }
+
+const dotted = (...parts) => parts.filter(Boolean).join(" · ");
 
 /** The mono line at the right of a row: what makes it pressing, in numbers the data has. */
 function instrumentOf(c, card) {
   if (c.task) return c.sub;
-  if (c.kindId === "followup") return [c.big, c.sub].filter(Boolean).join(" · ");
+  if (c.kindId === "followup") return dotted(c.big, c.sub);
   if (c.kindId === "offer") {
     const pay = card ? pointsOf(card.salary_max) ?? pointsOf(card.salary_min) : null;
     return pay !== null ? t("hoy.row.salary", { amount: fmtMoney(pay, { digits: 0 }) }) : c.sub;
   }
   const score = scoreText(card && card.score);
-  if (c.kindId === "approve") return [score, card && card.source, card && card.has_screenshot ? t("hoy.row.capture") : ""].filter(Boolean).join(" · ");
-  return [score, card && card.days_in_state > 0 ? t("hoy.row.days", { n: card.days_in_state }) : ""].filter(Boolean).join(" · ");
+  if (c.kindId === "approve") return dotted(score, card && card.source, card && card.has_screenshot ? t("hoy.row.capture") : "");
+  return dotted(score, card && card.days_in_state > 0 ? t("hoy.row.days", { n: card.days_in_state }) : "");
 }
 
 function rowOf(c, cards, shown) {
-  const card = c.key ? cards.get(c.key) : c.open ? cards.get(c.open) : null;
+  const cardKey = c.key || c.open;
+  const card = cardKey ? cards.get(cardKey) : null;
   return {
     id: c.id,
     data: c.task ? { task: String(c.task.id) } : { card: c.key },
@@ -95,7 +100,7 @@ function rowOf(c, cards, shown) {
     tone: c.tone,
     kindId: c.kindId,
     kind: t("hoy.kind." + c.kindId),
-    company: c.task ? null : clean(c.company, 60),
+    company: c.task ? null : clean(c.company, COMPANY_MAX),
     text: clean(c.task ? c.title : c.role, 140),
     why: c.why ? clean(c.why, 180) : null,
     instrument: sane(clean(instrumentOf(c, card), 90)),
@@ -105,18 +110,20 @@ function rowOf(c, cards, shown) {
   };
 }
 
+const sentOf = (move) => move.to === "submitted";
+
 /** What happened since `lastMs`: new mail and the moves that matter, newest first. Nothing at all on a first visit (no last visit). */
 function sinceOf(snap, lastMs, nowMs) {
   if (!(lastMs > 0)) return null;
   const quoted = (text) => (text ? "«" + text + "»" : "");
   const mails = ((snap.today || {}).emails || []).filter((m) => Date.parse(m.received_at) > lastMs).map((m) => ({
     at: Date.parse(m.received_at), mark: "mail:" + mailId(m), kind: "mail", typeId: m.kind, type: kindLabel(m.kind),
-    company: clean(m.company || m.from, 50), line: clean([quoted(clean(m.subject, 100)), m.summary].filter(Boolean).join(" · "), 150),
+    company: clean(m.company || m.from, COMPANY_SHORT_MAX), line: clean([quoted(clean(m.subject, 100)), m.summary].filter(Boolean).join(" · "), 150),
   }));
   const moves = ((snap.activity || {}).moves || []).filter((x) => Date.parse(x.at) > lastMs && MOVES_SHOWN.has(x.to)).map((x) => ({
-    at: Date.parse(x.at), mark: "card:" + x.key, kind: "move", typeId: x.to === "submitted" ? "sent" : x.to,
-    type: x.to === "submitted" ? t("hoy.since.type.sent") : x.to === "needs_gonza" ? t("hoy.since.type.needs") : stateLabel(x.to),
-    company: clean(x.company, 50), line: clean(x.title, 150),
+    at: Date.parse(x.at), mark: "card:" + x.key, kind: "move", typeId: sentOf(x) ? "sent" : x.to,
+    type: sentOf(x) ? t("hoy.since.type.sent") : x.to === "needs_gonza" ? t("hoy.since.type.needs") : stateLabel(x.to),
+    company: clean(x.company, COMPANY_SHORT_MAX), line: clean(x.title, 150),
   }));
   const all = [...mails, ...moves].sort((a, b) => b.at - a.at);
   const sent = moves.filter((x) => x.typeId === "sent").length;
@@ -127,14 +134,36 @@ function sinceOf(snap, lastMs, nowMs) {
   };
 }
 
+export const MAIL_STALE_MS = 48 * HOUR_MS;   // the mailbox is "not read" after two days; the clock is the snapshot's, never the browser's
+
+/**
+ * The warning of a mailbox that stopped being read: text when applications wait for an answer and the last import (`today.inbox`)
+ * is missing or older than 48 hours at `generated_at`; null otherwise (and null when the snapshot has no `today.inbox`, a binary from before it).
+ * The days are whole days, rounded down.
+ */
+function mailWarnOf(snap, nowMs) {
+  const inbox = (snap.today || {}).inbox;
+  if (!inbox || typeof inbox !== "object") return null;
+  const waiting = whole(inbox.waiting);
+  if (waiting <= 0) return null;
+  const at = Date.parse(snap.generated_at);
+  const clock = Number.isFinite(at) ? at : nowMs;
+  const read = inbox.imported_at ? Date.parse(inbox.imported_at) : NaN;
+  const tail = tn("hoy.mail.waiting", waiting);
+  if (!Number.isFinite(read)) return t("hoy.mail.never") + " " + tail;
+  const age = clock - read;
+  if (!(age > MAIL_STALE_MS)) return null;
+  return tn("hoy.mail.stale", daysSince(inbox.imported_at, clock)) + " " + tail;
+}
+
 /** The 48 half hours of the night. `busy` is Gonza's time: the run window was closed (an unknown window is not drawn as busy). */
 function stripOf(activity, nowMs) {
-  const slots = (activity && activity.slots) || [];
-  const max = slots.reduce((m, s) => Math.max(m, s.seen || 0), 0);
+  const slots = ((activity && activity.slots) || []).map((s) => ({ ...s, seen: s.seen || 0 }));
+  const max = slots.reduce((m, s) => Math.max(m, s.seen), 0);
   const day = (iso) => (dayOf(iso) === dayOf(nowMs) ? t("hoy.strip.today") : t("hoy.strip.yesterday"));
   return {
     max,
-    slots: slots.map((s) => ({ at: s.at, seen: s.seen || 0, busy: s.open === false, h: max ? (s.seen || 0) / max : 0 })),
+    slots: slots.map((s) => ({ at: s.at, seen: s.seen, busy: s.open === false, h: max ? s.seen / max : 0 })),
     // a night with nothing seen draws no strip, so it has no title either (the receipts already say 0)
     title: max > 0 && activity && activity.from && activity.to
       ? t("hoy.strip.title", { from: fmtDate(activity.from, "time") + " " + day(activity.from), to: fmtDate(activity.to, "time") + " " + day(activity.to) }) : null,
@@ -154,17 +183,17 @@ function footOf(snap, nowMs) {
 /** The demo's line about itself in the language of the page now (each text is a pair [es, en]); a link that is not http(s), or has no words, is dropped. Null without it. */
 function aboutOf(about) {
   if (!about) return null;
-  const say = (pair) => (Array.isArray(pair) ? pair[lang() === "en" ? 1 : 0] : pair);
+  const inLang = (pair) => (Array.isArray(pair) ? pair[lang() === "en" ? 1 : 0] : pair);
   return {
-    line: clean(say(about.line), 200),
-    note: clean(say(about.note), 200),
-    links: (about.links || []).map((l) => ({ href: safeHref(l.href), text: clean(say(l.text), 60) })).filter((l) => l.href && l.text),
+    line: clean(inLang(about.line), 200),
+    note: clean(inLang(about.note), 200),
+    links: (about.links || []).map((l) => ({ href: safeHref(l.href), text: clean(inLang(l.text), 60) })).filter((l) => l.href && l.text),
   };
 }
 
 /**
  * hoyView(model, { nowMs, lastVisitMs, flat, about }) ->
- *   { about, calm, eyebrow, turn, headline, awaiting, calmLine, figures, base, strip, next, after, rows, restLabel, restHint, more, moreLabel, since, foot, snoozed }
+ *   { about, mailWarn, calm, eyebrow, turn, headline, awaiting, calmLine, figures, base, strip, next, after, rows, restLabel, restHint, more, moreLabel, since, foot, snoozed }
  * `flat` is the page with no keyboard (a phone): `restHint` tells it to tap and names no key, where a desk is told what a click does.
  * `about` is what the public demo says about itself ({ line, note, links: [{ href, text }] }), null on the real panel.
  * `turn` is the real number of what waits (7 or 60: the headline is never cut), `headline` is the one run of the title ("Te tocan siete.",
@@ -172,21 +201,22 @@ function aboutOf(about) {
  * `rows` are the NEXT_ROWS that follow with one button each, and `more` is what does not fit ("y {M} más", which opens
  * PROCESOS filtered to what is yours). `since` is null on a first visit.
  */
-export function hoyView(m, { nowMs, lastVisitMs = 0, flat = false, about = null }) {
-  const snap = m.snap;
-  const turn = whole(turnCount(m));
-  const cands = candidates(m);
+export function hoyView(model, { nowMs, lastVisitMs = 0, flat = false, about = null }) {
+  const snap = model.snap;
+  const turn = whole(turnCount(model));
+  const cands = candidates(model);
   const calm = turn === 0 && cands.length === 0;
   const cards = indexCards(snap);
   const night = nightFigures(snap);
-  const first = cands[0] ? rowOf(cands[0], cards, 3) : null;
-  const rows = cands.slice(1, 1 + NEXT_ROWS).map((c) => rowOf(c, cards, 1));
-  const more = Math.max(0, turn - ((first ? 1 : 0) + rows.length));
+  const nextRow = cands[0] ? rowOf(cands[0], cards, NEXT_BUTTONS) : null;
+  const rows = cands.slice(1, 1 + NEXT_ROWS).map((c) => rowOf(c, cards, ROW_BUTTONS));
+  const more = Math.max(0, turn - ((nextRow ? 1 : 0) + rows.length));
   const c = snap.controls || {};
   const snoozed = snap.snoozed || { total: 0, cards: [] };
   return {
     about: aboutOf(about),
     calm,
+    mailWarn: mailWarnOf(snap, nowMs),
     eyebrow: t("hoy.eyebrow", { ask: t(askOf("hoy")), hora: fmtDate(nowMs, "time") }),
     turn,
     headline: calm ? t("hoy.calm.title") : tn("hoy.head", turn, { word: turnWord(turn) }),
@@ -200,8 +230,8 @@ export function hoyView(m, { nowMs, lastVisitMs = 0, flat = false, about = null 
     ],
     base: night.days > 0 ? tn("hoy.fig.base", night.days) : null,
     strip: stripOf(snap.activity, nowMs),
-    next: first,
-    after: first ? tn("hoy.next.after", Math.max(0, turn - 1)) : null,
+    next: nextRow,
+    after: nextRow ? tn("hoy.next.after", Math.max(0, turn - 1)) : null,
     rows,
     restLabel: t("hoy.rest.label", { n: rows.length }),
     restHint: t(flat ? "hoy.rest.hint.flat" : "hoy.rest.hint"),
@@ -211,7 +241,7 @@ export function hoyView(m, { nowMs, lastVisitMs = 0, flat = false, about = null 
     foot: footOf(snap, nowMs),
     snoozed: {
       total: whole(snoozed.total),
-      items: (snoozed.cards || []).map((x) => ({ key: x.key, company: clean(x.company, 60), role: clean(x.title, 90), until: x.snoozed_until ? fmtDate(x.snoozed_until, "datetime") : "" })),
+      items: (snoozed.cards || []).map((x) => ({ key: x.key, company: clean(x.company, COMPANY_MAX), role: clean(x.title, 90), until: x.snoozed_until ? fmtDate(x.snoozed_until, "datetime") : "" })),
     },
   };
 }

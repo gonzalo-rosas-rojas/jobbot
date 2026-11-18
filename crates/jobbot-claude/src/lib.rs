@@ -270,11 +270,9 @@ pub fn parse_reply(stdout: &str) -> Result<ClaudeReply, ClaudeError> {
         .get("total_cost_usd")
         .and_then(Value::as_f64)
         .unwrap_or(0.0);
-    let text = value
-        .get("result")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
+    let result = value.get("result").and_then(Value::as_str);
+    let text = result.unwrap_or_default().to_string();
+    let structured = value.get("structured_output").filter(|v| !v.is_null());
     if value
         .get("is_error")
         .and_then(Value::as_bool)
@@ -291,6 +289,15 @@ pub fn parse_reply(stdout: &str) -> Result<ClaudeReply, ClaudeError> {
             cost_usd,
         });
     }
+    // A successful reply carries text, or (with a schema, as the real capture shows in
+    // `claude-structured.json`) a structured answer and no `result` at all. A reply with neither
+    // is not an empty answer, it is a reply this parser does not understand. A missing
+    // `total_cost_usd` still counts as 0: this crate has no log to say so.
+    if result.is_none() && structured.is_none() {
+        return Err(ClaudeError::Unreadable(
+            "la respuesta no trae ni `result` ni `structured_output`".to_string(),
+        ));
+    }
     let usage = value.get("usage");
     let tokens = |key: &str| {
         usage
@@ -300,10 +307,7 @@ pub fn parse_reply(stdout: &str) -> Result<ClaudeReply, ClaudeError> {
     };
     Ok(ClaudeReply {
         text,
-        structured: value
-            .get("structured_output")
-            .filter(|v| !v.is_null())
-            .cloned(),
+        structured: structured.cloned(),
         cost_usd,
         input_tokens: tokens("input_tokens")
             + tokens("cache_creation_input_tokens")
@@ -573,7 +577,7 @@ impl CliClaude {
     /// `claude auth status` with exactly the environment of a `-p` child, judged by
     /// `judge_account`. Blocks on the child for at most the configured timeout.
     async fn ask_auth_status(&self) -> Result<AccountSeen, ClaudeError> {
-        std::fs::create_dir_all(&self.work_dir).map_err(|e| ClaudeError::Io(e.to_string()))?;
+        ensure_dir(&self.work_dir)?;
         let mut command = self.child_command(&["auth", "status"]);
         command
             .stdin(Stdio::null())
@@ -632,8 +636,8 @@ impl CliClaude {
     /// folder (created first), on the terminal so the browser opens. Nothing is parsed: the
     /// preflight that follows is the proof.
     pub async fn login(&self) -> Result<(), ClaudeError> {
-        std::fs::create_dir_all(&self.config_dir).map_err(|e| ClaudeError::Io(e.to_string()))?;
-        std::fs::create_dir_all(&self.work_dir).map_err(|e| ClaudeError::Io(e.to_string()))?;
+        ensure_dir(&self.config_dir)?;
+        ensure_dir(&self.work_dir)?;
         let args = self.login_args();
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let mut command = self.child_command(&args);
@@ -742,6 +746,11 @@ impl CliClaude {
     }
 }
 
+/// Creates `dir` (and its parents) when missing; failing to is an I/O error of the runner.
+fn ensure_dir(dir: &Path) -> Result<(), ClaudeError> {
+    std::fs::create_dir_all(dir).map_err(|e| ClaudeError::Io(e.to_string()))
+}
+
 /// A spawn failure as the error Gonza reads: a missing program is named, anything else is I/O.
 fn spawn_error(program: &Path, e: std::io::Error) -> ClaudeError {
     if e.kind() == std::io::ErrorKind::NotFound {
@@ -770,7 +779,7 @@ impl ClaudeRunner for CliClaude {
     /// it closes is exactly what the login opened. The cached verdict of the preflight is
     /// dropped whatever happens: the next question must ask again.
     async fn logout(&self) -> Result<(), ClaudeError> {
-        std::fs::create_dir_all(&self.work_dir).map_err(|e| ClaudeError::Io(e.to_string()))?;
+        ensure_dir(&self.work_dir)?;
         let mut command = self.child_command(&["auth", "logout"]);
         command
             .stdin(Stdio::null())
@@ -798,7 +807,7 @@ impl ClaudeRunner for CliClaude {
     async fn run(&self, req: &ClaudeRequest) -> Result<ClaudeReply, ClaudeError> {
         // Fail closed: no prompt goes out until the login is known to be the private one.
         self.preflight().await?;
-        std::fs::create_dir_all(&self.work_dir).map_err(|e| ClaudeError::Io(e.to_string()))?;
+        ensure_dir(&self.work_dir)?;
         let mut command = self.prepare_command(req);
         let mut child = command.spawn().map_err(|e| spawn_error(&self.program, e))?;
         // The prompt is written from its own task while the output is read, so a prompt bigger
@@ -883,7 +892,7 @@ mod tests {
         not(windows),
         ignore = "drive-letter paths are only absolute on Windows"
     )]
-    fn the_config_dir_is_the_file_s_or_the_default_under_local_appdata() {
+    fn the_config_dir_comes_from_the_file_or_defaults_under_local_appdata() {
         let local = Path::new("C:\\Users\\x\\AppData\\Local");
         let dir = resolve_config_dir(&ClaudeConfig::default(), Some(local)).unwrap();
         assert_eq!(
@@ -966,7 +975,7 @@ mod tests {
             expected_org_id: "org-personal".to_string(),
             ..ClaudeConfig::default()
         };
-        let mut other_dir = status_ok("C:/Users/x/.claude");
+        let other_dir = status_ok("C:/Users/x/.claude");
         let mut api_key = status_ok("C:/cfg/jobbot/claude-config");
         api_key["authMethod"] = json!("api_key");
         let mut bedrock = status_ok("C:/cfg/jobbot/claude-config");
@@ -983,7 +992,7 @@ mod tests {
             (&api_key, true, "es api_key"),
             (&bedrock, true, "proveedor bedrock"),
             (&team, true, "es team"),
-            (&mut other_dir, true, "CLAUDE_CONFIG_DIR"),
+            (&other_dir, true, "CLAUDE_CONFIG_DIR"),
             (&other_email, true, "cuenta equivocada"),
             (&other_org, true, "organización equivocada"),
         ] {
@@ -1146,6 +1155,28 @@ mod tests {
     }
 
     #[test]
+    fn a_success_that_says_nothing_is_unreadable_not_an_empty_answer() {
+        for text in [
+            r#"{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.01}"#,
+            r#"{"type":"result","subtype":"success","total_cost_usd":0.01,"structured_output":null}"#,
+        ] {
+            assert!(
+                matches!(parse_reply(text), Err(ClaudeError::Unreadable(_))),
+                "{text:?}"
+            );
+        }
+        // An empty text that is there is still an answer; a structured one needs no text.
+        let empty = r#"{"type":"result","subtype":"success","result":"","total_cost_usd":0.01}"#;
+        assert_eq!(parse_reply(empty).unwrap().text, "");
+    }
+
+    #[test]
+    fn a_success_without_a_cost_counts_as_free() {
+        let text = r#"{"type":"result","subtype":"success","result":"OK"}"#;
+        assert_eq!(parse_reply(text).unwrap().cost_usd, 0.0);
+    }
+
+    #[test]
     fn garbage_and_other_json_are_unreadable() {
         for text in [
             "",
@@ -1214,6 +1245,20 @@ mod tests {
         }
     }
 
+    /// What a command sets (`Some`) or removes (`None`) in its child's environment.
+    fn envs_of(command: &Command) -> std::collections::HashMap<String, Option<String>> {
+        command
+            .as_std()
+            .get_envs()
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().into_owned(),
+                    v.map(|v| v.to_string_lossy().into_owned()),
+                )
+            })
+            .collect()
+    }
+
     #[test]
     fn the_child_never_inherits_credentials_and_gets_the_own_config_folder() {
         let dir = tempfile::tempdir().unwrap();
@@ -1226,16 +1271,7 @@ mod tests {
             own.clone(),
         );
         let command = runner.prepare_command(&request());
-        let envs: std::collections::HashMap<_, _> = command
-            .as_std()
-            .get_envs()
-            .map(|(k, v)| {
-                (
-                    k.to_string_lossy().into_owned(),
-                    v.map(|v| v.to_string_lossy().into_owned()),
-                )
-            })
-            .collect();
+        let envs = envs_of(&command);
         for name in [
             "ANTHROPIC_API_KEY",
             "ANTHROPIC_AUTH_TOKEN",
@@ -1275,7 +1311,7 @@ mod tests {
         );
         // What an environment with a work cloud setup could hold, in any letter case (Windows
         // does not care), next to ordinary variables the child needs.
-        let present = [
+        let removed = [
             "CLAUDE_CODE_OAUTH_TOKEN",
             "claude_code_use_bedrock",
             "CLAUDE_CODE_USE_VERTEX",
@@ -1286,29 +1322,27 @@ mod tests {
             "AWS_ACCESS_KEY_ID",
             "GOOGLE_APPLICATION_CREDENTIALS",
             "CLOUD_ML_REGION",
+        ];
+        let inherited = [
             "PATH",
             "USERPROFILE",
             "APPDATA",
             "HTTPS_PROXY",
             "CLAUDE_CODE_DISABLE_CLAUDE_MDS_FOR_OTHER_THINGS",
         ];
-        let command =
-            runner.prepare_command_in(&request(), present.iter().map(std::ffi::OsString::from));
-        let envs: std::collections::HashMap<_, _> = command
-            .as_std()
-            .get_envs()
-            .map(|(k, v)| (k.to_string_lossy().into_owned(), v.is_none()))
-            .collect();
-        for name in &present[..10] {
+        let present = removed.iter().chain(&inherited);
+        let command = runner.prepare_command_in(&request(), present.map(std::ffi::OsString::from));
+        let envs = envs_of(&command);
+        for name in removed {
             assert_eq!(
-                envs.get(*name),
-                Some(&true),
+                envs.get(name),
+                Some(&None),
                 "{name} must be removed from the child's environment"
             );
         }
-        for name in &present[10..] {
+        for name in inherited {
             assert!(
-                !envs.contains_key(*name),
+                !envs.contains_key(name),
                 "{name} is an ordinary variable and must be inherited untouched"
             );
         }
@@ -1339,15 +1373,7 @@ mod tests {
             let command =
                 runner.child_command_in(args, present.iter().map(std::ffi::OsString::from));
             let std_command = command.as_std();
-            let envs: std::collections::HashMap<_, _> = std_command
-                .get_envs()
-                .map(|(k, v)| {
-                    (
-                        k.to_string_lossy().into_owned(),
-                        v.map(|v| v.to_string_lossy().into_owned()),
-                    )
-                })
-                .collect();
+            let envs = envs_of(&command);
             for name in [
                 "CLAUDE_CODE_OAUTH_TOKEN",
                 "ANTHROPIC_API_KEY",

@@ -2,17 +2,24 @@
 //! retries (`Retry-After`, backoff) and the GET every source calls, which goes through the
 //! source's `Http` stack (`crate::http`).
 
+use std::collections::HashSet;
 use std::time::Duration;
 
 use anyhow::Context;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
-use jobbot_domain::models::FetchError;
+use jobbot_domain::models::{FetchError, FetchResult, Job};
 use serde_json::Value;
 
 use crate::http::Http;
 
 /// Upper bound for one HTTP request. A slow board must not stall the whole run.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// The host of Greenhouse's public board API, shared by the reader, the questions and the open check.
+pub(crate) const GREENHOUSE_API_URL: &str = "https://boards-api.greenhouse.io";
+
+/// The host of Lever's public postings API, shared by the reader and the open check.
+pub(crate) const LEVER_API_URL: &str = "https://api.lever.co";
 
 /// Wait between two requests to the same site, for the sources that read more than one page or feed.
 pub const REQUEST_PAUSE: Duration = Duration::from_millis(500);
@@ -97,6 +104,10 @@ impl RetryPolicy {
     };
 }
 
+/// Doublings of the first wait after which the backoff stops growing (and the exponent stays small
+/// enough not to overflow).
+const MAX_BACKOFF_DOUBLINGS: u32 = 10;
+
 /// The longest a host is left alone, whatever its `Retry-After` claims: a day.
 pub(crate) const MAX_COOLDOWN: Duration = Duration::from_secs(24 * 60 * 60);
 
@@ -131,7 +142,7 @@ pub fn backoff_delay(
     let base = retry_after.unwrap_or_else(|| {
         policy
             .base
-            .checked_mul(2u32.saturating_pow(attempt.min(10)))
+            .checked_mul(2u32.saturating_pow(attempt.min(MAX_BACKOFF_DOUBLINGS)))
             .unwrap_or(policy.max_wait)
     });
     let jitter = if jitter.is_finite() {
@@ -145,6 +156,8 @@ pub fn backoff_delay(
         .min(policy.max_wait)
 }
 
+/// A random number from 0.0 to 1.0 for the backoff's jitter. When the system cannot give random
+/// bytes it is 0.0: no jitter is a valid wait (`backoff_delay` accepts 0.0), so the retry goes on.
 pub(crate) fn jitter_unit() -> f64 {
     let mut bytes = [0u8; 4];
     if getrandom::fill(&mut bytes).is_err() {
@@ -174,13 +187,13 @@ pub async fn get_json(http: &Http, url: &str, query: &[(&str, &str)]) -> anyhow:
 /// named are skipped.
 pub fn join_places<'a>(parts: impl IntoIterator<Item = &'a str>) -> String {
     let mut joined = String::new();
-    let mut lower = String::new();
     for part in parts {
         let part = part.trim();
         let part_lower = part.to_lowercase();
         if part.is_empty() {
             continue;
         }
+        let lower = joined.to_lowercase();
         // A long name is also "already named" when an earlier place contains it ("Canada" in
         // "Ontario, Canada"); short codes only count on an exact match, because "us" is inside "austin".
         let named = lower.split("; ").any(|place| place == part_lower)
@@ -190,10 +203,8 @@ pub fn join_places<'a>(parts: impl IntoIterator<Item = &'a str>) -> String {
         }
         if !joined.is_empty() {
             joined.push_str("; ");
-            lower.push_str("; ");
         }
         joined.push_str(part);
-        lower.push_str(&part_lower);
     }
     joined
 }
@@ -211,6 +222,77 @@ pub fn failure(source: &str, slug: &str, error: &anyhow::Error) -> FetchError {
 /// The error for postings that were dropped because they lacked an id, a title or a URL.
 pub fn skipped_error(source: &str, slug: &str, count: usize) -> FetchError {
     FetchError::skipped(source, slug, count)
+}
+
+/// What one source reads from one slug or feed: the jobs it parsed and how many postings it
+/// skipped for missing fields, or why it failed.
+pub type Reading = anyhow::Result<(Vec<Job>, usize)>;
+
+/// What a source that runs several searches keeps across them: the ids it already has (a job two
+/// searches both return counts once), the requests made so far (to pause between them) and the
+/// result being built, so that when a later page fails the earlier ones are kept.
+#[derive(Default)]
+pub struct Crawl {
+    pub seen: HashSet<String>,
+    pub requests: u32,
+    pub result: FetchResult,
+}
+
+/// Adds what `reading` gave to `result`: its jobs and, when postings were skipped, the line that
+/// says so; a failure becomes one error line. One slug failing never stops the others.
+pub fn record(result: &mut FetchResult, source: &str, slug: &str, reading: Reading) {
+    match reading {
+        Ok((jobs, skipped)) => {
+            result.jobs.extend(jobs);
+            if skipped > 0 {
+                result.errors.push(skipped_error(source, slug, skipped));
+            }
+        }
+        Err(error) => result.errors.push(failure(source, slug, &error)),
+    }
+}
+
+/// The jobs `parse` makes of `items` and how many items it could not parse.
+pub fn parse_all<'a, T: 'a>(
+    items: impl IntoIterator<Item = &'a T>,
+    parse: impl Fn(&T) -> Option<Job>,
+) -> (Vec<Job>, usize) {
+    let mut jobs = Vec::new();
+    let mut skipped = 0;
+    for item in items {
+        match parse(item) {
+            Some(job) => jobs.push(job),
+            None => skipped += 1,
+        }
+    }
+    (jobs, skipped)
+}
+
+/// Appends one `\n{label}: {value}` line to `text` for each field whose value is not empty.
+pub fn with_labeled_lines(mut text: String, fields: &[(&str, &str)]) -> String {
+    for (label, value) in fields {
+        if !value.is_empty() {
+            text = format!("{text}\n{label}: {value}");
+        }
+    }
+    text
+}
+
+/// `value`, or `fallback` when `value` is empty.
+pub fn or_if_empty<'a>(value: &'a str, fallback: &'a str) -> &'a str {
+    if value.is_empty() { fallback } else { value }
+}
+
+/// A policy with waits so short that a test never sleeps, shared by the tests of this module and
+/// of `crate::http`.
+#[cfg(test)]
+pub(crate) fn quick_policy() -> RetryPolicy {
+    RetryPolicy {
+        max_retries: 2,
+        base: Duration::from_millis(1),
+        max_wait: Duration::from_secs(30),
+        default_cooldown: Duration::from_secs(30),
+    }
 }
 
 #[cfg(test)]
@@ -313,6 +395,70 @@ mod tests {
         // ...but a short code is not looked up inside other words: "US" is not in "Austin".
         assert_eq!(join_places(["Austin", "US"]), "Austin; US");
         assert_eq!(join_places(["", " "]), "");
+        // Case is ignored and accents are not: "SÃO PAULO" names "São Paulo", "Sao Paulo" does not.
+        assert_eq!(
+            join_places(["São Paulo, Brasil", "SÃO PAULO", "Brasil", "Sao Paulo"]),
+            "São Paulo, Brasil; Sao Paulo"
+        );
+    }
+
+    fn job_titled(title: &str) -> Job {
+        Job {
+            title: title.to_string(),
+            ..Job::default()
+        }
+    }
+
+    #[test]
+    fn record_keeps_the_jobs_and_says_what_was_skipped_or_failed() {
+        let mut result = FetchResult::default();
+        record(&mut result, "lever", "acme", Ok((vec![job_titled("A")], 0)));
+        record(&mut result, "lever", "beta", Ok((vec![job_titled("B")], 2)));
+        record(
+            &mut result,
+            "lever",
+            "gone",
+            Err(anyhow::anyhow!("HTTP 404")),
+        );
+
+        let titles: Vec<&str> = result.jobs.iter().map(|job| job.title.as_str()).collect();
+        assert_eq!(titles, ["A", "B"]);
+        let lines: Vec<String> = result.errors.iter().map(ToString::to_string).collect();
+        assert_eq!(result.errors.len(), 2, "{lines:?}");
+        assert_eq!(result.errors[0], FetchError::skipped("lever", "beta", 2));
+        assert_eq!(lines[1], "lever:gone: HTTP 404");
+    }
+
+    #[test]
+    fn parse_all_counts_what_cannot_be_parsed() {
+        let items = [json!("keep"), json!(3), json!("also")];
+        let (jobs, skipped) = parse_all(&items, |item| item.as_str().map(job_titled));
+        let titles: Vec<&str> = jobs.iter().map(|job| job.title.as_str()).collect();
+        assert_eq!((titles, skipped), (vec!["keep", "also"], 1));
+    }
+
+    #[test]
+    fn labeled_lines_skip_empty_values_and_keep_the_order() {
+        let text = with_labeled_lines(
+            "Body".to_string(),
+            &[
+                ("Type", "Full time"),
+                ("Category", ""),
+                ("Skills", "Rust, Go"),
+            ],
+        );
+        assert_eq!(text, "Body\nType: Full time\nSkills: Rust, Go");
+        assert_eq!(
+            with_labeled_lines(String::new(), &[("Type", "x")]),
+            "\nType: x"
+        );
+    }
+
+    #[test]
+    fn or_if_empty_falls_back_only_on_an_empty_value() {
+        assert_eq!(or_if_empty("", "fallback"), "fallback");
+        assert_eq!(or_if_empty("value", "fallback"), "value");
+        assert_eq!(or_if_empty(" ", "fallback"), " ");
     }
 
     #[test]
@@ -337,19 +483,9 @@ mod tests {
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    /// A policy with waits so short that a test never sleeps.
-    fn quick() -> RetryPolicy {
-        RetryPolicy {
-            max_retries: 2,
-            base: Duration::from_millis(1),
-            max_wait: Duration::from_secs(30),
-            default_cooldown: Duration::from_secs(30),
-        }
-    }
-
     /// The standard stack over the network with `quick` waits and a board of its own.
     fn quick_http() -> Http {
-        Http::over(Network::new(reqwest::Client::new()), quick(), None)
+        Http::over(Network::new(reqwest::Client::new()), quick_policy(), None)
     }
 
     #[test]
@@ -456,7 +592,7 @@ mod tests {
         assert!(err.downcast_ref::<RateLimited>().is_some(), "{err:#}");
         assert_eq!(
             server.received_requests().await.unwrap().len(),
-            1 + quick().max_retries as usize
+            1 + quick_policy().max_retries as usize
         );
 
         // The host now rests: the next call does not even send a request.
@@ -464,7 +600,7 @@ mod tests {
         assert!(again.downcast_ref::<RateLimited>().is_some(), "{again:#}");
         assert_eq!(
             server.received_requests().await.unwrap().len(),
-            1 + quick().max_retries as usize,
+            1 + quick_policy().max_retries as usize,
             "no new request while the host cools down"
         );
     }
@@ -486,7 +622,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_retry_after_of_a_lifetime_cannot_panic_the_run() {
+    async fn a_huge_retry_after_cannot_panic_the_run() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .respond_with(

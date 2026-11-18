@@ -11,7 +11,6 @@
 //! `onsite_locations` (Australia) are searched again without the remote filter: Gonza would move
 //! there for a job, so on-site and hybrid postings count too, and the region filter decides.
 
-use std::collections::HashSet;
 use std::time::Duration;
 
 use crate::http::Http;
@@ -22,12 +21,24 @@ use serde_json::Value;
 
 use super::Source;
 use super::base::{
-    REQUEST_PAUSE, failure, get_json, id_string, join_places, parse_iso, skipped_error, str_field,
+    Crawl, REQUEST_PAUSE, failure, get_json, id_string, join_places, parse_iso, skipped_error,
+    str_field, with_labeled_lines,
 };
 use jobbot_domain::models::{FetchResult, Job};
 use jobbot_domain::text::html_to_text;
 
 const DEFAULT_BASE_URL: &str = "https://jobs.workable.com";
+/// The entry of a job's `locations` that marks its remote option, not a place.
+const REMOTE_PLACE: &str = "TELECOMMUTE";
+
+/// Which jobs one search asks for.
+#[derive(Clone, Copy, PartialEq)]
+enum Workplace {
+    /// Only remote jobs (`workplace=remote`).
+    Remote,
+    /// Every job, on-site and hybrid included.
+    Any,
+}
 
 /// The `[workable_search]` table of `profile/sources.toml`; present (even empty) turns the source on.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -96,34 +107,31 @@ impl WorkableSearchSource {
         self
     }
 
-    /// Follows the pages of one query in one place (`remote_only` adds `workplace=remote`). Jobs go
-    /// straight into `result`, so when a later page fails the earlier pages are kept and only the
-    /// error is returned. `seen` drops a job that two queries both return; `requests` counts every
-    /// request of the run, to pause between them.
+    /// Follows the pages of one query in one place (`Workplace::Remote` adds `workplace=remote`).
+    /// Jobs go straight into the crawl's result, so when a later page fails the earlier pages are
+    /// kept and only the error is returned.
     async fn fetch_query(
         &self,
         query: &str,
         location: &str,
-        remote_only: bool,
-        seen: &mut HashSet<String>,
-        requests: &mut u32,
-        result: &mut FetchResult,
+        workplace: Workplace,
+        crawl: &mut Crawl,
     ) -> anyhow::Result<()> {
         let url = format!("{}/api/v1/jobs", self.base_url);
-        let mut token = String::new();
+        let mut token: Option<String> = None;
         for _ in 0..self.config.max_pages {
-            if *requests > 0 {
+            if crawl.requests > 0 {
                 tokio::time::sleep(self.pause).await;
             }
-            *requests += 1;
+            crawl.requests += 1;
             let mut params = vec![("query", query)];
-            if remote_only {
+            if workplace == Workplace::Remote {
                 params.push(("workplace", "remote"));
             }
             if !location.is_empty() {
                 params.push(("location", location));
             }
-            if !token.is_empty() {
+            if let Some(token) = &token {
                 params.push(("pageToken", token.as_str()));
             }
             let body = get_json(&self.http, &url, &params).await?;
@@ -134,20 +142,22 @@ impl WorkableSearchSource {
             for item in items {
                 match parse_job(item) {
                     Some(job) => {
-                        if seen.insert(job.external_id.clone()) {
-                            result.jobs.push(job);
+                        if crawl.seen.insert(job.external_id.clone()) {
+                            crawl.result.jobs.push(job);
                         }
                     }
                     None => skipped += 1,
                 }
             }
             if skipped > 0 {
-                result
+                crawl
+                    .result
                     .errors
                     .push(skipped_error("workable_search", query, skipped));
             }
-            token = str_field(&body, "nextPageToken").to_string();
-            if token.is_empty() {
+            token =
+                Some(str_field(&body, "nextPageToken").to_string()).filter(|next| !next.is_empty());
+            if token.is_none() {
                 break;
             }
         }
@@ -162,41 +172,33 @@ impl Source for WorkableSearchSource {
     }
 
     async fn fetch(&self) -> FetchResult {
-        let mut result = FetchResult::default();
-        let mut seen = HashSet::new();
-        let mut requests = 0;
-        let searches = std::iter::once((self.config.location.as_str(), true)).chain(
+        let mut crawl = Crawl::default();
+        let searches = std::iter::once((self.config.location.as_str(), Workplace::Remote)).chain(
             self.config
                 .onsite_locations
                 .iter()
-                .map(|place| (place.as_str(), false)),
+                .map(|place| (place.as_str(), Workplace::Any)),
         );
-        for (location, remote_only) in searches {
+        for (location, workplace) in searches {
             for query in &self.config.queries {
                 if let Err(error) = self
-                    .fetch_query(
-                        query,
-                        location,
-                        remote_only,
-                        &mut seen,
-                        &mut requests,
-                        &mut result,
-                    )
+                    .fetch_query(query, location, workplace, &mut crawl)
                     .await
                 {
                     // The first search keeps its plain query as the slug, as before.
-                    let slug = if remote_only {
+                    let slug = if workplace == Workplace::Remote {
                         query.clone()
                     } else {
                         format!("{query} @ {location}")
                     };
-                    result
+                    crawl
+                        .result
                         .errors
                         .push(failure("workable_search", &slug, &error));
                 }
             }
         }
-        result
+        crawl.result
     }
 }
 
@@ -222,7 +224,7 @@ fn parse_job(item: &Value) -> Option<Job> {
             places
                 .iter()
                 .filter_map(Value::as_str)
-                .filter(|place| *place != "TELECOMMUTE")
+                .filter(|place| *place != REMOTE_PLACE)
                 .collect()
         })
         .unwrap_or_default();
@@ -236,20 +238,19 @@ fn parse_job(item: &Value) -> Option<Job> {
     } else {
         join_places(listed)
     };
-    let mut description = ["description", "requirementsSection", "benefitsSection"]
+    let sections = ["description", "requirementsSection", "benefitsSection"]
         .iter()
         .map(|key| section(item, key))
         .filter(|text| !text.is_empty())
         .collect::<Vec<_>>()
         .join("\n");
-    for (label, value) in [
-        ("Department", str_field(item, "department")),
-        ("Type", str_field(item, "employmentType")),
-    ] {
-        if !value.is_empty() {
-            description = format!("{description}\n{label}: {value}");
-        }
-    }
+    let description = with_labeled_lines(
+        sections,
+        &[
+            ("Department", str_field(item, "department")),
+            ("Type", str_field(item, "employmentType")),
+        ],
+    );
     Some(Job {
         source: "workable_search".to_string(),
         external_id,

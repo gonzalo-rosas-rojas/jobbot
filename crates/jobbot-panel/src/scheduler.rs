@@ -28,6 +28,11 @@ pub const QUERY_DEADLINE: Duration = Duration::from_secs(3);
 /// How long an answer is believed, and how long to wait before asking again after no answer.
 const ANSWER_LASTS: Duration = Duration::from_secs(300);
 const NO_ANSWER_LASTS: Duration = Duration::from_secs(60);
+/// How often `run_within` looks at the child it is waiting for.
+const POLL_EVERY: Duration = Duration::from_millis(10);
+/// Windows process-creation flag: the child never opens a console of its own.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// What Windows said.
 #[derive(Debug, Clone, PartialEq)]
@@ -89,8 +94,7 @@ impl WindowsTasks {
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
-            // CREATE_NO_WINDOW: the child never opens a console of its own.
-            command.creation_flags(0x0800_0000);
+            command.creation_flags(CREATE_NO_WINDOW);
         }
         command
     }
@@ -139,9 +143,11 @@ fn run_within(mut command: Command, deadline: Duration) -> Option<String> {
             }
             Ok(Some(_)) => return None,
             Ok(None) if started.elapsed() < deadline => {
-                std::thread::sleep(Duration::from_millis(10));
+                std::thread::sleep(POLL_EVERY);
             }
             _ => {
+                // Past the deadline (or `try_wait` failed): kill fails when the child just ended and
+                // wait only reaps it; either way the answer is `None`, so neither result matters.
                 let _ = child.kill();
                 let _ = child.wait();
                 return None;
@@ -263,7 +269,18 @@ impl TaskWatch {
             .spawn(move || {
                 // A question that panics is no answer, and must not leave `asking` set for good.
                 let answer = inner.query.as_ref().and_then(|query| {
-                    std::panic::catch_unwind(AssertUnwindSafe(|| query.ask())).unwrap_or(None)
+                    match std::panic::catch_unwind(AssertUnwindSafe(|| query.ask())) {
+                        Ok(answer) => answer,
+                        Err(payload) => {
+                            let message = payload
+                                .downcast_ref::<&str>()
+                                .map(|text| (*text).to_string())
+                                .or_else(|| payload.downcast_ref::<String>().cloned())
+                                .unwrap_or_else(|| "(no message)".to_string());
+                            tracing::error!(%message, "the scheduled-task question panicked; no answer");
+                            None
+                        }
+                    }
                 });
                 let mut state = inner
                     .state
@@ -472,7 +489,9 @@ mod tests {
         let started = Instant::now();
         assert_eq!(run_within(slow, Duration::from_millis(300)), None);
         assert!(
-            started.elapsed() < Duration::from_secs(5),
+            // The ping lasts about 29 s: half of that still tells a kill at the deadline from
+            // waiting for the child, and leaves room for a busy machine.
+            started.elapsed() < Duration::from_secs(15),
             "it came back at the deadline, not when the child ended: {:?}",
             started.elapsed()
         );
@@ -553,6 +572,8 @@ mod tests {
         }
         let (release, wait) = mpsc::channel();
         let watch = TaskWatch::asking(Stuck(Mutex::new(wait)));
+        // A `current` that waited for the stuck question would never return (nothing has been
+        // sent on `release`); the clock is for the other failure, one that waits a while each time.
         let started = Instant::now();
         for _ in 0..50 {
             assert_eq!(watch.current(*NOW), None);

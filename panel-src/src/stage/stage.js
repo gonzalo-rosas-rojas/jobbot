@@ -4,13 +4,16 @@
 // the nearest visible body and clipped at the sheet's right edge (A17). It schedules nothing: the scene engine (scene/engine.js)
 // calls it on every frame that has work, and once a minute at rest.
 
+import { wrapHour } from "../core/math.js";
 import { createSky, skyAt } from "./sky.js";
 import { createSkyline } from "./skyline.js";
 import { createDial } from "./dial.js";
-import { beamFor, bodyKind, drawBeam } from "./beam.js";
+import { beamFor, bodyKind, drawBeam, WINDOW_MARGIN } from "./beam.js";
 import { STOP_IDS, dialPoseOf, dialPoseAt, markGlow, skylineShift, sheetGeometry, sheetOpacity, smoothstep } from "../scene/poses.js";
 
 const HUD = 56;
+const SHEET_TOP_GAP = 22;      // when the live sheet cannot be measured, the one drawn is this far under the bar of stops...
+const SHEET_BOTTOM_GAP = 40;   // ...and this far above the bottom of the window
 // The layers of the city from this one on (0 far, 1 mid, 2 near) are painted on a canvas in front of the dial: the dial of HOY stands
 // half sunk behind two layers of the city, as in relay2 (spec §2.2, veredicto §3.1). Reversible: 3 puts the whole city behind the dial.
 export const FRONT_FROM = 1;
@@ -29,7 +32,10 @@ export const FRONT_FROM = 1;
 export const POOL = { rgb: [10, 14, 25], alpha: 0.76, day: 0.55, solid: 0.55, reach: 1.3 };
 
 const lumaOf = ([r, g, b]) => {
-  const lin = (c) => ((c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  const lin = (c) => {
+    const v = c / 255;
+    return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  };
   return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
 };
 
@@ -45,15 +51,15 @@ export function poolAlpha(hora) {
  * dial of HOY) would otherwise tint the skyline under the sheet and change the picture there from stop to stop.
  */
 function drawPool(g, pool, clipLeft = 0) {
-  const [r, gr, b] = POOL.rgb;
+  const [r, green, b] = POOL.rgb;
   const rg = g.createRadialGradient(pool.x, pool.y, 0, pool.x, pool.y, pool.r);
-  rg.addColorStop(0, `rgba(${r},${gr},${b},${pool.alpha})`);
-  rg.addColorStop(POOL.solid, `rgba(${r},${gr},${b},${pool.alpha})`);
+  rg.addColorStop(0, `rgba(${r},${green},${b},${pool.alpha})`);
+  rg.addColorStop(POOL.solid, `rgba(${r},${green},${b},${pool.alpha})`);
   // From `solid` out the shadow eases away on a smoothstep instead of a straight ramp, so its edge has no rim to read as a disc.
   for (const k of [0.2, 0.4, 0.6, 0.8]) {
-    rg.addColorStop(POOL.solid + (1 - POOL.solid) * k, `rgba(${r},${gr},${b},${(pool.alpha * (1 - k * k * (3 - 2 * k))).toFixed(3)})`);
+    rg.addColorStop(POOL.solid + (1 - POOL.solid) * k, `rgba(${r},${green},${b},${(pool.alpha * (1 - smoothstep(0, 1, k))).toFixed(3)})`);
   }
-  rg.addColorStop(1, `rgba(${r},${gr},${b},0)`);
+  rg.addColorStop(1, `rgba(${r},${green},${b},0)`);
   g.save();
   g.globalCompositeOperation = "source-over";
   g.fillStyle = rg;
@@ -65,7 +71,7 @@ function drawPool(g, pool, clipLeft = 0) {
 // The sky hands each entry of `beams` to its light painter before it draws the city; the stage uses that slot for the pool too:
 // the wide glow of the beam first, then the pool over it, then the rays and the sun's core on top, so the pool dims the glow where
 // the dial's labels are while the sun, its rays and the beam's far end stay as bright as the beam rule made them.
-const paintLight = (g, light, clipLeft, holes) => (light.pool ? drawPool(g, light, clipLeft) : drawBeam(g, light, clipLeft, undefined, holes));
+const paintLight = (g, light, clipLeft, holes) => (light.pool ? drawPool(g, light, clipLeft) : drawBeam(g, light, { clipLeft, holes }));
 const lights = (beam, layout, alpha) => [
   ...(beam ? [{ ...beam, part: "bloom" }] : []),
   { pool: true, x: layout.cx, y: layout.cy, r: (layout.size / 2) * POOL.reach, alpha },
@@ -74,7 +80,7 @@ const lights = (beam, layout, alpha) => [
 
 /** "HH:MM" for a decimal hour, to the nearest minute, round the clock (0.43 reads 00:26). */
 export function clockText(hora) {
-  const total = Math.round((((hora % 24) + 24) % 24) * 60) % 1440;
+  const total = Math.round(wrapHour(hora) * 60) % 1440;
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
 
@@ -136,7 +142,7 @@ export function createStage({ canvas, dialHost, t, getSheetRect = () => null, ge
     dial.glow(markGlow(pos));
     const layout = dial.layout(dialPoseAt(pos, g), hora);
     const live = getSheetRect();
-    const sheet = live && live.right > live.left ? live : { left: g.gutter, right: g.sheetRight, top: HUD + 22, bottom: h - 40 };
+    const sheet = live && live.right > live.left ? live : { left: g.gutter, right: g.sheetRight, top: HUD + SHEET_TOP_GAP, bottom: h - SHEET_BOTTOM_GAP };
     const shift = skylineShift(pos, reduced);
     // On a stop the light is cut at the sheet's right edge (A17). While the camera travels the sheet fades out and the light would hang
     // in mid sky with a cut edge and nothing to be cut by: its edge follows the sheet's own opacity back to the sheet's left side.
@@ -144,7 +150,7 @@ export function createStage({ canvas, dialHost, t, getSheetRect = () => null, ge
     const holes = getHoles();
     // Only the light of a window needs the list of lit windows; the sun and the horizon do not look at the city. minA 0.2: at 02:00-04:30
     // the city sleeps and a window is drawn at a quarter strength or less (skyline.js, LIT), so the default 0.5 left the small hours with no light at all.
-    const windows = bodyKind(hora) === "window" ? skyline.litWindows(w, h, shift, skyAt(hora).lit, { minX: sheet.right + 60, maxX: w - 40, minA: 0.2 }) : [];
+    const windows = bodyKind(hora) === "window" ? skyline.litWindows(w, h, shift, skyAt(hora).lit, { minX: sheet.right + WINDOW_MARGIN.fromSheet, maxX: w - WINDOW_MARGIN.fromEdge, minA: 0.2 }) : [];
     const found = beamFor({ hora, w, h, sheet: { left: sheet.left, right: edge, top: sheet.top, bottom: sheet.bottom }, hub: { x: layout.cx, y: layout.cy, size: layout.size }, windows });
     sky.paint({
       hora, shift,

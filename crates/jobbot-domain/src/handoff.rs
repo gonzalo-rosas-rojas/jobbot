@@ -6,9 +6,10 @@
 use std::path::{Path, PathBuf};
 
 use crate::answers::AnswerBank;
-use crate::form::{FieldInfo, FillValue, SubmitResult, SubmitStatus, plan_fields};
+use crate::form::{FieldInfo, FillPlan, FillValue, SubmitResult, SubmitStatus, plan_fields};
+use crate::gate::{REASON_LISTING_ONLY, REASON_MANUAL_ONLY, host_matches};
 use crate::models::Job;
-use crate::text::{host_of, safe_key};
+use crate::text::safe_key;
 
 /// Hosts whose forms are filled by the bot but sent by Gonza from his own browser.
 pub const HANDOFF_HOSTS: &[&str] = &["ashbyhq.com"];
@@ -19,10 +20,7 @@ pub const HANDOFF_REASON_PREFIX: &str = "handoff:";
 /// True when the URL's host is one of `HANDOFF_HOSTS` or a subdomain of one (same rule as the
 /// gate's host lists: `notashbyhq.com` and `?ref=ashbyhq.com` do not match).
 pub fn is_handoff(url: &str) -> bool {
-    let host = host_of(url);
-    HANDOFF_HOSTS
-        .iter()
-        .any(|handoff| host == *handoff || host.ends_with(&format!(".{handoff}")))
+    host_matches(url, HANDOFF_HOSTS)
 }
 
 /// True when the form of `job` lives on a handoff host: its apply link or, like the gate's
@@ -42,8 +40,8 @@ pub fn is_handoff_reason(reason: &str) -> bool {
 /// confirming it proves nothing about the form filler.
 pub fn is_sent_by_hand(reason: &str) -> bool {
     is_handoff_reason(reason)
-        || reason.starts_with("manual_only_platform")
-        || reason.starts_with("listing_only")
+        || reason.starts_with(REASON_MANUAL_ONLY)
+        || reason.starts_with(REASON_LISTING_ONLY)
         || reason.starts_with(MANUAL_RECORD_PREFIX)
 }
 
@@ -181,37 +179,7 @@ pub fn sheet_fields(fields: &[FieldInfo], bank: &AnswerBank, cv_pdf: &Path) -> V
                 continue;
             }
             seen.push(key);
-            let members: Vec<&FieldInfo> = fields
-                .iter()
-                .filter(|member| is_grouped(member) && group_key(member) == key)
-                .collect();
-            let options: Vec<String> = members
-                .iter()
-                .map(|member| member.option.trim().to_string())
-                .filter(|option| !option.is_empty())
-                .collect();
-            let picked: Vec<String> = members
-                .iter()
-                .filter(|member| {
-                    action_for(member.idx).is_some() || plan.kept.contains(&member.idx)
-                })
-                .map(|member| member.option.trim().to_string())
-                .collect();
-            let required = members.iter().any(|member| member.required);
-            let answer = if picked.is_empty() {
-                unanswered(required)
-            } else {
-                SheetAnswer::Choice {
-                    pick: picked.join(", "),
-                    alternatives: Vec::new(),
-                }
-            };
-            sheet.push(SheetField {
-                label: label_of(field),
-                required,
-                answer,
-                options,
-            });
+            sheet.push(grouped_sheet_field(field, fields, &plan));
             continue;
         }
         let answer = match action_for(field.idx).map(|action| &action.value) {
@@ -232,6 +200,44 @@ pub fn sheet_fields(fields: &[FieldInfo], bank: &AnswerBank, cv_pdf: &Path) -> V
         });
     }
     sheet
+}
+
+/// The one question that a radio group or a group of checkboxes makes, led by `field`: its options,
+/// and what the planner picks (or keeps ticked) among them.
+fn grouped_sheet_field(field: &FieldInfo, fields: &[FieldInfo], plan: &FillPlan) -> SheetField {
+    let key = group_key(field);
+    let members: Vec<&FieldInfo> = fields
+        .iter()
+        .filter(|member| is_grouped(member) && group_key(member) == key)
+        .collect();
+    let options: Vec<String> = members
+        .iter()
+        .map(|member| member.option.trim().to_string())
+        .filter(|option| !option.is_empty())
+        .collect();
+    let picked: Vec<String> = members
+        .iter()
+        .filter(|member| {
+            plan.actions.iter().any(|action| action.idx == member.idx)
+                || plan.kept.contains(&member.idx)
+        })
+        .map(|member| member.option.trim().to_string())
+        .collect();
+    let required = members.iter().any(|member| member.required);
+    let answer = if picked.is_empty() {
+        unanswered(required)
+    } else {
+        SheetAnswer::Choice {
+            pick: picked.join(", "),
+            alternatives: Vec::new(),
+        }
+    };
+    SheetField {
+        label: label_of(field),
+        required,
+        answer,
+        options,
+    }
 }
 
 fn unanswered(required: bool) -> SheetAnswer {

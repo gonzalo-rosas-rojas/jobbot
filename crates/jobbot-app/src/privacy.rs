@@ -18,15 +18,24 @@ const LOCAL_APP_DATA: &str = "%LOCALAPPDATA%";
 const APP_DATA: &str = "%APPDATA%";
 const USER_PROFILE: &str = "%USERPROFILE%";
 
+/// How the name of a user's folder ends in `users_folder`.
+#[derive(Clone, Copy)]
+enum NameEnd {
+    /// Where the class of name characters stops.
+    Boundary,
+    /// At a separator, which stays in the match.
+    Separator,
+}
+
 /// `C:\Users\<name>` (any drive, either slash, or the `/c/Users/<name>` of a Unix-style shell),
 /// and the `AppData\Local` or `AppData\Roaming` that may follow it. `name` is the class of the
-/// characters a user's folder name may hold; with `then_separator` the name must be followed by a
-/// separator, which is kept (a name that may hold spaces needs something to say where it ends).
-fn users_folder(name: &str, then_separator: bool) -> Regex {
-    let end = if then_separator {
-        r"(?P<sep>[\\/])"
-    } else {
-        ""
+/// characters a user's folder name may hold; with `NameEnd::Separator` the name must be followed
+/// by a separator, which is kept (a name that may hold spaces needs something to say where it
+/// ends).
+fn users_folder(name: &str, name_end: NameEnd) -> Regex {
+    let end = match name_end {
+        NameEnd::Separator => r"(?P<sep>[\\/])",
+        NameEnd::Boundary => "",
     };
     Regex::new(&format!(
         r"(?i)(?:[A-Za-z]:|/[A-Za-z])[\\/]+Users[\\/]+(?P<name>{name}+)(?:[\\/]+AppData[\\/]+(?P<which>Local|Roaming)\b)?{end}"
@@ -35,13 +44,19 @@ fn users_folder(name: &str, then_separator: bool) -> Regex {
 }
 
 /// In a value that is one folder, the name runs to the next separator and may hold spaces.
-static FOLDER_OF_A_PATH: LazyLock<Regex> = LazyLock::new(|| users_folder(r"[^\\/]", false));
+static FOLDER_OF_A_PATH: LazyLock<Regex> =
+    LazyLock::new(|| users_folder(r"[^\\/]", NameEnd::Boundary));
 /// In a sentence a name followed by a separator may hold spaces (`C:\Users\Zoe Q\x`) ...
 static SPACED_FOLDER_IN_TEXT: LazyLock<Regex> =
-    LazyLock::new(|| users_folder(r#"[^\\/\r\n"'<>|:;,()]"#, true));
+    LazyLock::new(|| users_folder(r#"[^\\/\r\n"'<>|:;,()]"#, NameEnd::Separator));
 /// ... and one that is not runs to the next space or punctuation (`C:\Users\ana falló`).
 static FOLDER_IN_TEXT: LazyLock<Regex> =
-    LazyLock::new(|| users_folder(r#"[^\\/\s"'<>|:;,()]"#, false));
+    LazyLock::new(|| users_folder(r#"[^\\/\s"'<>|:;,()]"#, NameEnd::Boundary));
+
+/// The patterns that find a user's folder in running text, tried in this order.
+fn text_folders() -> [&'static Regex; 2] {
+    [&SPACED_FOLDER_IN_TEXT, &FOLDER_IN_TEXT]
+}
 
 /// The folders of the Windows user, as this process sees them. They are injected so a test names
 /// its own and never depends on who runs it.
@@ -167,11 +182,7 @@ impl UserPaths {
     /// The filter for everything the page receives: his folders and his own addresses are taken
     /// out, an address of a company or a recruiter is left, because the page needs it.
     pub fn redact(&self, text: &str) -> String {
-        self.hide_with(
-            text,
-            &[&SPACED_FOLDER_IN_TEXT, &FOLDER_IN_TEXT],
-            self.page_addresses(),
-        )
+        self.hide_with(text, &text_folders(), self.page_addresses())
     }
 
     /// `redact` on every string of a JSON value, except the ones under a key that holds a URL
@@ -180,14 +191,12 @@ impl UserPaths {
         use serde_json::Value;
         match value {
             // Most strings have nothing to take out: they keep their own allocation.
-            Value::String(text) => match self.hide_changed(
-                &text,
-                &[&SPACED_FOLDER_IN_TEXT, &FOLDER_IN_TEXT],
-                self.page_addresses(),
-            ) {
-                Some(changed) => Value::String(changed),
-                None => Value::String(text),
-            },
+            Value::String(text) => {
+                match self.hide_changed(&text, &text_folders(), self.page_addresses()) {
+                    Some(changed) => Value::String(changed),
+                    None => Value::String(text),
+                }
+            }
             Value::Array(items) => Value::Array(
                 items
                     .into_iter()
@@ -231,22 +240,14 @@ impl UserPaths {
     /// `%USERPROFILE%`, e-mail addresses masked, and nothing else touched. For a message, where a
     /// folder name ends at the next space.
     pub fn hide_in_text(&self, text: &str) -> String {
-        self.hide_with(
-            text,
-            &[&SPACED_FOLDER_IN_TEXT, &FOLDER_IN_TEXT],
-            Addresses::All,
-        )
+        self.hide_with(text, &text_folders(), Addresses::All)
     }
 
     /// The same for a value that is one folder: a name with spaces is one name, and a Windows path
     /// comes out with `\` for every separator.
     pub fn hide_path(&self, path: &str) -> String {
         let hidden = self.hide_with(path, &[&FOLDER_OF_A_PATH], Addresses::All);
-        let windows = hidden.starts_with('%') || {
-            let mut chars = hidden.chars();
-            matches!((chars.next(), chars.next()), (Some(c), Some(':')) if c.is_ascii_alphabetic())
-        };
-        if windows {
+        if looks_like_windows_path(&hidden) {
             hidden.replace('/', "\\")
         } else {
             hidden
@@ -439,6 +440,9 @@ impl<W: Write> Write for LineFilter<W> {
 
 impl<W: Write> Drop for LineFilter<W> {
     fn drop(&mut self) {
+        // `drop` cannot return the error, and this filter may be wrapping stderr itself, so there
+        // is nowhere safe to report a failed write without risking writing what it masks. The
+        // loss is bounded: at most the last, unfinished line.
         let _ = self.write_held(true);
         let _ = self.inner.flush();
     }
@@ -470,6 +474,13 @@ fn address_key(address: &str) -> String {
     format!("{local}@{domain}")
 }
 
+/// True for a path that starts with an environment variable (`%USERPROFILE%`) or a drive (`C:`).
+fn looks_like_windows_path(path: &str) -> bool {
+    let mut chars = path.chars();
+    path.starts_with('%')
+        || matches!((chars.next(), chars.next()), (Some(c), Some(':')) if c.is_ascii_alphabetic())
+}
+
 /// True when the character before `at` belongs to a word: `xC:\Users` is not a drive.
 fn starts_a_longer_word(text: &str, at: usize) -> bool {
     text[..at]
@@ -488,7 +499,12 @@ fn known_folder(folder: &str) -> Option<Regex> {
     if parts.is_empty() {
         return None;
     }
-    Regex::new(&format!(r"(?i){}", parts.join(r"[\\/]+"))).ok()
+    // The parts are escaped, so the pattern always compiles. If it ever did not, the folder must
+    // not quietly drop out of a privacy filter.
+    Some(
+        Regex::new(&format!(r"(?i){}", parts.join(r"[\\/]+")))
+            .expect("an escaped folder name always compiles"),
+    )
 }
 
 /// `text` with every `pattern` (a `known_folder`) that is a whole folder name, not the start of a

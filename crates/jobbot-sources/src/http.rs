@@ -70,6 +70,9 @@ impl Reply {
     }
 }
 
+/// The status of a page the host says has not changed since the validators sent with the request.
+const NOT_MODIFIED: u16 = 304;
+
 /// One layer of the stack, or the network under it.
 #[async_trait]
 pub trait Fetcher: Send + Sync {
@@ -123,7 +126,7 @@ impl Fetcher for Network {
             last_modified: header(reqwest::header::LAST_MODIFIED),
             body: String::new(),
         };
-        if status == 304 || status == 429 || status == 503 {
+        if status == NOT_MODIFIED || reply.is_refusal() {
             return Ok(reply);
         }
         // Any other failure keeps reqwest's own message (status and address).
@@ -199,7 +202,7 @@ impl<F: Fetcher> Fetcher for Cached<F> {
             asked.if_modified_since = page.last_modified.clone();
         }
         let reply = self.inner.get(&asked).await?;
-        if reply.status == 304 {
+        if reply.status == NOT_MODIFIED {
             let Some(page) = kept else {
                 anyhow::bail!("{url} answered 304 (not modified) to a request without validators");
             };
@@ -211,19 +214,29 @@ impl<F: Fetcher> Fetcher for Cached<F> {
                 ..reply
             });
         }
-        let has_validator = reply.etag.is_some() || reply.last_modified.is_some();
-        if (200..300).contains(&reply.status) && has_validator && reply.body.len() <= MAX_KEPT_PAGE
-        {
-            let page = StoredPage {
-                etag: reply.etag.clone(),
-                last_modified: reply.last_modified.clone(),
-                body: reply.body.clone(),
-            };
-            if let Err(e) = self.memory.store_page(url, &page, Utc::now()) {
-                eprintln!("aviso: no se pudo guardar la copia de {url}: {e}");
-            }
-        }
+        self.keep(url, &reply);
         Ok(reply)
+    }
+}
+
+impl<F> Cached<F> {
+    /// Keeps a page of the right kind (2xx, a validator, not too big) for the next run.
+    fn keep(&self, url: &str, reply: &Reply) {
+        let has_validator = reply.etag.is_some() || reply.last_modified.is_some();
+        if !((200..300).contains(&reply.status)
+            && has_validator
+            && reply.body.len() <= MAX_KEPT_PAGE)
+        {
+            return;
+        }
+        let page = StoredPage {
+            etag: reply.etag.clone(),
+            last_modified: reply.last_modified.clone(),
+            body: reply.body.clone(),
+        };
+        if let Err(e) = self.memory.store_page(url, &page, Utc::now()) {
+            eprintln!("aviso: no se pudo guardar la copia de {url}: {e}");
+        }
     }
 }
 
@@ -270,7 +283,8 @@ impl Cooldowns {
             .filter(|rest| !rest.is_zero())
     }
 
-    fn start(&self, host: &str, wait: Duration) {
+    /// Leaves `host` alone for `wait`, on the board and in the memory.
+    fn leave_alone(&self, host: &str, wait: Duration) {
         let mut board = self
             .board
             .lock()
@@ -325,7 +339,7 @@ impl<F: Fetcher> Fetcher for HostCooldown<F> {
             .asked_wait()
             .unwrap_or(self.default_cooldown)
             .min(MAX_COOLDOWN);
-        self.board.start(&host, rest);
+        self.board.leave_alone(&host, rest);
         Err(RateLimited {
             host,
             wait_secs: rest.as_secs(),
@@ -402,17 +416,12 @@ impl Http {
         policy: RetryPolicy,
         deadline: Option<Instant>,
     ) -> Http {
-        let stack = Deadline::new(
-            HostCooldown::new(
-                Retrying::new(bottom, policy),
-                Arc::new(Cooldowns::default()),
-                policy.default_cooldown,
-            ),
+        Http::layered(
+            Retrying::new(bottom, policy),
+            Arc::new(Cooldowns::default()),
+            policy,
             deadline,
-        );
-        Http {
-            fetcher: Arc::new(stack),
-        }
+        )
     }
 
     /// `over`, with the board and the kept pages held in `memory` as well.
@@ -423,12 +432,23 @@ impl Http {
         memory: Arc<dyn HttpMemory>,
     ) -> Http {
         let board = Arc::new(Cooldowns::remembered(memory.clone()));
+        Http::layered(
+            Cached::new(Retrying::new(bottom, policy), memory),
+            board,
+            policy,
+            deadline,
+        )
+    }
+
+    /// The outer layers (the host cooldown and the deadline) over `inner`.
+    fn layered(
+        inner: impl Fetcher + 'static,
+        board: Arc<Cooldowns>,
+        policy: RetryPolicy,
+        deadline: Option<Instant>,
+    ) -> Http {
         let stack = Deadline::new(
-            HostCooldown::new(
-                Cached::new(Retrying::new(bottom, policy), memory),
-                board,
-                policy.default_cooldown,
-            ),
+            HostCooldown::new(inner, board, policy.default_cooldown),
             deadline,
         );
         Http {
@@ -463,6 +483,7 @@ mod tests {
     use jobbot_app::ports::store::{StoreError, StoreResult};
 
     use super::*;
+    use crate::sources::base::quick_policy;
 
     /// A bottom fetcher that plays a script: one reply per request, in order (the last one
     /// repeats), and remembers every request it got.
@@ -533,16 +554,6 @@ mod tests {
         }
     }
 
-    /// Waits so short that a test never sleeps.
-    fn quick() -> RetryPolicy {
-        RetryPolicy {
-            max_retries: 2,
-            base: Duration::from_millis(1),
-            max_wait: Duration::from_secs(30),
-            default_cooldown: Duration::from_secs(30),
-        }
-    }
-
     fn request(url: &str) -> Request {
         Request::get(reqwest::Url::parse(url).unwrap())
     }
@@ -556,7 +567,7 @@ mod tests {
     async fn a_refusal_with_a_short_retry_after_is_asked_again_until_the_page_comes() {
         for status in [429, 503] {
             let script = Script::of(&[refusal(status, Some("0")), page("ok")]);
-            let retrying = Retrying::new(script.clone(), quick());
+            let retrying = Retrying::new(script.clone(), quick_policy());
             let reply = retrying.get(&request("https://a.test/feed")).await.unwrap();
             assert_eq!(reply, page("ok"), "status {status}");
             assert_eq!(script.asked().len(), 2, "status {status}");
@@ -566,18 +577,21 @@ mod tests {
     #[tokio::test]
     async fn retrying_stops_at_the_policy_and_passes_the_last_refusal_up() {
         let script = Script::of(&[refusal(429, None)]);
-        let reply = Retrying::new(script.clone(), quick())
+        let reply = Retrying::new(script.clone(), quick_policy())
             .get(&request("https://a.test/feed"))
             .await
             .unwrap();
         assert_eq!(reply.status, 429);
-        assert_eq!(script.asked().len(), 1 + quick().max_retries as usize);
+        assert_eq!(
+            script.asked().len(),
+            1 + quick_policy().max_retries as usize
+        );
     }
 
     #[tokio::test]
     async fn a_retry_after_beyond_the_longest_wait_is_not_waited_for() {
         let script = Script::of(&[refusal(429, Some("3600")), page("never")]);
-        let reply = Retrying::new(script.clone(), quick())
+        let reply = Retrying::new(script.clone(), quick_policy())
             .get(&request("https://a.test/feed"))
             .await
             .unwrap();
@@ -588,7 +602,7 @@ mod tests {
     #[tokio::test]
     async fn pages_and_other_answers_are_not_retried() {
         let script = Script::of(&[page("first"), page("second")]);
-        let reply = Retrying::new(script.clone(), quick())
+        let reply = Retrying::new(script.clone(), quick_policy())
             .get(&request("https://a.test/feed"))
             .await
             .unwrap();
@@ -599,7 +613,11 @@ mod tests {
     #[tokio::test]
     async fn a_host_that_refused_is_left_alone_and_the_others_are_not() {
         let script = Script::of(&[refusal(429, Some("120")), page("b")]);
-        let cooldown = HostCooldown::new(script.clone(), Arc::default(), quick().default_cooldown);
+        let cooldown = HostCooldown::new(
+            script.clone(),
+            Arc::default(),
+            quick_policy().default_cooldown,
+        );
 
         let err = cooldown
             .get(&request("https://a.test/1"))
@@ -622,7 +640,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_refusal_without_a_time_rests_the_default_and_a_lifetime_rests_a_day() {
+    async fn a_refusal_without_a_time_rests_the_default_cooldown() {
         let script = Script::of(&[refusal(503, None)]);
         let cooldown = HostCooldown::new(script, Arc::default(), Duration::from_secs(300));
         let err = cooldown
@@ -630,7 +648,10 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(rate_limited(&err).wait_secs, 300);
+    }
 
+    #[tokio::test]
+    async fn a_lifetime_beyond_the_cap_rests_the_longest() {
         let script = Script::of(&[refusal(429, Some("18446744073709551615"))]);
         let cooldown = HostCooldown::new(script, Arc::default(), Duration::from_secs(300));
         let err = cooldown
@@ -664,7 +685,7 @@ mod tests {
     #[tokio::test]
     async fn the_clones_of_one_http_share_its_board_and_another_http_has_its_own() {
         let script = Script::of(&[refusal(429, Some("120"))]);
-        let http = Http::over(script.clone(), quick(), None);
+        let http = Http::over(script.clone(), quick_policy(), None);
         let clone = http.clone();
         assert!(http.get_text("https://a.test/1", &[]).await.is_err());
         let asked = script.asked().len();
@@ -676,7 +697,7 @@ mod tests {
             "the clone knows the host is resting"
         );
 
-        let other = Http::over(script.clone(), quick(), None);
+        let other = Http::over(script.clone(), quick_policy(), None);
         assert!(other.get_text("https://a.test/3", &[]).await.is_err());
         assert!(
             script.asked().len() > asked,
@@ -687,7 +708,7 @@ mod tests {
     #[tokio::test]
     async fn the_query_is_appended_to_the_url() {
         let script = Script::of(&[page("ok")]);
-        let http = Http::over(script.clone(), quick(), None);
+        let http = Http::over(script.clone(), quick_policy(), None);
         let body = http
             .get_text("https://a.test/feed", &[("page", "2"), ("q", "rust dev")])
             .await
@@ -779,7 +800,7 @@ mod tests {
             .rest_host("a.test:443", Utc::now() + TimeDelta::seconds(120))
             .unwrap();
         let script = Script::of(&[page("ok")]);
-        let http = Http::over_with_memory(script.clone(), quick(), None, memory);
+        let http = Http::over_with_memory(script.clone(), quick_policy(), None, memory);
 
         let err = http.get_text("https://a.test/1", &[]).await.unwrap_err();
         let wait = rate_limited(&err).wait_secs;
@@ -796,7 +817,7 @@ mod tests {
             script.clone(),
             RetryPolicy {
                 max_retries: 0,
-                ..quick()
+                ..quick_policy()
             },
             None,
             memory.clone(),
@@ -806,7 +827,7 @@ mod tests {
         let left = (until - Utc::now()).num_seconds();
         assert!((115..=120).contains(&left), "{left}");
 
-        let next_run = Http::over_with_memory(script.clone(), quick(), None, memory);
+        let next_run = Http::over_with_memory(script.clone(), quick_policy(), None, memory);
         let err = next_run
             .get_text("https://a.test/2", &[])
             .await
@@ -820,7 +841,8 @@ mod tests {
         let memory = Arc::new(Memory::default());
         let lm = "Wed, 21 Oct 2026 07:28:00 GMT";
         let script = Script::of(&[validated("jobs", Some("\"v1\""), Some(lm)), not_modified()]);
-        let first_run = Http::over_with_memory(script.clone(), quick(), None, memory.clone());
+        let first_run =
+            Http::over_with_memory(script.clone(), quick_policy(), None, memory.clone());
         assert_eq!(
             first_run
                 .get_text("https://a.test/feed", &[])
@@ -828,7 +850,7 @@ mod tests {
                 .unwrap(),
             "jobs"
         );
-        let next_run = Http::over_with_memory(script.clone(), quick(), None, memory);
+        let next_run = Http::over_with_memory(script.clone(), quick_policy(), None, memory);
         assert_eq!(
             next_run.get_text("https://a.test/feed", &[]).await.unwrap(),
             "jobs",
@@ -850,7 +872,7 @@ mod tests {
             validated("old", None, Some("Mon, 19 Oct 2026 07:28:00 GMT")),
             validated("new", None, Some("Fri, 23 Oct 2026 07:28:00 GMT")),
         ]);
-        let http = Http::over_with_memory(script.clone(), quick(), None, memory.clone());
+        let http = Http::over_with_memory(script.clone(), quick_policy(), None, memory.clone());
         http.get_text("https://a.test/feed", &[]).await.unwrap();
         assert_eq!(
             http.get_text("https://a.test/feed", &[]).await.unwrap(),
@@ -873,7 +895,7 @@ mod tests {
             validated(&huge, Some("\"big\""), None),
             validated(&"y".repeat(MAX_KEPT_PAGE), Some("\"fits\""), None),
         ]);
-        let http = Http::over_with_memory(script, quick(), None, memory.clone());
+        let http = Http::over_with_memory(script, quick_policy(), None, memory.clone());
         for path in ["plain", "huge", "fits"] {
             http.get_text(&format!("https://a.test/{path}"), &[])
                 .await
@@ -887,7 +909,8 @@ mod tests {
     #[tokio::test]
     async fn a_304_to_a_request_without_validators_is_an_error() {
         let script = Script::of(&[not_modified()]);
-        let http = Http::over_with_memory(script, quick(), None, Arc::new(Memory::default()));
+        let http =
+            Http::over_with_memory(script, quick_policy(), None, Arc::new(Memory::default()));
         let err = http.get_text("https://a.test/feed", &[]).await.unwrap_err();
         assert!(err.to_string().contains("304"), "{err:#}");
     }
@@ -902,7 +925,7 @@ mod tests {
             script.clone(),
             RetryPolicy {
                 max_retries: 0,
-                ..quick()
+                ..quick_policy()
             },
             None,
             Memory::broken(),

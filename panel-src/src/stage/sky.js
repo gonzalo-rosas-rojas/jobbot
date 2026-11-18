@@ -3,6 +3,8 @@
 // server's wall clock, so the colour does not change when you travel between stops.
 
 import { nightT } from "../scene/clock.js";
+import { clamp, wrapHour } from "../core/math.js";
+import { css, cssa, offscreen } from "./shared.js";
 
 // [nightT (hours since 18:00), top, horizon, warm glow, warm alpha, stars alpha]. Seven night stops from the story's sky.js,
 // three day stops of §4.3 (10:00, 13:00, 17:00), and a copy of 18:00 at 24 so the ring closes without a jump. The day is a deep
@@ -27,11 +29,8 @@ export const STOPS = [
 // towards 18:00. The values from 16 on are this plan's, not the spec's: T24 judges them with Gonza.
 export const LIT = [[0, 0.55], [1, 0.62], [3, 0.46], [5.5, 0.2], [8, 0.07], [11, 0.04], [12.8, 0.12], [14, 0.3], [15, 0.22], [16, 0.08], [19, 0], [23, 0.04], [24, 0.55]];
 
-const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
 const hexRgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
 const mix = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
-const css = (c) => `rgb(${c[0]},${c[1]},${c[2]})`;
-const cssa = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${Math.max(0, a).toFixed(3)})`;
 const PARSED = STOPS.map(([t, top, hor, warm, warmA, stars]) => ({ t, top: hexRgb(top), hor: hexRgb(hor), warm: hexRgb(warm), warmA, stars }));
 
 /** Piecewise-linear value of `points` ([x, y] pairs, x ascending) at `x`, held flat past both ends. */
@@ -59,7 +58,7 @@ function sample(n) {
 
 /** 0 outside 19:30 to 06:30, ramping up from 19:30 to 21:00 and down from 05:00 to 06:30, 1 in between. */
 export function starsGate(hora) {
-  const h = ((hora % 24) + 24) % 24;
+  const h = wrapHour(hora);
   const up = (x, a, b) => clamp((x - a) / (b - a));
   return h >= 12 ? up(h, 19.5, 21) : 1 - up(h, 5, 6.5);
 }
@@ -71,6 +70,8 @@ export function skyAt(hora) {
   return { top: s.top, mid: mix(s.top, s.hor, 0.5), hor: s.hor, warm: s.warm, warmA: s.warmA, stars: s.stars * starsGate(hora), lit: track(LIT, n) };
 }
 
+const STAR_QUANT = 200;            // the stars' alpha is rounded to 1/200 of its scale: a step of it is a tenth of a level on the brightest star
+
 /**
  * Paints the sky on `canvas`. `skyline` draws the city, `drawBeam(g, beam, clipLeft, holes)` one light, `rand` seeds the 280 stars
  * once. `frame = { hora, shift, beams, clipLeft, holes, ghost, warmX }`; `warmX` is the fraction of the width where the warm band
@@ -78,9 +79,6 @@ export function skyAt(hora) {
  * `front` is an optional second canvas (transparent, over the dial) that takes the layers of the city from `frontFrom` on: the
  * sky canvas keeps the far ones, and the dial stands between the two.
  */
-const offscreen = typeof OffscreenCanvas === "function" ? (w, h) => new OffscreenCanvas(w, h) : null;      // null where there is none (Node): then everything is painted on every frame
-const STAR_QUANT = 200;            // the stars' alpha is rounded to 1/200 of its scale: a step of it is a tenth of a level on the brightest star
-
 export function createSky(canvas, { skyline, drawBeam, rand, dpr = () => Math.min(globalThis.devicePixelRatio || 1, 1.5), front = null, frontFrom = 1, makeCanvas = offscreen }) {
   const g = canvas.getContext("2d", { alpha: false });
   const fg = front ? front.getContext("2d") : null;

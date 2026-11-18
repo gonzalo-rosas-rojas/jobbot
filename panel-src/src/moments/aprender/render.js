@@ -9,10 +9,13 @@
 //   page.rowView(id) / page.firstQuestion()  the view of a row by its id (what a key acts on), and of the first question
 //   page.repaint(id)                         paints one row again (its armed or pending state changed)
 
-import { h } from "../../core/dom.js";
-import { sync, setText, setData, setHidden, setTitle } from "../shared/util.js";
+import { h, setText } from "../../core/dom.js";
+import { sync, setData, setHidden, setTitle, setBusy } from "../shared/util.js";
 import { opens } from "../shared/opens.js";
-import { actButton } from "../../ui/act.js";
+import { actButton, setActLabel } from "../../ui/act.js";
+import { keyOf, isGapRowId } from "./view.js";
+
+const SKELETON_ROWS = 3;   // the grey rows shown until the first snapshot arrives
 
 const rowSignature = (view, state) => JSON.stringify([view.label, view.formsLabel, view.who, view.open, view.link, view.actions.map((a) => [a.id, a.key, a.label, a.primary, a.visible]), state.armed, state.pending]);
 
@@ -40,7 +43,7 @@ function createRow(first, t) {
     setData(el, "actions", view.actions.map((a) => a.id).join(","));
     setData(el, "opens", opens(view) ? "true" : null);   // a click on the row opens it: the hand and the underline say so
     setData(el, "pending", state.pending ? "true" : null);
-    if (state.pending) { if (el.getAttribute("aria-busy") !== "true") el.setAttribute("aria-busy", "true"); } else if (el.hasAttribute("aria-busy")) el.removeAttribute("aria-busy");
+    setBusy(el, state.pending);
     setData(el, "armed", state.armed);
     setText(parts.q, view.label);
     setText(parts.n, view.formsLabel);
@@ -60,7 +63,7 @@ function createRow(first, t) {
       const action = shown.find((a) => a.id === b.dataset.action);
       const armed = state.armed === action.id;
       const said = armed ? t("act.sure") : action.label; // the name a screen reader gives is the one the eyes read
-      setText(b.lastChild, said);
+      setActLabel(b, said);
       setData(b, "armed", armed ? "true" : null);
       const aria = t("aprender.act.aria", { action: said, what: view.label });
       if (b.getAttribute("aria-label") !== aria) b.setAttribute("aria-label", aria);
@@ -116,7 +119,7 @@ export function createPage({ actions, drill, drillUi, onMore, onTopic, onStart, 
     topics: h("ul", { class: "ap-topics" }),
     gapsH: h("h3", { class: "ap-h2 label" }),
     gaps: h("ul", { class: "ap-gaps" }),
-    start: actButton({ key: "↵", primary: true, cls: "ap-start", "data-ap": "start" }),
+    start: actButton({ key: keyOf("open"), primary: true, cls: "ap-start", "data-ap": "start" }),
     foot: h("p", { class: "ap-foot label" }),
   };
   P.h1 = h("h1", { class: "mega cond", id: "aprender-title", tabindex: "-1" }, P.lead, " ", P.turn);
@@ -124,7 +127,7 @@ export function createPage({ actions, drill, drillUi, onMore, onTopic, onStart, 
   P.figEls.forEach((f) => P.figs.append(h("div", { class: "fig", "data-fig": f.id }, f.label, f.n)));
   P.eveAct.append(P.eveActs, P.eveOthers); // the buttons of the eve and, on the same line, what is waiting behind them
   P.drillSum.append(P.drillText, P.topics, P.gapsH, P.gaps, P.start);
-  P.list.append(h("li", { class: "ap-row skeleton", "aria-hidden": "true" }), h("li", { class: "ap-row skeleton", "aria-hidden": "true" }), h("li", { class: "ap-row skeleton", "aria-hidden": "true" }));
+  P.list.append(...Array.from({ length: SKELETON_ROWS }, () => h("li", { class: "ap-row skeleton", "aria-hidden": "true" })));
 
   const block = (name, labelledBy, ...kids) => h("section", { class: "ap-block", "data-block": name, "aria-labelledby": labelledBy }, ...kids);
   const blocks = {
@@ -232,7 +235,11 @@ export function createPage({ actions, drill, drillUi, onMore, onTopic, onStart, 
     }
     setText(P.eveOthers, [e.gaps, e.others].filter(Boolean).join(" · "));
     setHidden(P.eveOthers, !(e.gaps || e.others));
-    // the one row of the eve: the button that opens the dossier (the cursor reaches it with j k, Enter opens it)
+    patchEveAction(e);
+  }
+
+  /** The one row of the eve: the button that opens the dossier (the cursor reaches it with j k, Enter opens it). */
+  function patchEveAction(e) {
     if (eveRowId && (!e.row || e.row.id !== eveRowId)) { views.delete(eveRowId); eveRowId = null; eveActSig = ""; P.eveActs.replaceChildren(); delete P.eveAct.dataset.row; delete P.eveAct.dataset.card; }
     if (!e.row) { setHidden(P.eveAct, true); return; }
     setHidden(P.eveAct, false);
@@ -250,12 +257,18 @@ export function createPage({ actions, drill, drillUi, onMore, onTopic, onStart, 
 
   function patchDrill(d) {
     setText(P.drillH, d.head);
-    setText(P.start.lastChild, d.start.label);
+    setActLabel(P.start, d.start.label);
     if (P.start.getAttribute("aria-label") !== d.start.aria) P.start.setAttribute("aria-label", d.start.aria);
     const active = drill.state.active;
     setHidden(P.drillSum, active);
     setText(P.drillText, d.text || "");
     setHidden(P.drillText, !d.text);
+    patchTopics(d);
+    setHidden(P.start, d.state !== "due");
+    patchGaps(d.gaps);
+  }
+
+  function patchTopics(d) {
     const sig = JSON.stringify(d.topics.map((x) => [x.raw, x.topic, x.dueLabel, x.avgLabel, x.wSeen, x.wDue]));
     if (sig !== topicsSig) {
       topicsSig = sig;
@@ -270,21 +283,23 @@ export function createPage({ actions, drill, drillUi, onMore, onTopic, onStart, 
       }));
     }
     setHidden(P.topics, d.topics.length === 0 || d.state !== "due");
-    setHidden(P.start, d.state !== "due");
-    const gsig = JSON.stringify(d.gaps);
-    setHidden(P.gapsH, !d.gaps);
-    setHidden(P.gaps, !d.gaps);
+  }
+
+  function patchGaps(gaps) {
+    const gsig = JSON.stringify(gaps);
+    setHidden(P.gapsH, !gaps);
+    setHidden(P.gaps, !gaps);
     if (gsig !== gapsSig) {
       gapsSig = gsig;
-      for (const key of [...views.keys()]) if (key.startsWith("gap:")) views.delete(key);
-      if (d.gaps) {
-        setText(P.gapsH, d.gaps.head);
-        P.gaps.replaceChildren(...d.gaps.rows.map((g) => {
+      for (const key of [...views.keys()]) if (isGapRowId(key)) views.delete(key);
+      if (gaps) {
+        setText(P.gapsH, gaps.head);
+        P.gaps.replaceChildren(...gaps.rows.map((g) => {
           const li = h("li", { class: "ap-gap", "data-seen": g.seen ? "true" : "false" }, h("span", { class: "ap-g-topic label wrap-any" }, g.topic), h("span", { class: "ap-g-offer wrap-any" }, g.offer), h("span", { class: "ap-g-state label" }, g.state));
           if (g.data) {
             li.dataset.row = g.id;
             li.dataset.card = g.data.card;
-            views.set(g.id, { id: g.id, data: g.data, open: g.open, link: null, actions: [{ id: "open", key: "↵", label: "", primary: false, visible: false, permanent: false }] });
+            views.set(g.id, { id: g.id, data: g.data, open: g.open, link: null, actions: [{ id: "open", key: keyOf("open"), label: "", primary: false, visible: false, permanent: false }] });
           }
           return li;
         }));

@@ -74,7 +74,62 @@ fn digest_sections_attribution_and_privacy_of_rejections() {
     // Rejections are logged, not pushed.
     assert!(!text.contains("Rejected Role"), "{text}");
     assert!(
-        text.contains("Enviadas: 2 · Respuestas: 2 (100%) · Entrevistas: 1"),
+        text.contains("- Enviadas: 2 · Respuestas: 2 · Entrevistas: 1\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("- De las enviadas esta semana ya respondieron: 2 (100%)\n"),
+        "{text}"
+    );
+}
+#[test]
+fn an_application_that_replied_and_then_interviewed_counts_as_one_response() {
+    let t = Tracker::in_memory().unwrap();
+    seed(
+        &t,
+        &make_job(),
+        &[
+            State::Prepared,
+            State::Submitted,
+            State::Replied,
+            State::Interview,
+        ],
+    );
+    let text = build_digest(&t, *NOW, 5).unwrap();
+    // Two events (Replied, Interview) on one application: one response, and never over 100 %.
+    assert!(
+        text.contains("- Enviadas: 1 · Respuestas: 1 · Entrevistas: 1\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("- De las enviadas esta semana ya respondieron: 1 (100%)\n"),
+        "{text}"
+    );
+}
+#[test]
+fn a_reply_to_an_old_application_counts_as_a_response_but_not_in_the_weekly_rate() {
+    let t = Tracker::in_memory().unwrap();
+    let old = make_job_with(|j| j.external_id = "old".into());
+    let fresh = make_job_with(|j| j.external_id = "fresh".into());
+    let long_ago = *NOW - TimeDelta::days(30);
+    // Sent a month ago, answered this week.
+    t.add_job(&old, 80.0, &BTreeMap::new(), long_ago).unwrap();
+    t.create_application(&old.key(), long_ago).unwrap();
+    t.transition(&old.key(), State::Prepared, None, long_ago)
+        .unwrap();
+    t.transition(&old.key(), State::Submitted, None, long_ago)
+        .unwrap();
+    t.transition(&old.key(), State::Replied, None, *NOW)
+        .unwrap();
+    // Sent this week, still waiting.
+    seed(&t, &fresh, &[State::Prepared, State::Submitted]);
+    let text = build_digest(&t, *NOW, 5).unwrap();
+    assert!(
+        text.contains("- Enviadas: 1 · Respuestas: 1 · Entrevistas: 0\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("- De las enviadas esta semana ya respondieron: 0 (0%)\n"),
         "{text}"
     );
 }

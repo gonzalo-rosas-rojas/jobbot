@@ -10,10 +10,10 @@ import { h, focusMark, restoreFocus, isTypingIn } from "../core/dom.js";
 import { t, tn, lang, onLang, getTimeZone } from "../i18n/index.js";
 import { stopCounts } from "../core/model.js";
 import { humanize, cardIndex } from "../core/humanize.js";
-import { saveView } from "../core/store.js";
+import { saveView } from "../core/route.js";
 import { STOP_IDS } from "../scene/poses.js";
 import { momentOf, STOPS_META, askOf } from "../moments/registry.js";
-import { createHud } from "./hud.js";
+import { createHud, setDialMode } from "./hud.js";
 import { createStops } from "./stops.js";
 import { createBar } from "./bar.js";
 import { createRouter } from "./router.js";
@@ -35,6 +35,8 @@ import { quietFor } from "./keyfilter.js";
 import { icon } from "./icons.js";
 
 const NEWTASK_STOPS = ["hoy", "procesos"];                        // the stops whose `n` is a button on the flat page
+const FADE_MS = 180;                                              // the short crossfade of a cut (calm motion) into a stop
+const NEWS_LINES_SAID = 4;                                        // the news of a snapshot said at once: more would run on past what a listener keeps
 const SLOW_MS = 3000;                                             // after this long without the first snapshot the loading state adds a second, quiet line
 const JOB_STOPS = ["hoy", "procesos", "cola", "aprender"];        // the stops whose rows are applications: the palette opens one's drawer where he is; elsewhere it goes to PROCESOS first
 const noNav = { go() {}, lock() {}, settle() {}, cancel() {}, repaint() {}, current: () => null };
@@ -43,7 +45,7 @@ const noNav = { go() {}, lock() {}, settle() {}, cancel() {}, repaint() {}, curr
  * createShell({ root, view, session, settings, sound, flags, embedded, reduced, now, brand, about }) -> {
  *   ctx, app, host, hud, stops, drawer, help, palette, menu, toast, cursor, router, tools, announcer,
  *   setNav(nav, isFlat), go(id, opts), showStop(id, { fade }), arrive(id, { push, manual }), openJob(key), current(), model,
- *   tick() (a minute passed), setClock(text), setDialBig(on), announceCross(mark), isTyping() }
+ *   tick() (a minute passed), setClock(text), setDialMode(mode), announceCross(mark), isTyping() }
  * `reduced()` says whether motion is asked to be calm (the system's request or his own setting); `now()` is the page's "now" in ms (the clock
  * of the machine, or the machine's moved to the hour of ?clock= so that the words of a moment agree with the sky).
  */
@@ -58,6 +60,10 @@ export function createShell({ root, view, session, settings, sound, flags = {}, 
   let phase = "loading";
   let slowTimer = null;
 
+  const doc = root.closest("#doc") || root;
+  // a modal dialog (the help, the palette, the sound's sheet) leaves nothing reachable behind it (WAI-ARIA); the camera takes the page back when it closes
+  const setModal = (open) => { doc.inert = open; if (!open) nav.settle(); };
+
   const announcer = createAnnouncer();
   // What the server says reaches him in his words (core/humanize.js): the company and the role instead of the key, the date as he writes it. Every
   // text of the server goes through this one function on its way to the toast, the live region and the banner, so no moment has to know about it.
@@ -68,7 +74,7 @@ export function createShell({ root, view, session, settings, sound, flags = {}, 
   // The sound's own face: the indicator of the HUD and the sheet "Escuchar los sonidos" (ui/sound-ui.js). Only a `sound` that is a player (it can say its
   // status) has one; the sheet is a dialog like the help, so the page behind it is inert while it is open.
   const soundUi = typeof sound.status === "function"
-    ? createSoundUi({ player: sound, settings, chooseSound: (on) => tools.chooseSound(on), toast: (text, ok) => toast.show(text, ok), onToggle: (open) => { doc.inert = open; if (!open) nav.settle(); } })
+    ? createSoundUi({ player: sound, settings, chooseSound: (on) => tools.chooseSound(on), toast: (text, ok) => toast.show(text, ok), onToggle: setModal })
     : null;
   const title = createTitle(brand);
   const router = createRouter({ embedded });
@@ -110,13 +116,12 @@ export function createShell({ root, view, session, settings, sound, flags = {}, 
     stop: () => shown, cursor, drawer, help: { isOpen: () => help.isOpen(), close: () => help.close(), toggle: () => help.toggle() },
     palette: { isOpen: () => palette.isOpen(), close: () => palette.close(), open: () => palette.open() }, menu, tools, sheet: soundUi && soundUi.sheet, go: (id) => go(id), cancelJump: () => nav.cancel(),
   });
-  const doc = root.closest("#doc") || root;
-  // a modal dialog leaves nothing reachable behind it (WAI-ARIA); the live region and the dialog itself are outside #doc
-  const help = createHelp({ root: document.body, sound, getStop: () => shown, live: () => liveSet(shown), flat: () => flat, onToggle: (open) => { doc.inert = open; if (!open) nav.settle(); } });
+  // the live region and the dialogs themselves are outside #doc, so they stay reachable while it is inert
+  const help = createHelp({ root: document.body, sound, getStop: () => shown, live: () => liveSet(shown), flat: () => flat, onToggle: setModal });
   // Ctrl K: the same kind of dialog, so the same inert page and the same hand-back to the camera. It is given what it holds each time it opens (the stops, the
   // applications of the last snapshot, the settings as they are now) and what to do with a choice: it never reaches the server by itself.
   const palette = createPalette({
-    root: document.body, sound, onToggle: (open) => { doc.inert = open; if (!open) nav.settle(); },
+    root: document.body, sound, onToggle: setModal,
     source: () => ({
       entries: buildEntries({
         stops: STOPS_META, cards: cardsOf(model && model.snap), current: shown,
@@ -127,7 +132,10 @@ export function createShell({ root, view, session, settings, sound, flags = {}, 
       verbs: actionVerbs(STOPS_META),
     }),
   });
-  installKeys({ target: window, handlers, stop: () => shown, locked: () => menu.isOpen() || help.isOpen() || palette.isOpen() || !!(soundUi && soundUi.sheet.isOpen()), drawerOpen: () => drawer.isOpen(), typing: quietFor });
+  const soundSheetOpen = () => !!(soundUi && soundUi.sheet.isOpen());
+  // a layer over the page owns the keyboard and the camera
+  const overlayOpen = () => menu.isOpen() || help.isOpen() || palette.isOpen() || soundSheetOpen();
+  installKeys({ target: window, handlers, stop: () => shown, locked: overlayOpen, drawerOpen: () => drawer.isOpen(), typing: quietFor });
 
   // ---- the context of the moments (spec §2.3)
   const ctx = {
@@ -140,7 +148,7 @@ export function createShell({ root, view, session, settings, sound, flags = {}, 
     about: about || null,                                        // the public demo's line about itself (HOY draws it); null on the real panel
     announce: (text) => announcer.say(human(text)),
     toast: (text, ok, opts) => toast.show(text, ok, opts),
-    drawer: { open: (key, origin) => drawer.open(key, origin), close: () => drawer.close(), isOpen: () => drawer.isOpen(), step: (dir) => drawer.step(dir), reload: () => drawer.reload(), get key() { return drawer.key; } },
+    drawer: { open: (key, origin) => drawer.open(key, origin), close: () => drawer.closeAndRestore(), isOpen: () => drawer.isOpen(), step: (dir) => drawer.step(dir), reload: () => drawer.reload(), get key() { return drawer.key; } },
     model: () => model,
     themeName: () => tools.themeName(),
     chooseTheme: (name) => tools.chooseTheme(name),
@@ -157,9 +165,17 @@ export function createShell({ root, view, session, settings, sound, flags = {}, 
     host.toggleAttribute("data-lenis-prevent", host.scrollHeight > host.clientHeight + 1);
   }
 
+  const closeDrawerQuietly = () => { if (drawer.isOpen()) drawer.closeQuietly(); };
+
   function relabelNewTask() {
     newTaskLabel.textContent = t("keys.newtask");
     newTask.hidden = !NEWTASK_STOPS.includes(shown) || phase !== "ready";
+  }
+
+  /** The words of the frame the shell itself owns: the skip link and the button of the flat page. */
+  function relabelShell() {
+    skip.textContent = t("shell.skip");
+    relabelNewTask();
   }
 
   /** The words of the loading state and of the button of the banner, in the language of the page. */
@@ -216,7 +232,7 @@ export function createShell({ root, view, session, settings, sound, flags = {}, 
   /** Puts the moment of `id` under the sheet (a no-op when it already is). `fade`: a cut under reduced motion gets a short crossfade (spec §3.9). */
   function showStop(id, { fade = false } = {}) {
     if (id === shown || !momentOf(id)) return;
-    if (drawer.isOpen()) drawer.close({ silent: true });
+    closeDrawerQuietly();
     unmountMoment();
     shown = id;
     document.body.dataset.stop = id;
@@ -227,20 +243,23 @@ export function createShell({ root, view, session, settings, sound, flags = {}, 
     stops.setActive(id);
     loadingEyebrow.textContent = t("tab." + id);
     mountMoment(id);
-    if (fade && typeof app.animate === "function") app.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 180, easing: "linear" });
+    if (fade && typeof app.animate === "function") app.animate([{ opacity: 0 }, { opacity: 1 }], { duration: FADE_MS, easing: "linear" });
   }
 
   /** After a trip by key or bar the keyboard would be on nothing (the old moment is gone): it lands on the heading of the new one. */
   function land() {
     const active = document.activeElement;
-    const heading = phase === "ready" ? host.querySelector("h1") : phase === "loading" ? loadingTitle : null;
+    let heading = null;
+    if (phase === "ready") heading = host.querySelector("h1");
+    else if (phase === "loading") heading = loadingTitle;
     if (heading && (!active || active === document.body || active === document.documentElement || !document.body.contains(active))) heading.focus({ preventScroll: true });
   }
 
   /** A trip ended (or the page came to rest on a stop): the address, the history, the announcement and the keyboard. `cut`: it was a cut. */
   function arrive(id, { push = false, manual = false, cut = false } = {}) {
     showStop(id, { fade: cut });                                 // a cut (calm motion) arrives with the short crossfade of spec §3.9
-    router.write(id, drawer.key, { push });
+    if (push) router.pushStop(id, drawer.key);
+    else router.replaceStop(id, drawer.key);
     if (!manual) {
       announcer.say(t("nav.announce", { name: t("tab." + id), what: t(askOf(id)) }));
       sound.play("arrive", { room: id });                          // the prologue has no motif: the cue of a room is for the five that are rooms
@@ -254,8 +273,8 @@ export function createShell({ root, view, session, settings, sound, flags = {}, 
     if (!STOP_IDS.includes(id)) return;
     const moment = momentOf(id);
     if (opts && moment && typeof moment.arrive === "function") moment.arrive(opts);
-    if (id === shown) { if (drawer.isOpen()) drawer.close(); return; }
-    if (drawer.isOpen()) drawer.close({ silent: true });
+    if (id === shown) { if (drawer.isOpen()) drawer.closeAndRestore(); return; }
+    closeDrawerQuietly();
     nav.go(id, { push: true });
   }
 
@@ -297,7 +316,8 @@ export function createShell({ root, view, session, settings, sound, flags = {}, 
     // His busy hours are the ones outside the bot's window: no unsolicited sound then (spec §7).
     sound.setBusy(model.snap.controls.window_open === false);
     updateMoment();
-    if (event.news && event.news.lines.length) announcer.say(event.news.lines.slice(0, 4).join(". "));
+    palette.refresh();                                           // open since before this snapshot: it shows the applications of this one
+    if (event.news && event.news.lines.length) announcer.say(event.news.lines.slice(0, NEWS_LINES_SAID).join(". "));
     // the sound of what changed while he was not looking is not decided here: main.js feeds the snapshots to the background detector (sound/background.js)
   }
 
@@ -330,18 +350,16 @@ export function createShell({ root, view, session, settings, sound, flags = {}, 
       mountMoment(shown);
       restoreFocus(mark, host);
     }
-    relabelNewTask();
+    relabelShell();
     relabelLoading();
-    skip.textContent = t("shell.skip");
   });
-  skip.textContent = t("shell.skip");
-  relabelNewTask();
+  relabelShell();
   setPhase("loading");
 
   router.listen(({ stop, job }) => {
-    if (stop && stop !== shown) { if (drawer.isOpen()) drawer.close({ silent: true }); if (job) pendingJob = job; nav.go(stop, { push: false }); return; }
+    if (stop && stop !== shown) { closeDrawerQuietly(); if (job) pendingJob = job; nav.go(stop, { push: false }); return; }
     if (job && job !== drawer.key) drawer.open(job);
-    else if (!job && drawer.isOpen()) drawer.close({ fromPop: true });
+    else if (!job && drawer.isOpen()) drawer.closeFromHistory();
   });
 
   window.addEventListener("resize", syncScroll);
@@ -358,17 +376,14 @@ export function createShell({ root, view, session, settings, sound, flags = {}, 
     },
     go, showStop, arrive, openJob, syncScroll,
     /** The camera may glide a page that rests between two stops to the nearest one only while nothing else holds the page (spec A1). */
-    canSnap: () => !drawer.isOpen() && !menu.isOpen() && !help.isOpen() && !palette.isOpen() && !(soundUi && soundUi.sheet.isOpen()),
+    canSnap: () => !drawer.isOpen() && !overlayOpen(),
     current: () => shown,
     get model() { return model; },
     /** A minute passed: the words that depend on "now" ("corrida hace 7 h") are worked out again. */
     tick() { if (model) hud.setStatus(model.snap, now()); },
     setClock: (text) => hud.setClock(text),
-    /** The dial is big (prologue, HOY) or docked; the one clock of the page is the dial's while it is big and the HUD's when it docks (spec §4.8). */
-    setDialBig(on) {
-      if (on === null) delete hud.el.dataset.dial;
-      else if (hud.el.dataset.dial !== (on ? "big" : "docked")) hud.el.dataset.dial = on ? "big" : "docked";
-    },
+    /** The dial is "big" (prologue, HOY), "docked", or "none" (no dial is drawn: the attribute goes); the one clock of the page is the dial's while it is big and the HUD's when it docks (spec §4.8). */
+    setDialMode: (mode) => setDialMode(hud.el, mode),
     announceCross: (mark) => announcer.say(t("shell.cross." + mark)),
     isTyping: () => isTypingIn(app) || menu.isOpen(),
   };

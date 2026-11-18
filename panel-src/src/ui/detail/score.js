@@ -4,7 +4,7 @@
 
 import { h } from "../../core/dom.js";
 import { t } from "../../i18n/index.js";
-import { factorBars, factorName, factorPoints as points } from "../../core/format.js";
+import { factorBars, factorName, factorPoints } from "../../core/format.js";
 
 /** The bars of the score as data (core/format.js factorBars, as COLA and PROCESOS draw them); an array is no breakdown. */
 export function scoreRows(scoreDetail) {
@@ -12,24 +12,25 @@ export function scoreRows(scoreDetail) {
   return factorBars(scoreDetail).map((b) => ({ ...b, label: factorName(b.id) }));
 }
 
+/** The `ul` of bars, one `li` per factor and a last one with the total. */
+function barsBody(bars, card) {
+  const rows = bars.map((b) => {
+    const bar = h("i", {});
+    bar.style.setProperty("--w", String(b.k));
+    return h("li", { class: "d-bar" },
+      h("span", { class: "d-bk" }, b.label),
+      h("span", { class: "meter", "aria-hidden": "true" }, bar),
+      h("span", { class: "d-bv num" }, b.text));
+  });
+  rows.push(h("li", { class: "d-bar total" },
+    h("span", { class: "d-bk" }, t("detail.score.total")),
+    h("span", {}),
+    h("span", { class: "d-bv num" }, factorPoints(card.score))));
+  return h("ul", { class: "d-bars", "aria-label": t("drawer.score.aria") }, rows);
+}
+
 export function scoreView(detail, card) {
   const bars = scoreRows(detail.score_detail);
-  const body = bars.length === 0
-    ? h("p", { class: "muted" }, t("drawer.score.none"))
-    : (() => {
-      const rows = bars.map((b) => {
-        const bar = h("i", {});
-        bar.style.setProperty("--w", String(b.k));
-        return h("li", { class: "d-bar" },
-          h("span", { class: "d-bk" }, b.label),
-          h("span", { class: "meter", "aria-hidden": "true" }, bar),
-          h("span", { class: "d-bv num" }, b.text));
-      });
-      rows.push(h("li", { class: "d-bar total" },
-        h("span", { class: "d-bk" }, t("detail.score.total")),
-        h("span", {}),
-        h("span", { class: "d-bv num" }, points(card.score))));
-      return h("ul", { class: "d-bars", "aria-label": t("drawer.score.aria") }, rows);
-    })();
+  const body = bars.length === 0 ? h("p", { class: "muted" }, t("drawer.score.none")) : barsBody(bars, card);
   return h("section", { class: "d-sec", "aria-labelledby": "d-score-h" }, h("h3", { id: "d-score-h" }, t("drawer.score.how")), body);
 }

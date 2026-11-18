@@ -83,7 +83,7 @@ test("E1: after a stop the server accepted, the next snapshot is the truth again
 
 test("E1: COLA hands the intent to its view and settles it on every snapshot, as SISTEMA does", () => {
   const cola = fs.readFileSync(path.join(SRC, "moments", "cola.js"), "utf8");
-  assert.match(cola, /intent:\s*me\.actions\.engineState\(\)\.intent/);
+  assert.match(cola, /intent:\s*state\.actions\.engineState\(\)\.intent/);
   assert.match(cola, /S\.actions\.settle\(\)/);
 });
 

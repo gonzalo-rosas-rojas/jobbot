@@ -16,32 +16,28 @@
 import { t } from "../i18n/index.js";
 import { holdVisit } from "../core/diff.js";
 import { hoyView } from "./hoy/view.js";
-import { createActions } from "./hoy/actions.js";
+import { createActions, unsnoozeRowOf } from "./hoy/actions.js";
 import { createHoy } from "./hoy/render.js";
 import { createForms } from "./hoy/forms.js";
 import { createPrompt } from "./hoy/prompt.js";
+import { openInNewTab } from "./shared/util.js";
+import { indexCards } from "./shared/cards.js";
 
 // "Since your last visit" means since the last time the page was open BEFORE this one: the shell saves a new `lastVisit` whenever
 // the tab is hidden, so it is the visit boot held (core/diff.js `holdVisit`; read on the first mount when nothing held one) and kept for the whole session of the page.
 let sinceMs = null;
-const visitMs = () => (sinceMs == null ? (sinceMs = holdVisit()) : sinceMs);
+function visitMs() {
+  if (sinceMs == null) sinceMs = holdVisit();
+  return sinceMs;
+}
 
 let S = null;
 
-/** A card of the snapshot by its key, wherever it is (a column of the board, the proposals, the stuck ones), or null. */
-function findCard(model, key) {
-  if (!model) return null;
-  const snap = model.snap;
-  for (const col of snap.board || []) for (const c of col.cards) if (c.key === key) return c;
-  for (const c of [...((snap.awaiting_approval || {}).cards || []), ...((snap.needs_gonza || {}).cards || [])]) if (c.key === key) return c;
-  return null;
-}
-
 function mount(host, ctx) {
   if (S) unmount();
-  const openUrl = ctx.openUrl || ((url) => window.open(url, "_blank", "noopener,noreferrer"));
-  const me = { ctx, first: true, host };
-  me.actions = createActions({
+  const openUrl = ctx.openUrl || openInNewTab;
+  const state = { ctx, first: true, host };
+  state.actions = createActions({
     session: ctx.session,
     sound: ctx.sound,
     announce: ctx.announce,
@@ -49,23 +45,26 @@ function mount(host, ctx) {
     open: (key, rowId) => ctx.open(key, rowId),
     openUrl,
     // without a menu HOY still works, only `s` is "until tomorrow" and `x`, `r` do nothing (actions.js)
-    ask: ctx.ask || (ctx.menu ? (id, row) => me.forms.ask(id, row) : null),
+    ask: ctx.ask || (ctx.menu ? (id, row) => state.forms.ask(id, row) : null),
     toast: typeof ctx.toast === "function" ? ctx.toast : null,   // a skip, an answer and a withdrawal leave a "Deshacer"
-    afterLink: ctx.afterLink || ((row) => { if (me.prompt) me.prompt.afterLink(row); }),
-    onChange: (id) => { if (S === me) me.ui.repaint(id); },
+    afterLink: ctx.afterLink || ((row) => { if (state.prompt) state.prompt.afterLink(row); }),
+    onChange: (id) => { if (S === state) state.ui.repaint(id); },
   });
-  me.ui = createHoy({
-    actions: me.actions,
-    run: (id, view) => me.actions.run(id, view),
+  state.ui = createHoy({
+    actions: state.actions,
+    run: (id, view) => state.actions.run(id, view),
     more: () => ctx.go("procesos", { filter: "turn" }),
-    unsnooze: (key) => me.actions.run("unsnooze", { id: "snz:" + key, data: { card: key }, open: null, link: null, actions: [{ id: "unsnooze", permanent: false }] }),
+    unsnooze: (key) => state.actions.run("unsnooze", unsnoozeRowOf(key)),
     reduced: ctx.reduced,
   });
-  host.append(me.ui.el);
+  host.append(state.ui.el);
   // the little menus (postpone, withdraw, register, new task) need the shell's menu
-  me.forms = ctx.menu ? createForms({ menu: ctx.menu, session: ctx.session, sound: ctx.sound, announce: ctx.announce, now: ctx.now, cardOf: (key) => findCard(me.model, key), rowEl: (id) => me.ui.el.querySelector(`[data-row="${CSS.escape(id)}"]`) }) : null;
-  me.prompt = createPrompt({ host: me.ui.el, run: (id, row, opts) => me.actions.run(id, row, opts), announce: ctx.announce });
-  S = me;
+  // the form reads the card the row was drawn from (hoy/view.js indexes the cards the same way), so a key in two places is one card for both
+  const cardOf = (key) => (state.model ? indexCards(state.model.snap).get(key) || null : null);
+  const rowEl = (id) => state.ui.el.querySelector(`[data-row="${CSS.escape(id)}"]`);
+  state.forms = ctx.menu ? createForms({ menu: ctx.menu, session: ctx.session, sound: ctx.sound, announce: ctx.announce, now: ctx.now, cardOf, rowEl }) : null;
+  state.prompt = createPrompt({ host: state.ui.el, run: (id, row, opts) => state.actions.run(id, row, opts), announce: ctx.announce });
+  S = state;
 }
 
 function update(model, ctx) {
@@ -96,12 +95,14 @@ function onKey(actionId, row, event) {
 
 function unmount() {
   if (!S) return;
-  const me = S;
+  const state = S;
   S = null;
-  me.actions.destroy();
-  me.prompt.destroy();
-  me.ui.destroy();
-  me.host.replaceChildren();
+  state.actions.destroy();
+  state.prompt.destroy();
+  state.ui.destroy();
+  // the whole host: the shell gives it to one moment at a time (ui/shell.js unmountMoment runs this unmount and empties the host before mountMoment
+  // puts the next moment in), so there is no other moment's section to spare here
+  state.host.replaceChildren();
 }
 
 export const id = "hoy";

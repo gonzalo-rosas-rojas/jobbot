@@ -18,7 +18,9 @@
 
 import { t, has } from "../i18n/index.js";
 
-const text = (x) => (x == null ? "" : String(x).trim());
+const trimmed = (x) => (x == null ? "" : String(x).trim());
+
+const cardsIn = (list) => (list && Array.isArray(list.cards) ? list.cards : []);
 
 /** The applications of a snapshot, once each by key, in the order the board gives them: the board first, then what needs him, awaits his approval and is put aside. */
 export function cardsOf(snap) {
@@ -27,42 +29,53 @@ export function cardsOf(snap) {
   const seen = new Set();
   const add = (card) => {
     if (!card || typeof card !== "object" || card.key == null || seen.has(card.key)) return;
-    const company = text(card.company);
-    const title = text(card.title);
+    const company = trimmed(card.company);
+    const title = trimmed(card.title);
     if (!company && !title) return;                       // nothing to find it by
     seen.add(card.key);
-    out.push({ key: card.key, company, title, state: text(card.state) });
+    out.push({ key: card.key, company, title, state: trimmed(card.state) });
   };
-  for (const column of Array.isArray(snap.board) ? snap.board : []) for (const card of (column && Array.isArray(column.cards)) ? column.cards : []) add(card);
-  for (const list of [snap.needs_gonza, snap.awaiting_approval, snap.snoozed]) for (const card of (list && Array.isArray(list.cards)) ? list.cards : []) add(card);
+  for (const column of Array.isArray(snap.board) ? snap.board : []) for (const card of cardsIn(column)) add(card);
+  for (const list of [snap.needs_gonza, snap.awaiting_approval, snap.snoozed]) for (const card of cardsIn(list)) add(card);
   return out;
 }
+
+const doesWords = (id) => (has("palette.does." + id) ? t("palette.does." + id) : "");
 
 /** [{ stop, words }]: the verbs that are done at each stop (the palette says where, it does not do them). Only the stops that have some. */
 export function actionVerbs(stops) {
   return (stops || []).filter((s) => has("palette.does." + s.id)).map((s) => ({ stop: s.id, words: t("palette.does." + s.id) }));
 }
 
-export function buildEntries({ stops, cards, current, state, run, soundEntries = null }) {
-  const out = [];
-  for (const s of stops || []) {
+/** One entry per stop, with its number; the one on screen says so. */
+function gotoEntries(stops, current, run) {
+  return (stops || []).map((s) => {
     const here = s.id === current;
-    out.push({ id: "go:" + s.id, group: "goto", label: t(s.name), sub: t(s.ask), words: t("palette.alias." + s.id) + " " + (has("palette.does." + s.id) ? t("palette.does." + s.id) : ""), key: s.key, tag: here ? t("palette.here") : "", current: here, run: () => run.go(s.id) });
-  }
-  for (const card of cards || []) {
-    out.push({
-      id: "job:" + card.key, group: "jobs", label: card.company || card.title, sub: card.company ? card.title : "", words: "",
-      key: "", tag: card.state && has("state." + card.state) ? t("state." + card.state) : "", current: false, run: () => run.job(card.key),
-    });
-  }
+    return { id: "go:" + s.id, group: "goto", label: t(s.name), sub: t(s.ask), words: t("palette.alias." + s.id) + " " + doesWords(s.id), key: s.key, tag: here ? t("palette.here") : "", current: here, run: () => run.go(s.id) };
+  });
+}
+
+/** One entry per application: its company and role, and its state as the tag. */
+function jobEntries(cards, run) {
+  return (cards || []).map((card) => ({
+    id: "job:" + card.key, group: "jobs", label: card.company || card.title, sub: card.company ? card.title : "", words: "",
+    key: "", tag: card.state && has("state." + card.state) ? t("state." + card.state) : "", current: false, run: () => run.job(card.key),
+  }));
+}
+
+/** The settings and the help: theme, language, sound (the single entry or the family), calm motion, the keys. */
+function prefEntries(state, run, soundEntries) {
   const theme = state.theme === "light" ? "light" : "dark";
   const other = state.lang === "en" ? "es" : "en";
-  out.push(
+  return [
     { id: "pref:theme", group: "prefs", label: t("cmd.theme", { name: t("theme." + (theme === "light" ? "dark" : "light")) }), sub: t("palette.current") + ": " + t("theme." + theme), words: t("palette.alias.theme"), key: "t", tag: "", current: false, run: () => run.theme() },
     { id: "pref:lang", group: "prefs", label: t("cmd.lang", { name: t("lang." + other) }), sub: t("palette.current") + ": " + t("lang." + (state.lang === "en" ? "en" : "es")), words: t("palette.alias.lang"), key: "l", tag: "", current: false, run: () => run.lang() },
     ...(soundEntries || [{ id: "pref:sound", group: "prefs", label: t(state.sound ? "cmd.sound.off" : "cmd.sound.on"), sub: "", words: t("palette.alias.sound"), key: "m", tag: "", current: false, run: () => run.sound() }]),
     { id: "pref:motion", group: "prefs", label: t(state.motion === "calm" ? "cmd.motion.auto" : "cmd.motion.calm"), sub: "", words: t("palette.alias.motion"), key: "", tag: "", current: false, run: () => run.motion() },
     { id: "pref:help", group: "prefs", label: t("ctrl.keys.hint"), sub: "", words: t("palette.alias.help"), key: "?", tag: "", current: false, run: () => run.help() },
-  );
-  return out;
+  ];
+}
+
+export function buildEntries({ stops, cards, current, state, run, soundEntries = null }) {
+  return [...gotoEntries(stops, current, run), ...jobEntries(cards, run), ...prefEntries(state, run, soundEntries)];
 }

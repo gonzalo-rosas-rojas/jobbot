@@ -10,7 +10,7 @@
 //   __lab.ground(on)                    clears the fill of that text and hides the rest of the dial's drawing, so a screenshot shows
 //                                       only what the glyphs are painted on (sky, pool, light, the labels' halo)
 import { createStage, POOL } from "../src/stage/stage.js";
-import { mulberry32 } from "../src/stage/skyline.js";
+import { mulberry32 } from "../src/core/random.js";
 import { t } from "../src/i18n/index.js";
 
 const canvas = document.getElementById("sky");

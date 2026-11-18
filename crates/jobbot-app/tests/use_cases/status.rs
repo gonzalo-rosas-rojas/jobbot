@@ -38,3 +38,28 @@ fn a_recorded_run_is_what_status_reads_back() {
         "{line}"
     );
 }
+
+#[test]
+fn a_last_run_stamp_that_is_not_a_date_is_not_reported_as_no_run() {
+    let tracker = Tracker::in_memory().unwrap();
+    tracker
+        .set_meta("last_run_at", "ayer por la tarde")
+        .unwrap();
+
+    let line = describe_last_run(&tracker, *NOW).unwrap();
+
+    assert_eq!(line, "Última corrida: fecha ilegible (ayer por la tarde)");
+}
+
+#[test]
+fn a_step_a_finished_run_did_not_need_is_said_in_gonzas_words() {
+    let tracker = Tracker::in_memory().unwrap();
+    let mut log = StepLog::default();
+    log.ran("discover", json!({"new": 1}));
+    record_run(&tracker, *NOW, &RunEnd::Done, &mut log).unwrap();
+
+    let line = describe_last_run(&tracker, *NOW).unwrap();
+
+    assert!(line.contains("preparar: no tocaba"), "{line}");
+    assert!(!line.contains("not_due"), "{line}");
+}

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { CADENCE, cadenceOf, dayOf } from "../src/moments/procesos/cadence.js";
+import { CADENCE, cadenceOf, daysInStage } from "../src/moments/procesos/cadence.js";
 
 const card = (state, days) => ({ key: "k", state, days_in_state: days });
 
@@ -39,12 +39,12 @@ test("a company that answered is looked at on day 3 when nobody has a task on it
 });
 
 test("a day that is missing, negative, fractional or not a number is a whole day of at least 0 (a broken snapshot never prints NaN)", () => {
-  assert.equal(dayOf({ days_in_state: null }), 0);
-  assert.equal(dayOf({}), 0);
-  assert.equal(dayOf({ days_in_state: -3 }), 0);
-  assert.equal(dayOf({ days_in_state: 9.7 }), 9);
-  assert.equal(dayOf({ days_in_state: "12" }), 12);
-  assert.equal(dayOf({ days_in_state: "abc" }), 0);
+  assert.equal(daysInStage({ days_in_state: null }), 0);
+  assert.equal(daysInStage({}), 0);
+  assert.equal(daysInStage({ days_in_state: -3 }), 0);
+  assert.equal(daysInStage({ days_in_state: 9.7 }), 9);
+  assert.equal(daysInStage({ days_in_state: "12" }), 12);
+  assert.equal(daysInStage({ days_in_state: "abc" }), 0);
   for (const bad of [null, undefined, NaN, "x", -1]) {
     const c = cadenceOf({ state: "submitted", days_in_state: bad });
     assert.ok(Number.isInteger(c.day) && c.day === 0, String(bad));

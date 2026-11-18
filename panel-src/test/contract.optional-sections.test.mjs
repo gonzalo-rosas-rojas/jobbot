@@ -10,7 +10,7 @@ import { createPlace } from "../src/moments/procesos/place.js";
 import { prologoView } from "../src/moments/prologo.js";
 import { hoyView } from "../src/moments/hoy/view.js";
 import { procesosView } from "../src/moments/procesos/view.js";
-import { colaView } from "../src/moments/cola/view.js";
+import { colaView, orderedProposals } from "../src/moments/cola/view.js";
 import { aprenderView } from "../src/moments/aprender/view.js";
 import { sistemaView } from "../src/moments/sistema/view.js";
 
@@ -68,8 +68,14 @@ test("optional sections: the queues are the same with the five sections missing"
   const nowMs = Date.parse(whole.generated_at);
   const cola = (snap) => colaView(model(snap), { nowMs });
   const hoy = (snap) => hoyView(model(snap), { nowMs });
-  assert.ok(cola(whole).proposals.length > 0 && hoy(whole).rows.length > 0, "the fixture has work to show");
-  assert.deepEqual(cola(thin).proposals, cola(whole).proposals);
+  // the proposals the page draws: the one in focus, then the rows of the queue under it
+  const proposals = (snap) => { const v = cola(snap); return v.focus ? [v.focus.key, ...v.queue.groups[0].rows.map((r) => r.data.card)] : []; };
+  assert.ok(proposals(whole).length > 0 && hoy(whole).rows.length > 0, "the fixture has work to show");
+  assert.deepEqual(proposals(thin), proposals(whole));
+  // every proposal with its score, in the order COLA takes them, past what the list shows
+  const scored = (snap) => orderedProposals(model(snap).snap).map((c) => [c.key, c.score]);
+  assert.ok(scored(whole).length > 0);
+  assert.deepEqual(scored(thin), scored(whole));
   // (the rest of COLA's list includes "sent tonight", which is read from `activity`: that part goes, the proposals stay)
   assert.deepEqual(model(thin).tasks, model(whole).tasks);
   assert.deepEqual(hoy(thin).rows, hoy(whole).rows);

@@ -12,7 +12,7 @@
 //   - there is no verb that saves an answer: the route (`POST /api/answers`) does not exist, and the page does not pretend it does.
 
 import { heldKey } from "../../core/dom.js";
-import { createArmer } from "../shared/armer.js";
+import { createArmer, REAL_TIMERS } from "../shared/armer.js";
 
 /** The request of a verb on a row, or null when the row cannot take it: { path, body }. */
 export function requestOf(actionId, row) {
@@ -27,7 +27,7 @@ export function requestOf(actionId, row) {
  *   { run(actionId, row), isArmed(rowId, actionId), armedOf(rowId), isPending(rowId), disarm(), destroy() }
  * `onChange(rowId)` is called whenever a row's pending or armed state changes: the render paints that row again.
  */
-export function createActions({ session, sound, announce, t, open, openUrl, onChange = () => {}, now = Date.now, timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (id) => clearTimeout(id) }, held = heldKey }) {
+export function createActions({ session, sound, announce, t, open, openUrl, onChange = () => {}, now = Date.now, timers = REAL_TIMERS, held = heldKey }) {
   const pending = new Set();
   const armer = createArmer({ announce, sound, t, onChange, now, timers, held });
 

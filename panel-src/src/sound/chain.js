@@ -8,14 +8,16 @@
 
 const CEILING = 0.5;
 const KNEE = 0.3;
+const CURVE_POINTS = 2049;                       // 2^11 + 1 samples over -1..1, so that zero falls on a sample of its own
 
 function ceilingCurve() {
-  const n = 2049;
+  const n = CURVE_POINTS;
   const c = new Float32Array(n);
   const room = CEILING - KNEE;
   for (let i = 0; i < n; i++) {
-    const x = Math.abs(-1 + (2 * i) / (n - 1));
-    c[i] = Math.sign(-1 + (2 * i) / (n - 1)) * (x <= KNEE ? x : KNEE + room * Math.tanh((x - KNEE) / room));
+    const v = -1 + (2 * i) / (n - 1);
+    const x = Math.abs(v);
+    c[i] = Math.sign(v) * (x <= KNEE ? x : KNEE + room * Math.tanh((x - KNEE) / room));
   }
   return c;
 }

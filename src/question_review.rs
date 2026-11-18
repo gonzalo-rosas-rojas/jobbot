@@ -19,7 +19,10 @@ mod tests {
             "databricks" => {
                 include_str!("../crates/jobbot-sources/tests/fixtures/questions/databricks.json")
             }
-            _ => include_str!("../crates/jobbot-sources/tests/fixtures/questions/datadog.json"),
+            "datadog" => {
+                include_str!("../crates/jobbot-sources/tests/fixtures/questions/datadog.json")
+            }
+            other => panic!("there is no questions fixture called {other:?}"),
         };
         parse_questions(&serde_json::from_str::<Value>(text).unwrap())
     }
@@ -49,6 +52,22 @@ mod tests {
                 AnswerEntry::new(&["=phone"], Some("+56 9 0000 0000")),
             ],
             consent_phrases: vec!["consent to the processing".to_string()],
+        }
+    }
+
+    /// Every group the review lists is one `bank` cannot answer: it has no answer for the label,
+    /// or none of its answers is among the options.
+    fn assert_no_bank_answer_is_listed(review: &Review, bank: &AnswerBank) {
+        for group in &review.groups {
+            let candidates = bank
+                .lookup(&group.sample_label)
+                .map(AnswerEntry::candidates)
+                .unwrap_or_default();
+            assert!(
+                candidates.is_empty() || group.bank_says == BankSays::NoMatchingOption,
+                "{}",
+                group.sample_label
+            );
         }
     }
 
@@ -88,7 +107,8 @@ mod tests {
     fn a_real_job_leaves_only_what_the_bank_cannot_answer() {
         let review = group_unanswered(&offers(&["databricks"]), &bank());
 
-        // 24 fields: 8 answered, 4 ignored, 3 EEOC, 9 groups.
+        // 24 fields: 8 answered, 4 ignored, 12 groups (the 3 EEOC ones among them: the filler
+        // never declines, so they are open on the real form).
         assert_eq!(
             review.answered, 8,
             "name, email, phone, resume x2, authorization"
@@ -97,9 +117,13 @@ mod tests {
             review.ignored, 4,
             "two hidden coordinates and the optional cover letter x2"
         );
-        assert_eq!(review.eeo_by_decline, 3);
-        assert_eq!(review.groups.len(), 9);
-        assert!(review.groups.iter().all(|group| group.required));
+        assert_eq!(review.eeo_by_decline, 0);
+        assert_eq!(review.groups.len(), 12);
+        assert_eq!(
+            review.groups.iter().filter(|group| !group.required).count(),
+            3,
+            "only the three EEOC questions are optional"
+        );
         assert_eq!(group(&review, "linkedin").bank_says, BankSays::Silent);
         assert_eq!(
             group(&review, "do you now or will you").bank_says,
@@ -124,17 +148,7 @@ mod tests {
             review.answered + review.ignored + review.eeo_by_decline + listed,
             total
         );
-        for group in &review.groups {
-            let candidates = bank()
-                .lookup(&group.sample_label)
-                .map(AnswerEntry::candidates)
-                .unwrap_or_default();
-            assert!(
-                candidates.is_empty() || group.bank_says == BankSays::NoMatchingOption,
-                "{}",
-                group.sample_label
-            );
-        }
+        assert_no_bank_answer_is_listed(&review, &bank());
     }
 
     #[test]
@@ -188,7 +202,13 @@ mod tests {
         assert_eq!(heard.kind, FieldKind::SingleSelect);
         assert_eq!(heard.option_count, 35);
         assert_eq!(heard.options.len(), MAX_OPTIONS);
-        // The authorization question has the bank's answer as its first option: answered.
+    }
+
+    #[test]
+    fn the_authorization_question_with_a_bank_answer_is_not_listed() {
+        let review = group_unanswered(&offers(&["datadog"]), &bank());
+
+        // It has the bank's answer as its first option: answered, so not among the open groups.
         assert!(!review.groups.iter().any(|group| {
             group
                 .normalized_label
@@ -197,8 +217,10 @@ mod tests {
     }
 
     #[test]
-    fn demographic_questions_with_a_decline_option_are_counted_apart() {
-        let review = group_unanswered(&offers(&["datadog"]), &bank());
+    fn with_the_decline_policy_demographic_questions_with_a_decline_option_are_counted_apart() {
+        let on = ReviewOptions { eeo_decline: true };
+
+        let review = group_unanswered_with(&offers(&["datadog"]), &bank(), on);
 
         assert_eq!(review.eeo_by_decline, 1);
         assert!(
@@ -265,16 +287,6 @@ mod tests {
         let review = group_unanswered(&offers(&["databricks", "datadog"]), &shipped);
 
         assert!(review.answered > 0);
-        for group in &review.groups {
-            let candidates = shipped
-                .lookup(&group.sample_label)
-                .map(AnswerEntry::candidates)
-                .unwrap_or_default();
-            assert!(
-                candidates.is_empty() || group.bank_says == BankSays::NoMatchingOption,
-                "{}",
-                group.sample_label
-            );
-        }
+        assert_no_bank_answer_is_listed(&review, &shipped);
     }
 }

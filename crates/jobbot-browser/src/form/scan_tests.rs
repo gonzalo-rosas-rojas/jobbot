@@ -1,10 +1,12 @@
 //! The field scan (`FIELD_JS`) against offline copies of real Greenhouse and Ashby forms.
 //! Browser tests run with `cargo test -p jobbot-browser --lib form::scan_tests -- --ignored --test-threads=1`.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use playwright_rs::{Browser, GotoOptions, Page, Playwright, WaitUntil};
 
+use super::apply::apply_action;
+use super::dropdown::TAG_OPTION_JS;
 use super::*;
 use jobbot_domain::answers::AnswerEntry;
 use jobbot_domain::fixtures::make_job_with;
@@ -101,9 +103,7 @@ struct Scanner {
 impl Scanner {
     async fn start() -> Scanner {
         let playwright = Playwright::launch().await.unwrap();
-        let browser = playwright
-            .chromium()
-            .launch_with_options(crate::launch::launch_options())
+        let browser = crate::launch::start(&playwright, crate::launch::launch_options())
             .await
             .unwrap();
         let page = browser.new_page().await.unwrap();
@@ -300,6 +300,13 @@ async fn ticked(scanner: &Scanner, ids: &[&str]) -> String {
     scanner.page.evaluate_value(&expression).await.unwrap()
 }
 
+/// A file that stands for the CV in `dir`; the fixtures only need something to attach.
+fn fake_cv(dir: &Path) -> PathBuf {
+    let cv = dir.join("cv.pdf");
+    std::fs::write(&cv, b"%PDF-1.4 fake").unwrap();
+    cv
+}
+
 const HEAR_IDS: [&str; 3] = ["question_2[]_1", "question_2[]_2", "question_2[]_3"];
 const EXPORT_IDS: [&str; 2] = ["question_3[]_1", "question_3[]_2"];
 
@@ -391,8 +398,7 @@ async fn ashby_checkbox_group_is_ticked_from_the_bank() {
 async fn an_open_checkbox_group_is_flagged_until_gonza_ticks_an_option() {
     let scanner = Scanner::start().await;
     let dir = tempfile::tempdir().unwrap();
-    let cv = dir.path().join("cv.pdf");
-    std::fs::write(&cv, b"%PDF-1.4 fake").unwrap();
+    let cv = fake_cv(dir.path());
     let job = make_job_with(|j| j.apply_url = fixture_url("greenhouse_form.html"));
     fill_application(
         &scanner.page,
@@ -410,26 +416,26 @@ async fn an_open_checkbox_group_is_flagged_until_gonza_ticks_an_option() {
     };
     let first: String = scanner
         .page
-        .evaluate_value(&flagged("question_2[]_1"))
+        .evaluate_value(&flagged(HEAR_IDS[0]))
         .await
         .unwrap();
     assert_eq!(first, "true");
     // Only the first option carries the mark.
     let second: String = scanner
         .page
-        .evaluate_value(&flagged("question_2[]_2"))
+        .evaluate_value(&flagged(HEAR_IDS[1]))
         .await
         .unwrap();
     assert_eq!(second, "false");
     scanner
         .page
-        .locator(r#"[id="question_2[]_3"]"#)
+        .locator(format!(r#"[id="{}"]"#, HEAR_IDS[2]))
         .check(None)
         .await
         .unwrap();
     let first: String = scanner
         .page
-        .evaluate_value(&flagged("question_2[]_1"))
+        .evaluate_value(&flagged(HEAR_IDS[0]))
         .await
         .unwrap();
     assert_eq!(first, "false");
@@ -442,8 +448,7 @@ async fn an_open_checkbox_group_is_flagged_until_gonza_ticks_an_option() {
 async fn greenhouse_dry_run_lists_each_open_question_once() {
     let scanner = Scanner::start().await;
     let dir = tempfile::tempdir().unwrap();
-    let cv = dir.path().join("cv.pdf");
-    std::fs::write(&cv, b"%PDF-1.4 fake").unwrap();
+    let cv = fake_cv(dir.path());
     let job = make_job_with(|j| j.apply_url = fixture_url("greenhouse_form.html"));
     let result = fill_application(
         &scanner.page,
@@ -687,8 +692,7 @@ async fn ashby_yes_no_answer_is_clicked_once_and_stays_selected() {
 async fn ashby_dry_run_presses_the_answer_and_flags_the_open_yes_no() {
     let scanner = Scanner::start().await;
     let dir = tempfile::tempdir().unwrap();
-    let cv = dir.path().join("cv.pdf");
-    std::fs::write(&cv, b"%PDF-1.4 fake").unwrap();
+    let cv = fake_cv(dir.path());
     let job = make_job_with(|j| j.apply_url = fixture_url("ashby_form.html"));
     let bank = AnswerBank {
         entries: vec![AnswerEntry::new(&["sponsorship"], Some("No"))],
@@ -848,8 +852,7 @@ async fn honeypot_inputs_are_not_fields_but_small_visible_ones_are() {
 async fn a_form_with_honeypots_is_filled_only_where_a_person_would_type() {
     let scanner = Scanner::start().await;
     let dir = tempfile::tempdir().unwrap();
-    let cv = dir.path().join("cv.pdf");
-    std::fs::write(&cv, b"%PDF-1.4 fake").unwrap();
+    let cv = fake_cv(dir.path());
     let job = make_job_with(|j| j.apply_url = fixture_url("honeypots.html"));
     let bank = AnswerBank {
         entries: vec![
@@ -1028,23 +1031,7 @@ fn first_name_bank() -> AnswerBank {
 
 /// Runs `fill_application` on the fixture at `url` in a fresh page, and returns what it answered.
 async fn fill_fixture(url: &str, mode: SubmitMode) -> anyhow::Result<SubmitResult> {
-    let scanner = Scanner::start().await;
-    let dir = tempfile::tempdir().unwrap();
-    let cv = dir.path().join("cv.pdf");
-    std::fs::write(&cv, b"%PDF-1.4 fake").unwrap();
-    let job = make_job_with(|j| j.apply_url = url.to_string());
-    let result = fill_application(
-        &scanner.page,
-        &job,
-        &cv,
-        &first_name_bank(),
-        mode,
-        &dir.path().join("shots"),
-        NavPolicy::LOCAL_TESTS,
-    )
-    .await;
-    scanner.stop().await;
-    result
+    fill_fixture_within(url, mode, APPLICATION_WALL).await
 }
 
 /// The click call can fail after the form went out (the click triggered a navigation, or the page
@@ -1088,8 +1075,7 @@ async fn fill_fixture_within(
 ) -> anyhow::Result<SubmitResult> {
     let scanner = Scanner::start().await;
     let dir = tempfile::tempdir().unwrap();
-    let cv = dir.path().join("cv.pdf");
-    std::fs::write(&cv, b"%PDF-1.4 fake").unwrap();
+    let cv = fake_cv(dir.path());
     let job = make_job_with(|j| j.apply_url = url.to_string());
     let result = fill_application_within(
         &scanner.page,
@@ -1229,8 +1215,7 @@ async fn an_option_is_tagged_only_if_it_is_still_the_judged_one() {
 async fn a_list_swapped_under_the_filler_never_gets_another_option_clicked() {
     let scanner = Scanner::start().await;
     let dir = tempfile::tempdir().unwrap();
-    let cv = dir.path().join("cv.pdf");
-    std::fs::write(&cv, b"%PDF-1.4 fake").unwrap();
+    let cv = fake_cv(dir.path());
     let job = make_job_with(|j| j.apply_url = fixture_url("swapped_list.html"));
     let bank = AnswerBank {
         entries: vec![AnswerEntry::new(&["school"], Some("Alpha University"))],
@@ -1273,8 +1258,7 @@ async fn a_list_swapped_under_the_filler_never_gets_another_option_clicked() {
 async fn the_submit_button_is_the_one_of_the_form_that_takes_the_cv() {
     let scanner = Scanner::start().await;
     let dir = tempfile::tempdir().unwrap();
-    let cv = dir.path().join("cv.pdf");
-    std::fs::write(&cv, b"%PDF-1.4 fake").unwrap();
+    let cv = fake_cv(dir.path());
     let job = make_job_with(|j| j.apply_url = fixture_url("submit_buttons.html"));
     let result = fill_application(
         &scanner.page,
@@ -1308,8 +1292,7 @@ async fn the_submit_button_is_the_one_of_the_form_that_takes_the_cv() {
 async fn a_form_with_only_other_services_buttons_has_no_submit_button() {
     let scanner = Scanner::start().await;
     let dir = tempfile::tempdir().unwrap();
-    let cv = dir.path().join("cv.pdf");
-    std::fs::write(&cv, b"%PDF-1.4 fake").unwrap();
+    let cv = fake_cv(dir.path());
     let job = make_job_with(|j| j.apply_url = fixture_url("submit_buttons.html"));
     scanner.open(&job.apply_url).await;
     scanner
@@ -1352,8 +1335,7 @@ async fn fill_dependent(
 ) -> (SubmitResult, [String; 3], String) {
     let scanner = Scanner::start().await;
     let dir = tempfile::tempdir().unwrap();
-    let cv = dir.path().join("cv.pdf");
-    std::fs::write(&cv, b"%PDF-1.4 fake").unwrap();
+    let cv = fake_cv(dir.path());
     let job = make_job_with(|j| j.apply_url = fixture_url("dependent_question.html"));
     let result = fill_application(
         &scanner.page,

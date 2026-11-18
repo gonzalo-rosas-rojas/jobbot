@@ -2,11 +2,11 @@
 // `#aprender`, `#sistema`, plus `/<job key>` while the drawer is open. A jump by key or by the bar and the opening of the drawer
 // each add one history entry (pushState); everything else (the camera settling after a scroll, a stop reached by the wheel)
 // only rewrites the current one (replaceState). A panel shown inside another page (`embedded`) never touches the history.
-// The route is { stop, job } and it is read with `routeOfHash` of core/store.js, the one that knows what a good address is.
+// The route is { stop, job } and it is read with `routeOfHash` of core/route.js, the one that knows what a good address is.
 
-import { hashOf, routeOfHash } from "../core/store.js";
+import { hashOf, routeOfHash } from "../core/route.js";
 
-/** createRouter({ embedded, win }) -> { write(stop, jobKey, { push }), back(), listen(fn), read() }. `win` is injectable for Node. */
+/** createRouter({ embedded, win }) -> { pushStop(stop, jobKey), replaceStop(stop, jobKey), back(), listen(fn), read() }. `win` is injectable for Node. */
 export function createRouter({ embedded = false, win = window } = {}) {
   let ignore = 0;                                  // pops that we caused ourselves (closing the drawer takes its entry back)
 
@@ -16,16 +16,26 @@ export function createRouter({ embedded = false, win = window } = {}) {
     return route && { stop: route.room, job: route.job };
   };
 
+  /** The address that says `stop` (and the open application, if any), or null when there is nothing to write: embedded, or it already says that. */
+  function addressFor(stop, jobKey) {
+    if (embedded) return null;
+    const hash = hashOf(stop, stop === "prologo" ? null : jobKey);
+    return win.location.hash === hash ? null : win.location.pathname + hash;
+  }
+
   return {
-    /** Writes the address for a stop (and the open application, if any); true when a new history entry was added. */
-    write(stop, jobKey = null, { push = false } = {}) {
-      if (embedded) return false;
-      const hash = hashOf(stop, stop === "prologo" ? null : jobKey);
-      if (win.location.hash === hash) return false;
-      const url = win.location.pathname + hash;
-      if (push) win.history.pushState(null, "", url);
-      else win.history.replaceState(null, "", url);
-      return push;
+    /** A jump or the opening of the drawer: the address for a stop is a NEW history entry. True when it was added. */
+    pushStop(stop, jobKey = null) {
+      const url = addressFor(stop, jobKey);
+      if (url === null) return false;
+      win.history.pushState(null, "", url);
+      return true;
+    },
+    /** Everything else (the camera settling, a step inside the drawer, a close): the address for a stop rewrites the current entry. Always false: no entry was added. */
+    replaceStop(stop, jobKey = null) {
+      const url = addressFor(stop, jobKey);
+      if (url !== null) win.history.replaceState(null, "", url);
+      return false;
     },
     /** Takes back the history entry the drawer added, so that "Back" does not open it again. */
     back() {

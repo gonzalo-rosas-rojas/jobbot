@@ -41,6 +41,12 @@ static RESUME_LABEL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)r[eé]sum[eé]|\bcv\b|curr[ií]culum").expect("valid resume regex")
 });
 
+/// True when a file input's label asks for the resume (`resume`, `résumé`, `CV`, `currículum`).
+/// The planner and the question review share this one test.
+pub fn is_resume_label(label: &str) -> bool {
+    RESUME_LABEL.is_match(label)
+}
+
 /// One form control as reported by the page scan (`FIELD_JS`). For a radio button, a button of a
 /// Yes/No toggle (`tag` is `button`, `kind` `radio`) or a checkbox of a group, `label` is the
 /// question of its group and `option` its own text ("Yes", "No, I do not need sponsorship");
@@ -139,17 +145,28 @@ impl FillPlan {
             return;
         }
         for member in picked {
-            if member.checked {
-                self.kept.push(member.idx);
-            } else {
-                self.actions.push(FillAction {
-                    idx: member.idx,
-                    label: label.to_string(),
-                    value: FillValue::Check,
-                });
-            }
+            self.check_or_keep(member.idx, label, member.checked);
         }
     }
+
+    /// Ticks the box `idx`, or only records it as kept when the page already shows it ticked (a
+    /// second click may undo it).
+    fn check_or_keep(&mut self, idx: usize, label: &str, checked: bool) {
+        if checked {
+            self.kept.push(idx);
+        } else {
+            self.actions.push(FillAction {
+                idx,
+                label: label.to_string(),
+                value: FillValue::Check,
+            });
+        }
+    }
+}
+
+/// True when `field` is the first of its group, which is where the whole group is decided.
+fn leads_group(members: &[&FieldInfo], field: &FieldInfo) -> bool {
+    members.first().map(|first| first.idx) == Some(field.idx)
 }
 
 /// The options of a group that the bank's answer names, by the rules of `options_named`.
@@ -190,7 +207,7 @@ pub fn plan_fields(fields: &[FieldInfo], bank: &AnswerBank, cv_pdf: &Path) -> Fi
         let label = field.label.trim();
         match field.kind.as_str() {
             "file" => {
-                if RESUME_LABEL.is_match(label) {
+                if is_resume_label(label) {
                     plan.actions.push(FillAction {
                         idx: field.idx,
                         label: label.to_string(),
@@ -200,95 +217,95 @@ pub fn plan_fields(fields: &[FieldInfo], bank: &AnswerBank, cv_pdf: &Path) -> Fi
                     plan.note_missing(label_or(label, "archivo"));
                 }
             }
-            "checkbox" => {
-                let members = choice_group(fields, field);
-                if members.len() >= 2 {
-                    // "Select all that apply": one decision for the whole group, taken at its
-                    // first option. The question says nothing about consent, so the allow list
-                    // plays no part: only an answer the bank gives ticks anything.
-                    if members.first().map(|first| first.idx) == Some(field.idx) {
-                        plan.answer_group(bank, label, &members, true);
-                    }
-                    // An option the page already ticked goes out as it is: when it signs him up
-                    // for something, he has to see it.
-                    if field.checked && signs_him_up_for_more(&field.option) {
-                        plan.note_pre_ticked(field.idx, label, &field.option);
-                    }
-                    continue;
-                }
-                if field.checked && signs_him_up_for_more(label) {
-                    plan.note_pre_ticked(field.idx, label, "");
-                    continue;
-                }
-                if !field.required {
-                    continue; // newsletters and the like are never ticked
-                }
-                // A box whose text names Hispanic or Latino answers the question left to Gonza,
-                // whatever the page captions it (a "privacy policy" caption over "Not Hispanic or
-                // Latino" was found by the fuzz body).
-                if mentions_hispanic(label) || mentions_hispanic(&field.option) {
-                    plan.note_missing(label_or(label, "checkbox"));
-                    continue;
-                }
-                if bank.is_consent(label) {
-                    if field.checked {
-                        plan.kept.push(field.idx);
-                    } else {
-                        plan.actions.push(FillAction {
-                            idx: field.idx,
-                            label: label.to_string(),
-                            value: FillValue::Check,
-                        });
-                    }
-                } else {
-                    plan.note_missing(label_or(label, "checkbox"));
-                }
-            }
+            "checkbox" => plan_checkbox(&mut plan, bank, fields, field),
             "radio" => {
                 // One decision per group, taken when its first button comes up.
                 let members = choice_group(fields, field);
-                if members.first().map(|first| first.idx) == Some(field.idx) {
+                if leads_group(&members, field) {
                     plan.answer_group(bank, label, &members, false);
                 }
             }
-            _ => {
-                let essay = is_essay_box(&field.tag, &field.kind, label);
-                let candidates = answer_entry(bank, label, essay)
-                    .map(AnswerEntry::candidates)
-                    .unwrap_or_default();
-                let Some(first) = candidates.first().cloned() else {
-                    if field.required {
-                        plan.note_missing(label_or(label, "campo sin etiqueta"));
-                    }
-                    continue;
-                };
-                // A date box, a number box or a control of a kind this planner does not know cannot
-                // take just any text: the question stays open (missing when required) instead of
-                // typing a word the page will reject.
-                if !takes_text(&field.kind, &first) {
-                    if field.required {
-                        plan.note_missing(label_or(label, "campo sin etiqueta"));
-                    }
-                    continue;
-                }
-                // Greenhouse's drop-downs are inputs, not selects: a one-line input keeps every
-                // option text to try (a plain text box then takes the first), a textarea cannot be
-                // a drop-down.
-                let value =
-                    if field.tag == "select" || (field.tag == "input" && candidates.len() > 1) {
-                        FillValue::Select(candidates)
-                    } else {
-                        FillValue::Text(first)
-                    };
-                plan.actions.push(FillAction {
-                    idx: field.idx,
-                    label: label.to_string(),
-                    value,
-                });
-            }
+            _ => plan_text(&mut plan, bank, field),
         }
     }
     plan
+}
+
+/// Plans one checkbox: a "select all that apply" group is answered from the bank; a box that stands
+/// alone is ticked only when it is required and is a consent the bank allows.
+fn plan_checkbox(plan: &mut FillPlan, bank: &AnswerBank, fields: &[FieldInfo], field: &FieldInfo) {
+    let label = field.label.trim();
+    let members = choice_group(fields, field);
+    if members.len() >= 2 {
+        // "Select all that apply": one decision for the whole group, taken at its
+        // first option. The question says nothing about consent, so the allow list
+        // plays no part: only an answer the bank gives ticks anything.
+        if leads_group(&members, field) {
+            plan.answer_group(bank, label, &members, true);
+        }
+        // An option the page already ticked goes out as it is: when it signs him up
+        // for something, he has to see it.
+        if field.checked && signs_him_up_for_more(&field.option) {
+            plan.note_pre_ticked(field.idx, label, &field.option);
+        }
+        return;
+    }
+    if field.checked && signs_him_up_for_more(label) {
+        plan.note_pre_ticked(field.idx, label, "");
+        return;
+    }
+    if !field.required {
+        return; // newsletters and the like are never ticked
+    }
+    // A box whose text names Hispanic or Latino answers the question left to Gonza,
+    // whatever the page captions it (a "privacy policy" caption over "Not Hispanic or
+    // Latino" was found by the fuzz body).
+    if mentions_hispanic(label) || mentions_hispanic(&field.option) {
+        plan.note_missing(label_or(label, "checkbox"));
+        return;
+    }
+    if bank.is_consent(label) {
+        plan.check_or_keep(field.idx, label, field.checked);
+    } else {
+        plan.note_missing(label_or(label, "checkbox"));
+    }
+}
+
+/// Plans a text box, a text area or a drop-down from the bank's answer to its label.
+fn plan_text(plan: &mut FillPlan, bank: &AnswerBank, field: &FieldInfo) {
+    let label = field.label.trim();
+    let essay = is_essay_box(&field.tag, &field.kind, label);
+    let candidates = answer_entry(bank, label, essay)
+        .map(AnswerEntry::candidates)
+        .unwrap_or_default();
+    let Some(first) = candidates.first().cloned() else {
+        if field.required {
+            plan.note_missing(label_or(label, "campo sin etiqueta"));
+        }
+        return;
+    };
+    // A date box, a number box or a control of a kind this planner does not know cannot
+    // take just any text: the question stays open (missing when required) instead of
+    // typing a word the page will reject.
+    if !takes_text(&field.kind, &first) {
+        if field.required {
+            plan.note_missing(label_or(label, "campo sin etiqueta"));
+        }
+        return;
+    }
+    // Greenhouse's drop-downs are inputs, not selects: a one-line input keeps every
+    // option text to try (a plain text box then takes the first), a textarea cannot be
+    // a drop-down.
+    let value = if field.tag == "select" || (field.tag == "input" && candidates.len() > 1) {
+        FillValue::Select(candidates)
+    } else {
+        FillValue::Text(first)
+    };
+    plan.actions.push(FillAction {
+        idx: field.idx,
+        label: label.to_string(),
+        value,
+    });
 }
 
 /// The options that make up one question, in page order: the radio buttons (or toggle buttons) or
@@ -546,9 +563,12 @@ pub fn mentions_hispanic(text: &str) -> bool {
     words(text).split(' ').any(is_hispanic_word)
 }
 
+/// How many words after a negation still count as negating Hispanic or Latino.
+const NEGATION_REACH_WORDS: usize = 3;
+
 /// True for an option such as "White (Not Hispanic or Latino)": it answers the Hispanic or Latino
 /// question as well, and Gonza keeps that one for himself, so it is never picked for him. A
-/// negation (not, non, no, than, excluding, except, without) within three words of Hispanic or
+/// negation (not, non, no, than, excluding, except, without) within `NEGATION_REACH_WORDS` (three) words of Hispanic or
 /// Latino covers "not of Hispanic origin", "Non-Latino", "I am not of Latino descent", "Other than
 /// Hispanic or Latino" and "White except Hispanic"; refusing too much only leaves the question for
 /// him.
@@ -561,7 +581,7 @@ pub fn claims_not_hispanic(option: &str) -> bool {
             "not" | "non" | "no" | "than" | "excluding" | "excluded" | "except" | "without"
         ) && tokens[i + 1..]
             .iter()
-            .take(3)
+            .take(NEGATION_REACH_WORDS)
             .any(|next| is_hispanic_word(next))
     })
 }
@@ -605,10 +625,15 @@ const BLOCKED_PHRASES: &[&str] = &[
     "just a moment",
 ];
 
+/// Page text as the phrase lists are written: lower case, with a typographic apostrophe made plain.
+fn lower_with_plain_apostrophes(text: &str) -> String {
+    text.to_lowercase().replace('\u{2019}', "'")
+}
+
 /// Reason (`captcha`, `login_required`, `blocked_page`) when the visible page text shows a wall
 /// that must never be bypassed; `None` for an ordinary application page.
 pub fn blocker_in_text(text: &str) -> Option<&'static str> {
-    let lower = text.to_lowercase().replace('\u{2019}', "'");
+    let lower = lower_with_plain_apostrophes(text);
     let has = |phrases: &[&str]| phrases.iter().any(|phrase| lower.contains(phrase));
     if has(CAPTCHA_PHRASES) {
         Some("captcha")
@@ -702,18 +727,18 @@ fn path_of(url: &str) -> String {
 /// stands. A phrase that was already on the page (a sidebar saying "Thanks for applying!") proves
 /// nothing, and neither does "we have not received your application".
 pub fn newly_confirmed(before: &PageSnapshot, after: &PageSnapshot) -> bool {
-    let (was, now) = (path_of(&before.url), path_of(&after.url));
+    let (was_path, now_path) = (path_of(&before.url), path_of(&after.url));
     let token_appeared = CONFIRMATION_URL_TOKENS
         .iter()
-        .any(|token| now.contains(token) && !was.contains(token));
-    let (was, now) = (
-        before.text.to_lowercase().replace('\u{2019}', "'"),
-        after.text.to_lowercase().replace('\u{2019}', "'"),
+        .any(|token| now_path.contains(token) && !was_path.contains(token));
+    let (was_text, now_text) = (
+        lower_with_plain_apostrophes(&before.text),
+        lower_with_plain_apostrophes(&after.text),
     );
     token_appeared
         || SUCCESS_PHRASES
             .iter()
-            .any(|phrase| affirmed(&now, phrase) && !affirmed(&was, phrase))
+            .any(|phrase| affirmed(&now_text, phrase) && !affirmed(&was_text, phrase))
 }
 
 /// The validation message that appeared after the click; one that was already showing is not
@@ -736,6 +761,21 @@ mod tests {
             option: option.into(),
             name: name.into(),
             checked: false,
+        }
+    }
+
+    #[test]
+    fn a_resume_label_is_recognised_in_english_and_spanish_and_only_as_a_word() {
+        for label in [
+            "Resume",
+            "Upload your résumé",
+            "CV",
+            "Adjunta tu currículum",
+        ] {
+            assert!(is_resume_label(label), "{label}");
+        }
+        for label in ["Cover letter", "Website", "Cvs of mine"] {
+            assert!(!is_resume_label(label), "{label}");
         }
     }
 

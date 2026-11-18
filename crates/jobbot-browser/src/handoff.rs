@@ -51,7 +51,7 @@ async fn inspect_page(
         let left = wall.saturating_sub(started.elapsed());
         let Ok(scanned) = tokio::time::timeout(left, page.evaluate(FIELD_JS, None::<&()>)).await
         else {
-            let _ = page.close().await;
+            // The caller closes the page, as it does after any other outcome.
             return Ok(FormInspection {
                 result: needs_gonza(
                     format!("page_error: la página no respondió en {} s", wall.as_secs()),
@@ -89,11 +89,10 @@ impl BrowserInspector {
         let playwright = Playwright::launch()
             .await
             .context("starting the Playwright driver")?;
-        let browser = playwright
-            .chromium()
-            .launch_with_options(crate::launch::guarded_launch_options(&egress))
-            .await
-            .context("launching Chromium")?;
+        let browser =
+            crate::launch::start(&playwright, crate::launch::guarded_launch_options(&egress))
+                .await
+                .context("launching Chromium")?;
         Ok(BrowserInspector {
             browser,
             _playwright: playwright,
@@ -130,7 +129,9 @@ impl FormInspector for BrowserInspector {
             APPLICATION_WALL,
         )
         .await;
-        let _ = page.close().await;
+        // The inspection is already in hand: the close only frees the tab, and a tab that stopped
+        // answering must not hold the run, so it is waited for at most as long as for a fill.
+        crate::form::close_within_limit(&page).await;
         inspection.map(|inspection| FormInspection {
             result: explain_tunnel_failure(inspection.result, &self.egress, mark),
             ..inspection
@@ -178,9 +179,7 @@ mod tests {
         );
         let job = make_job_with(|j| j.apply_url = url);
         let playwright = Playwright::launch().await.unwrap();
-        let browser = playwright
-            .chromium()
-            .launch_with_options(crate::launch::launch_options())
+        let browser = crate::launch::start(&playwright, crate::launch::launch_options())
             .await
             .unwrap();
         let page = browser.new_page().await.unwrap();

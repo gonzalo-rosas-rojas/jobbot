@@ -10,7 +10,7 @@ function rig({ stop = "hoy", drawerOpen = false, helpOpen = false, menuOpen = fa
   const log = [];
   const state = { stop, drawerOpen, helpOpen, menuOpen, paletteOpen, sheetOpen, row: null, job: null };
   const cursor = { move: (n) => log.push(["cursor.move", n]), clear: () => log.push(["cursor.clear"]), current: () => state.row, jobOf: () => state.job };
-  const drawer = { isOpen: () => state.drawerOpen, step: (n) => log.push(["drawer.step", n]), close: () => log.push(["drawer.close"]), open: (job, row) => log.push(["drawer.open", job, row]) };
+  const drawer = { isOpen: () => state.drawerOpen, step: (n) => log.push(["drawer.step", n]), closeAndRestore: () => log.push(["drawer.close"]), open: (job, row) => log.push(["drawer.open", job, row]) };
   const help = { isOpen: () => state.helpOpen, close: () => log.push(["help.close"]), toggle: () => log.push(["help.toggle"]) };
   const menu = { isOpen: () => state.menuOpen, close: () => log.push(["menu.close"]) };
   const palette = { isOpen: () => state.paletteOpen, open: () => log.push(["palette.open"]), close: () => log.push(["palette.close"]) };

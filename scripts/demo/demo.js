@@ -423,7 +423,9 @@
       pipeline: pipeline(list, m.metrics.sent_week),
       trust: trust(list, act),
       activity: act,
-      today: { tasks_total: withDue.length, tasks: withDue, emails_total: mailList.length, emails: mailList },
+      today: { tasks_total: withDue.length, tasks: withDue, emails_total: mailList.length, emails: mailList,
+               // the demo reads its mailbox every morning, so the warning on HOY never shows and "waiting" is never read: any number does
+               inbox: { imported_at: ago(2 * HOUR), waiting: 4 } },
       needs_gonza: listing(list.filter((a) => a.state === "needs_gonza" && !a.snoozedUntil).map(cardOf)),
       awaiting_approval: listing(list.filter((a) => a.state === "prepared" && a.shot && !a.approved && !a.snoozedUntil).map(cardOf)),
       snoozed: listing(list.filter((a) => a.snoozedUntil).map(cardOf)),   // a card put aside (POST /api/snooze) waits here until its day

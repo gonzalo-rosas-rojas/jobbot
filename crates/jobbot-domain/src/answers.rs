@@ -71,7 +71,9 @@ pub struct AnswerBank {
 /// words, so the job decides, not the label.
 const WORK_RIGHTS_LABELS: &str = "authorized to work|authorised to work|legally authorized|legally authorised|work authorization|work authorisation|eligible to work|eligibility to work|right to work|legally entitled|legally permitted|work permit|work rights|working rights|visa|sponsorship|sponsor|sponsored|immigration|citizenship|citizen|permanent resident";
 
-/// "Am I allowed to work there" labels, whose true answer for Australia is "No".
+/// "Am I allowed to work there" labels, whose true answer for Australia is "No". Most of these
+/// phrases are also in `WORK_RIGHTS_LABELS` (this list adds the "entitled/permitted/allowed to work"
+/// forms): when one of them is corrected in one list, check the other.
 const AUSTRALIA_AUTHORIZED: &str = "authorized to work|authorised to work|legally authorized|legally authorised|eligible to work|eligibility to work|right to work|rights to work|legally entitled|legally permitted|entitled to work|permitted to work|allowed to work|work rights|working rights";
 
 const SPONSORSHIP: &str = "sponsorship|sponsor|sponsored";
@@ -197,20 +199,32 @@ const NOT_SALARY_WORDS: [&str; 14] = [
     "referral",
 ];
 
-/// Whether the figure at `start..end` of `posting` is a bonus, an allowance or company money
-/// rather than pay: one of `NOT_SALARY_WORDS` in its sentence up to 30 characters before it, or
-/// right after it ("$75k sign-on"). A word further after it ("plus bonus") does not count.
-fn is_extra_money(posting: &str, start: usize, end: usize) -> bool {
-    let before = posting[..start].to_lowercase();
-    let sentence = before
+/// How many characters before a figure a `NOT_SALARY_WORDS` word still belongs to it.
+const EXTRA_MONEY_WINDOW_CHARS: usize = 30;
+
+/// Where the last sentence of `before` begins: after the last line break, or after the last `.`,
+/// `!` or `?` that ends a sentence (is followed by a space or closes the text).
+fn sentence_start(before: &str) -> usize {
+    before
         .rfind('\n')
         .into_iter()
         .chain(before.rfind(['.', '!', '?']).filter(|at| {
             before[at + 1..].starts_with(char::is_whitespace) || at + 1 == before.len()
         }))
         .max()
-        .map_or(0, |at| at + 1);
-    let skip = before[sentence..].chars().count().saturating_sub(30);
+        .map_or(0, |at| at + 1)
+}
+
+/// Whether the figure at `start..end` of `posting` is a bonus, an allowance or company money
+/// rather than pay: one of `NOT_SALARY_WORDS` in its sentence up to `EXTRA_MONEY_WINDOW_CHARS` before it, or
+/// right after it ("$75k sign-on"). A word further after it ("plus bonus") does not count.
+fn is_extra_money(posting: &str, start: usize, end: usize) -> bool {
+    let before = posting[..start].to_lowercase();
+    let sentence = sentence_start(&before);
+    let skip = before[sentence..]
+        .chars()
+        .count()
+        .saturating_sub(EXTRA_MONEY_WINDOW_CHARS);
     let near: String = before[sentence..].chars().skip(skip).collect();
     let after = posting[end..].trim_start().to_lowercase();
     NOT_SALARY_WORDS
@@ -272,21 +286,27 @@ const WILLING: &str = "willing|able to work|open to|happy to|excited|comfortable
 const NOT_WILLINGNESS: &str = "!commute|commuting|currently|located|live in|living|reside|distance|how many days|which office|preferred office|which location";
 
 impl AnswerBank {
+    /// A copy of the bank whose entries are `entries` followed by this bank's own, so the new ones
+    /// win (`lookup` takes the first match).
+    fn with_entries_first(&self, mut entries: Vec<AnswerEntry>) -> AnswerBank {
+        entries.extend(self.entries.iter().cloned());
+        AnswerBank {
+            entries,
+            consent_phrases: self.consent_phrases.clone(),
+        }
+    }
+
     /// A copy of the bank for a job in Australia where "are you willing to work in the office,
     /// in person or hybrid" is "Yes": the job would mean moving there, and on-site or remote both
     /// suit (2026-10-21). Questions about where the candidate lives today or how far they are from
     /// the office keep the bank's own answer.
     pub fn with_australian_on_site_answers(&self) -> AnswerBank {
         let willing = format!("{ON_SITE}&{WILLING}&{NOT_WILLINGNESS}");
-        let mut entries = vec![
+        let entries = vec![
             AnswerEntry::new(&[willing.as_str()], Some("Yes"))
                 .with_alternatives(&["Yes, I am", "Yes, I'm open to it"]),
         ];
-        entries.extend(self.entries.iter().cloned());
-        AnswerBank {
-            entries,
-            consent_phrases: self.consent_phrases.clone(),
-        }
+        self.with_entries_first(entries)
     }
 
     /// A copy of the bank for a job in Australia whose pay ask is `ask_aud` a year (see
@@ -309,10 +329,11 @@ impl AnswerBank {
             "aud|australian dollar&salary|compensation|remuneration|package|pay&{NOT_THE_YEARLY_ASK}"
         );
         // Everything else about pay: the USD answers further down must not reach it.
-        let rest = "salary|compensation|remuneration|pay expectation|expected pay|desired pay|aud";
+        let other_pay =
+            "salary|compensation|remuneration|pay expectation|expected pay|desired pay|aud";
         // A yes/no question about pay is not a figure: it stays with him, as in the file.
         let yes_or_no = "meet|meets|satisfy|satisfies|acceptable|comfortable|okay with|ok with|fine with|in line with|aligned with|align with|within the&salary|compensation|pay";
-        let mut entries = vec![
+        let entries = vec![
             AnswerEntry::new(&[yes_or_no], None),
             AnswerEntry::new(&[current_expectation], Some(text.as_str())),
             AnswerEntry::new(
@@ -324,13 +345,9 @@ impl AnswerBank {
                 &[expectation.as_str(), in_aud.as_str()],
                 Some(text.as_str()),
             ),
-            AnswerEntry::new(&[rest], None),
+            AnswerEntry::new(&[other_pay], None),
         ];
-        entries.extend(self.entries.iter().cloned());
-        AnswerBank {
-            entries,
-            consent_phrases: self.consent_phrases.clone(),
-        }
+        self.with_entries_first(entries)
     }
 
     /// A copy of the bank for a job in Australia, where Gonza has no work rights today (decided on
@@ -344,7 +361,7 @@ impl AnswerBank {
         let residence = format!("&{ASKS_ABOUT_RESIDENCE}");
         let chile = format!("chile|chilean&{WORK_RIGHTS_LABELS}");
         let negated = format!("{AUSTRALIA_AUTHORIZED}|{SPONSORSHIP}&{NEGATED_ASK}{residence}");
-        let both = format!("{AUSTRALIA_AUTHORIZED}&{SPONSORSHIP}{residence}");
+        let asks_both = format!("{AUSTRALIA_AUTHORIZED}&{SPONSORSHIP}{residence}");
         let no_rights = format!("{AUSTRALIA_AUTHORIZED}{residence}");
         let no_citizen = format!("citizen|permanent resident{residence}");
         let no_visa = format!(
@@ -356,7 +373,7 @@ impl AnswerBank {
         );
         // Whatever still names a visa, sponsorship or citizenship is left to him, except the
         // residence labels and the citizenship FIELD (the bank answers "Chile" there).
-        let rest = format!(
+        let other_work_rights = format!(
             "{WORK_RIGHTS_LABELS}{residence}&!country of citizenship|country of nationality|nationality"
         );
         // "In what countries do you have the unrestricted right to work?" (Elastic, 2026-10-21) asks
@@ -364,7 +381,7 @@ impl AnswerBank {
         let which_countries = format!(
             "in what countries|in which countries|what countries|which countries|in what country|in which country|which country|what country&{AUSTRALIA_AUTHORIZED}"
         );
-        let mut entries = vec![
+        let entries = vec![
             AnswerEntry::new(&[chile.as_str()], None),
             AnswerEntry::new(&[which_countries.as_str()], Some("Chile")),
             AnswerEntry::new(
@@ -374,7 +391,7 @@ impl AnswerBank {
                 Some(AUSTRALIA_VISA_STATUS),
             ),
             AnswerEntry::new(&[negated.as_str()], Some("No")),
-            AnswerEntry::new(&[both.as_str()], None),
+            AnswerEntry::new(&[asks_both.as_str()], None),
             AnswerEntry::new(
                 &[no_rights.as_str(), no_citizen.as_str(), no_visa.as_str()],
                 Some("No"),
@@ -385,13 +402,9 @@ impl AnswerBank {
                     "Yes, I require sponsorship",
                     "Yes, now and in the future",
                 ]),
-            AnswerEntry::new(&[rest.as_str()], None),
+            AnswerEntry::new(&[other_work_rights.as_str()], None),
         ];
-        entries.extend(self.entries.iter().cloned());
-        AnswerBank {
-            entries,
-            consent_phrases: self.consent_phrases.clone(),
-        }
+        self.with_entries_first(entries)
     }
 
     /// The first entry (in file order) with a pattern that appears as whole words in the label.
@@ -539,23 +552,29 @@ fn without_urls(label: &str) -> String {
         .join(" ")
 }
 
+/// Shortest word that can be the plural of a filler word ("boxes", "terms"): shorter ones ("is",
+/// "as", "us") end in `s` by themselves.
+const MIN_LEN_FOR_FILLER_PLURAL: usize = 4;
+
 /// True when the normalized `text` contains `phrase` and, once every occurrence of the phrase is
 /// taken out, only consent filler words are left (see `AnswerBank::is_consent`).
 fn says_only(text: &str, phrase: &str) -> bool {
     let phrase_words: Vec<&str> = phrase.split_whitespace().collect();
     let words: Vec<&str> = text.split_whitespace().collect();
-    let n = phrase_words.len();
-    if n == 0 {
-        return false;
-    }
-    let (last, head) = phrase_words.split_last().expect("n > 0");
+    without_phrase(&words, &phrase_words).is_some_and(|rest| only_filler(&rest))
+}
+
+/// `words` with every occurrence of `phrase` taken out; `None` when the phrase is empty or never
+/// appears. The phrase's last word may carry a plural `s`, as in `contains_phrase`.
+fn without_phrase<'a>(words: &[&'a str], phrase: &[&str]) -> Option<Vec<&'a str>> {
+    let n = phrase.len();
+    let (last, head) = phrase.split_last()?;
     let mut taken = vec![false; words.len()];
     let mut found = false;
     let mut i = 0;
     while i + n <= words.len() {
         let here = &words[i..i + n];
         let last_word = here[n - 1];
-        // The phrase's last word may carry a plural `s`, as in `contains_phrase`.
         if &here[..n - 1] == head
             && (last_word == *last || last_word.strip_suffix('s') == Some(last))
         {
@@ -566,15 +585,18 @@ fn says_only(text: &str, phrase: &str) -> bool {
             i += 1;
         }
     }
-    if !found {
-        return false;
-    }
-    let rest: Vec<&str> = words
-        .iter()
-        .zip(&taken)
-        .filter(|(_, taken)| !**taken)
-        .map(|(word, _)| *word)
-        .collect();
+    found.then(|| {
+        words
+            .iter()
+            .zip(&taken)
+            .filter(|(_, taken)| !**taken)
+            .map(|(word, _)| *word)
+            .collect()
+    })
+}
+
+/// True when every word of `rest` is consent filler, a plural of one, or a company possessive.
+fn only_filler(rest: &[&str]) -> bool {
     let mut k = 0;
     while k < rest.len() {
         let word = rest[k];
@@ -582,7 +604,7 @@ fn says_only(text: &str, phrase: &str) -> bool {
             k += 2; // "Cloudflare's": a company possessive
             continue;
         }
-        let plural_of_filler = word.len() >= 4
+        let plural_of_filler = word.len() >= MIN_LEN_FOR_FILLER_PLURAL
             && word
                 .strip_suffix('s')
                 .is_some_and(|stem| CONSENT_FILLER.contains(&stem));
@@ -771,10 +793,9 @@ mod tests {
 
     #[test]
     fn a_posting_whose_only_figures_are_not_pay_asks_for_the_level() {
-        let unpriced = australian_salary_ask("Software Engineer", "We are hiring.");
         assert_eq!(
             australian_salary_ask("Software Engineer", "We raised A$200,000 in grants"),
-            unpriced
+            AUSTRALIA_DEFAULT_ASK_AUD
         );
     }
 

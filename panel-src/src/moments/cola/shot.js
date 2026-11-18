@@ -11,9 +11,9 @@
 //   shot.show({ key: null })        the proposal has no capture: says so      shot.show(null)  nothing on screen: hides the plane
 //   shot.destroy()                  gives back the address of the picture
 
-import { h } from "../../core/dom.js";
+import { h, setText } from "../../core/dom.js";
 import { t, fmtDate } from "../../i18n/index.js";
-import { setText, setData, setHidden } from "../shared/util.js";
+import { setData, setHidden, isTime } from "../shared/util.js";
 
 const GRACE_MS = 3000;
 const HALO_AT = [260, 700]; // ms after the picture is loaded: the dark shade, then the warm one
@@ -62,7 +62,7 @@ export function createShot({ session }) {
     S.sig = sig;
     el.hidden = S.status === "off";
     setData(el, "state", S.status);
-    const at = S.preparedAt && Number.isFinite(Date.parse(S.preparedAt)) ? fmtDate(S.preparedAt, "datetime") : "";
+    const at = isTime(S.preparedAt) ? fmtDate(S.preparedAt, "datetime") : "";
     setText(caption, S.status === "ok" && at ? (S.size ? t("cola.shot.caption", { at, size: S.size }) : t("cola.shot.caption.plain", { at })) : "");
     setHidden(caption, !caption.textContent);
     setText(note, S.status === "none" ? t("cola.shot.none") : S.status === "error" ? t("cola.shot.error") : "");
@@ -87,9 +87,19 @@ export function createShot({ session }) {
     } else {
       plane.replaceChildren();
     }
-    setHidden(plane, S.status === "none" || S.status === "error");
-    setHidden(stack, S.status === "none" || S.status === "error");
+    const noPlane = S.status === "none" || S.status === "error";
+    setHidden(plane, noPlane);
+    setHidden(stack, noPlane);
     halo(S.status === "loading" || S.status === "ok", S.status === "ok" && S.size !== "");
+  }
+
+  /** Nothing to draw for any proposal: forget the picture and the one in flight, and show `status` ("off": no proposal on screen; "none": it has no capture). */
+  function clear(status) {
+    S.seq += 1;
+    revoke();
+    S.key = null;
+    S.status = status;
+    paint();
   }
 
   async function load(key) {
@@ -97,7 +107,7 @@ export function createShot({ session }) {
     S.status = "loading";
     paint();
     let blob = null;
-    try { blob = typeof session.blob === "function" ? await session.blob("/api/shot?key=" + encodeURIComponent(key)) : null; } catch (e) { blob = null; }
+    try { blob = typeof session.blob === "function" ? await session.blob("/api/shot?key=" + encodeURIComponent(key)) : null; } catch { blob = null; } // a failed fetch is shown as the "error" state below; the cause is the session's to report
     if (S.dead || mine !== S.seq) return; // another proposal is on screen now: do not even make the address
     if (blob) { S.url = URL.createObjectURL(blob); S.status = "ok"; } else S.status = "error";
     paint();
@@ -108,29 +118,14 @@ export function createShot({ session }) {
   return {
     el,
     show(spec) {
-      if (!spec) {
-        S.seq += 1;
-        revoke();
-        S.key = null;
-        S.status = "off";
-        paint();
-        return;
-      }
+      if (!spec) { clear("off"); return; }
       S.preparedAt = spec.preparedAt || null;
-      if (!spec.key) {
-        S.seq += 1;
-        revoke();
-        S.key = null;
-        S.status = "none";
-        paint();
-        return;
-      }
+      if (!spec.key) { clear("none"); return; }
       if (S.key === spec.key && (S.status === "ok" || S.status === "loading" || S.status === "error")) { S.sig = ""; paint(); return; }
       revoke();
       S.key = spec.key;
       load(spec.key);
     },
-    state: () => ({ key: S.key, status: S.status, size: S.size }),
     destroy() {
       S.dead = true;
       halo(false, false);

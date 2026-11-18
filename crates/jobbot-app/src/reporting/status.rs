@@ -140,12 +140,20 @@ pub fn stamp_with_age(at: DateTime<Utc>, now: DateTime<Utc>, name_the_zone: bool
 
 /// The `Última corrida` lines of `status`, from `meta.last_run_*`.
 pub fn describe_last_run(store: &dyn Store, now: DateTime<Utc>) -> Result<String> {
-    let at = store
-        .get_meta("last_run_at")?
-        .and_then(|text| DateTime::parse_from_rfc3339(&text).ok())
-        .map(|time| time.with_timezone(&Utc));
-    let Some(at) = at else {
-        return Ok("Última corrida: ninguna todavía (la tarea programada la anota al terminar cada run-daily).".to_string());
+    let at = match store.get_meta("last_run_at")? {
+        None => {
+            return Ok("Última corrida: ninguna todavía (la tarea programada la anota al terminar cada run-daily).".to_string());
+        }
+        // A stamp that is there but unreadable is not "no run yet": say what was stored.
+        Some(text) => match DateTime::parse_from_rfc3339(&text) {
+            Ok(time) => time.with_timezone(&Utc),
+            Err(_) => {
+                return Ok(format!(
+                    "Última corrida: fecha ilegible ({})",
+                    plain_line(&text)
+                ));
+            }
+        },
     };
     let result = store.get_meta("last_run_result")?.unwrap_or_default();
     let result = match result.as_str() {
@@ -183,6 +191,7 @@ pub fn describe_steps(steps: &serde_json::Value) -> String {
                 "stop" => "omitido (STOP)".to_string(),
                 "window_closed" => "omitido (ventana cerrada)".to_string(),
                 "after_error" => "omitido (tras un error)".to_string(),
+                "not_due" => "no tocaba".to_string(),
                 "error" => "con error".to_string(),
                 other => format!("omitido ({other})"),
             }

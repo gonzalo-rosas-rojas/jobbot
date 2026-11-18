@@ -85,6 +85,11 @@ impl ApplicationRow {
     pub fn waiting_reason(&self) -> Option<&str> {
         self.needs_reason.as_deref().or(self.note.as_deref())
     }
+
+    /// `waiting_reason`, or "sin motivo" when the row has neither a reason nor a note.
+    pub fn waiting_reason_or_default(&self) -> &str {
+        self.waiting_reason().unwrap_or("sin motivo")
+    }
 }
 
 /// One line of an application's history (`events` table).

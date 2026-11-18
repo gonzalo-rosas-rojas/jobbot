@@ -169,15 +169,36 @@ pub fn parse_exclusions(text: &str) -> Result<Exclusions, RulesError> {
 /// would let every salary pass the floor check, a NaN weight would slip past the sum check. A
 /// negative weight can make the sum 100 while the score leaves the 0 to 100 range.
 fn check_numbers(criteria: &Criteria) -> Result<(), RulesError> {
+    check_finite(criteria)?;
+    check_non_negative_weights(criteria)?;
+    check_ranges(criteria)
+}
+
+/// The score's top: weights add up to it and thresholds cannot pass it.
+const SCORE_MAX: f64 = 100.0;
+
+/// The six weights with the names `criteria.toml` gives them.
+fn weight_fields(criteria: &Criteria) -> [(&'static str, f64); 6] {
     let weights = &criteria.weights;
-    let weight_fields = [
+    [
         ("weights.fit", weights.fit),
         ("weights.compensation", weights.compensation),
         ("weights.stability", weights.stability),
         ("weights.learning", weights.learning),
         ("weights.interview_style", weights.interview_style),
         ("weights.other", weights.other),
-    ];
+    ]
+}
+
+/// The optional apply threshold of the extra places, when the file sets one.
+fn extra_threshold(criteria: &Criteria) -> Option<(&'static str, f64)> {
+    criteria
+        .extra_open_apply_threshold
+        .map(|value| ("extra_open_apply_threshold", value))
+}
+
+/// Every number of the file is finite (not `nan`, not `inf`).
+fn check_finite(criteria: &Criteria) -> Result<(), RulesError> {
     let (target_low, target_high) = criteria.target_monthly_usd;
     let other_fields = [
         ("floor_monthly_usd", criteria.floor_monthly_usd),
@@ -185,23 +206,31 @@ fn check_numbers(criteria: &Criteria) -> Result<(), RulesError> {
         ("target_monthly_usd", target_high),
         ("apply_threshold", criteria.apply_threshold),
     ];
-    let extra_threshold = criteria
-        .extra_open_apply_threshold
-        .map(|value| ("extra_open_apply_threshold", value));
-    for (field, value) in weight_fields
+    for (field, value) in weight_fields(criteria)
         .into_iter()
         .chain(other_fields)
-        .chain(extra_threshold)
+        .chain(extra_threshold(criteria))
     {
         if !value.is_finite() {
             return Err(RulesError::NotFinite { field });
         }
     }
-    for (field, value) in weight_fields {
+    Ok(())
+}
+
+/// No weight is below zero.
+fn check_non_negative_weights(criteria: &Criteria) -> Result<(), RulesError> {
+    for (field, value) in weight_fields(criteria) {
         if value < 0.0 {
             return Err(RulesError::NegativeWeight { field });
         }
     }
+    Ok(())
+}
+
+/// The floor, the thresholds and the posting age are inside the range that makes them mean
+/// something.
+fn check_ranges(criteria: &Criteria) -> Result<(), RulesError> {
     // A floor of 0 lets every salary through, a threshold outside the score's range sends every
     // posting or none, and a posting age of 0 days would have the prune withdraw them all.
     if criteria.floor_monthly_usd <= 0.0 {
@@ -212,9 +241,9 @@ fn check_numbers(criteria: &Criteria) -> Result<(), RulesError> {
     }
     let thresholds = [("apply_threshold", criteria.apply_threshold)]
         .into_iter()
-        .chain(extra_threshold);
+        .chain(extra_threshold(criteria));
     for (field, value) in thresholds {
-        if !(0.0..=100.0).contains(&value) {
+        if !(0.0..=SCORE_MAX).contains(&value) {
             return Err(RulesError::OutOfRange {
                 field,
                 range: "from 0 to 100",
@@ -235,7 +264,7 @@ pub fn parse_criteria(text: &str) -> Result<Criteria, RulesError> {
     let criteria: Criteria = toml::from_str(text).map_err(RulesError::Criteria)?;
     check_numbers(&criteria)?;
     let total = criteria.weights.total();
-    if (total - 100.0).abs() > 1e-9 {
+    if (total - SCORE_MAX).abs() > 1e-9 {
         return Err(RulesError::WeightsDoNotSum(total));
     }
     let (low, high) = criteria.target_monthly_usd;
@@ -271,7 +300,8 @@ other = 10
     fn minimal_criteria_gets_defaults() {
         let c = parse_criteria(MINIMAL).unwrap();
         assert_eq!(c.warmup_days, 14);
-        assert_eq!((c.review_dry_runs_per_run, c.max_posting_age_days), (5, 45));
+        assert_eq!(c.review_dry_runs_per_run, 5);
+        assert_eq!(c.max_posting_age_days, 45);
         assert!(c.priority_companies.is_empty() && c.skills.is_empty());
         assert!(c.extra_open_places.is_empty());
         assert_eq!(c.extra_open_apply_threshold, None);
@@ -297,12 +327,6 @@ other = 10
         assert_eq!(
             parse_criteria(&text).unwrap().extra_open_apply_threshold,
             Some(25.0)
-        );
-        let text = format!("extra_open_apply_threshold = nan\n{MINIMAL}");
-        let err = parse_criteria(&text).unwrap_err();
-        assert!(
-            err.to_string().contains("extra_open_apply_threshold"),
-            "{err}"
         );
     }
 
@@ -330,6 +354,11 @@ other = 10
             ),
             ("fit = 50", "fit = nan", "weights.fit"),
             ("other = 10", "other = inf", "weights.other"),
+            (
+                "floor_monthly_usd = 1",
+                "floor_monthly_usd = 1\nextra_open_apply_threshold = nan",
+                "extra_open_apply_threshold",
+            ),
         ] {
             let err = parse_criteria(&MINIMAL.replace(from, to)).unwrap_err();
             assert!(

@@ -13,6 +13,7 @@
 // when it is read and left out when the settings are written again.
 
 import { local } from "./store.js";
+import { pointsOf } from "./points.js";
 
 const MOTION_MODES = ["auto", "calm", "full"];
 export const DEFAULT_BATCH_MIN = 85;
@@ -21,8 +22,8 @@ export const DEFAULTS = Object.freeze({ sound: false, motion: "auto", batchMin: 
 
 /** A threshold from storage or a field: a number or the text of one becomes a whole score inside the range; anything else is the default. */
 function cleanBatchMin(v) {
-  const n = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : NaN;
-  if (!Number.isFinite(n)) return DEFAULT_BATCH_MIN;
+  const n = pointsOf(v);
+  if (n === null) return DEFAULT_BATCH_MIN;
   return Math.min(BATCH_MIN_RANGE[1], Math.max(BATCH_MIN_RANGE[0], Math.round(n)));
 }
 
@@ -55,7 +56,11 @@ export function createSettings({ store = local, search = "" } = {}) {
   const overrides = overridesOf(search);
   const listeners = new Set();
 
-  const effective = (key) => (key in overrides ? overrides[key] : key in saved ? saved[key] : DEFAULTS[key]);
+  function effective(key) {
+    if (key in overrides) return overrides[key];
+    if (key in saved) return saved[key];
+    return DEFAULTS[key];
+  }
   const all = () => Object.fromEntries(KEYS.map((k) => [k, effective(k)]));
 
   function emit(key, value, previous) {
@@ -73,14 +78,19 @@ export function createSettings({ store = local, search = "" } = {}) {
     /** `set("motion", "calm")` or `set({ motion: "calm", sound: true })`. Saved; listeners hear every value that changed. */
     set(keyOrPatch, value) {
       const patch = typeof keyOrPatch === "string" ? { [keyOrPatch]: value } : keyOrPatch || {};
+      let named = false;
       for (const key of Object.keys(patch)) {
         if (!KEYS.includes(key)) continue;
         const next = CLEAN[key](patch[key]);
         const previous = effective(key);
+        named = true;
         saved[key] = next;
         delete overrides[key];
-        try { store.set("settings", JSON.stringify(saved)); } catch (e) { /* in memory only */ }
         if (next !== previous) emit(key, next, previous);
+      }
+      // once per patch, and also when no value changed: a write that failed before is tried again, and a leftover key leaves the store
+      if (named) {
+        try { store.set("settings", JSON.stringify(saved)); } catch (e) { /* in memory only */ }
       }
       return all();
     },

@@ -1,5 +1,5 @@
 // Acceptance test of the encargo docs/encargos/idempotency-key-en-cada-post.md. The panel server runs a POST once per attempt id
-// (`Idempotency-Key`, crates/jobbot-panel/src/http.rs: attempt_id and once; ADR 0006): a repeat of the id gets the first reply back,
+// (`Idempotency-Key`, crates/jobbot-panel/src/http/attempts.rs: attempt_id and once; ADR 0006): a repeat of the id gets the first reply back,
 // marked `Idempotent-Replayed`, and the action runs once. The page has to send that id on every POST the session makes: a new one for
 // every action Gonza asks for, and the same one, with the same body, when the page sends that action again (one more try after a request
 // that got no answer, or the same action asked again while the first is in flight). A GET carries none. Everything is a fake server
@@ -12,7 +12,7 @@ import { createSession } from "../src/core/session.js";
 
 const SNAPSHOT = JSON.parse(readFileSync(new URL("./fixtures/snapshot.rich.json", import.meta.url), "utf8"));
 const HEADER = "Idempotency-Key";
-// What the server takes (http.rs, attempt_id): 1 to 128 visible ASCII characters, no quote. The page's ids are random and at least
+// What the server takes (http/attempts.rs, attempt_id): 1 to 128 visible ASCII characters, no quote. The page's ids are random and at least
 // 16 characters long (a crypto.randomUUID() is 36): the server keeps them a week, across reloads of the page.
 const WELL_FORMED = /^[\x21\x23-\x7e]{16,128}$/;
 

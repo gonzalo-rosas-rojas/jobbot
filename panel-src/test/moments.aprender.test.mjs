@@ -5,7 +5,7 @@ import { setLang, setTimeZone } from "../src/i18n/index.js";
 import esAprender from "../src/i18n/es/aprender.js";
 import enAprender from "../src/i18n/en/aprender.js";
 import { model, stopCounts } from "../src/core/model.js";
-import { aprenderView, numWord, keyShown, MISSING_ROWS, TOPIC_ROWS, SPELLED_UP_TO } from "../src/moments/aprender/view.js";
+import { aprenderView, numWord, keyOf, MISSING_ROWS, TOPIC_ROWS, SPELLED_UP_TO } from "../src/moments/aprender/view.js";
 import { missingOf, parseDossier } from "../src/moments/aprender/data.js";
 import { KEYS } from "../src/ui/keys.js";
 import { richAprender, bareAprender, hostileAprender, DOSSIER_MD } from "./helpers/aprender-fixture.mjs";
@@ -266,10 +266,10 @@ test("both languages: every string exists, none is a missing key, and es and en 
 });
 
 test("the keys the page shows are the ones of the key table", () => {
-  assert.equal(keyShown("resolve"), "u");
-  assert.equal(keyShown("open"), "↵");
-  assert.equal(keyShown("link"), "o");
-  assert.throws(() => keyShown("nope"));
+  assert.equal(keyOf("resolve"), "u");
+  assert.equal(keyOf("open"), "↵");
+  assert.equal(keyOf("link"), "o");
+  assert.throws(() => keyOf("nope"), /^Error: aprender: "nope" is not an action of the key table$/);
   const aprender = KEYS.filter((k) => (k.stops || []).includes("aprender")).map((k) => k.id);
   for (const id of ["move", "open", "resolve", "link", "grade", "reveal"]) assert.ok(aprender.includes(id), `${id} works in APRENDER`);
 });

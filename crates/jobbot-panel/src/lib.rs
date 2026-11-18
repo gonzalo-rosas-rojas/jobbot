@@ -15,6 +15,8 @@ use chrono::{DateTime, Utc};
 
 use jobbot_app::paths::Paths;
 use jobbot_app::ports::store::{LearnRepo, Store};
+use jobbot_app::profile::load_criteria;
+use jobbot_domain::rules::Criteria;
 use scheduler::{TaskAnswer, TaskQuery, TaskWatch};
 
 /// Where the panel gets the time. `jobbot panel` passes "start time plus time elapsed", like the
@@ -66,6 +68,28 @@ impl Panel {
 
     pub fn now(&self) -> DateTime<Utc> {
         (self.clock)()
+    }
+
+    /// `profile/criteria.toml`, or `None` when the page has to be drawn without it. A file that is
+    /// missing is no news (demo mode and the tests run without one); a file that exists and cannot
+    /// be read or parsed is logged, so a broken edit does not silently change what the page shows.
+    pub(crate) fn criteria(&self) -> Option<Criteria> {
+        let path = self.paths.profile_dir.join("criteria.toml");
+        match path.try_exists() {
+            Ok(true) => {}
+            Ok(false) => return None,
+            Err(err) => {
+                tracing::warn!(error = %err, "criteria.toml cannot be looked at, the page is drawn without it");
+                return None;
+            }
+        }
+        match load_criteria(&path) {
+            Ok(criteria) => Some(criteria),
+            Err(err) => {
+                tracing::warn!(error = %format!("{err:#}"), "criteria.toml is unreadable, the page is drawn without it");
+                None
+            }
+        }
     }
 }
 
@@ -295,13 +319,8 @@ mod page_tests {
             .and_then(|rest| rest.split("</title>").next())
             .expect("the page has a title")
             .to_lowercase();
+        // Exactly "panel": a word that says what this is cannot fit in it.
         assert_eq!(title, "panel");
-        for word in ["jobbot", "empleo", "postula", "job", "trabajo"] {
-            assert!(
-                !title.contains(word),
-                "the title {title:?} must not say {word:?}"
-            );
-        }
     }
 
     /// The page is one HTML file with exactly two scripts (the early theme/language, then the
@@ -441,7 +460,7 @@ mod page_tests {
     }
 
     #[test]
-    fn papel_changes_only_the_sheet_and_no_hex_is_pure_black_or_white() {
+    fn papel_changes_only_the_sheet_ink_and_line() {
         for name in theme_tokens(PAPEL).keys() {
             assert!(
                 name.starts_with("--sheet")
@@ -450,6 +469,10 @@ mod page_tests {
                 "{name} escapes the sheet in Papel"
             );
         }
+    }
+
+    #[test]
+    fn the_palette_has_no_pure_black_or_white() {
         let style = PAGE
             .split("<style nonce=\"__NONCE__\">")
             .nth(1)

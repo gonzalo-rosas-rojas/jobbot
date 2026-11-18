@@ -203,9 +203,9 @@ test("COLA, the PROCESOS drawer and the common drawer write a factor's points ov
   fresh();
   // the data is only half of it: COLA's sheet draws the text of each bar instead of gluing points and maximum again, and the common drawer
   // draws the rows of scoreRows instead of its own loop
-  const colaRender = source("moments/cola/render.js");
-  assert.match(colaRender, /\bb\.text\b/, "cola/render.js draws b.text");
-  assert.doesNotMatch(colaRender, /["'`] \/ ["'`]|\} \/ \$\{/, "cola/render.js writes no \" / \" of its own");
+  const colaBars = source("moments/cola/factors.js");
+  assert.match(colaBars, /\bb\.text\b/, "cola/factors.js draws b.text");
+  assert.doesNotMatch(colaBars, /["'`] \/ ["'`]|\} \/ \$\{/, "cola/factors.js writes no \" / \" of its own");
   const score = source("ui/detail/score.js");
   assert.ok(score.includes("export function scoreView"), "ui/detail/score.js still exports scoreView");
   assert.match(score.slice(score.indexOf("export function scoreView")), /\bscoreRows\(/, "scoreView draws scoreRows");
@@ -314,7 +314,7 @@ function sources(dir, out = []) {
   }
   return out;
 }
-const DEFINES = /^export (?:function|const) (?:clean|safeHref|sync|setText|setData|setHidden|setTitle)\b/m;
+const DEFINES = /^export (?:function|const) (?:clean|safeHref|sync|setData|setHidden|setTitle)\b/m;
 const SHARED = path.join(SRC, "moments", "shared", "util.js");
 
 // Two copies of a function do the same thing, so no call can tell them apart: the copy is a fact of the source, and the source is what this reads.

@@ -8,8 +8,10 @@ use chrono::{DateTime, SecondsFormat, TimeDelta, Utc};
 use rusqlite::{Connection, OptionalExtension, params};
 
 pub use jobbot_app::ports::store::{GapRow, PrepStats, TopicProgress};
-use jobbot_domain::prep::sm2::sm2;
+use jobbot_domain::prep::sm2::{INITIAL_EASE, sm2};
 use jobbot_domain::prep::{BankError, Question, load_questions};
+
+use crate::pragmas::{BUSY_TIMEOUT, use_wal};
 
 /// What the drill's store can fail with.
 #[derive(Debug, thiserror::Error)]
@@ -38,9 +40,17 @@ CREATE TABLE IF NOT EXISTS extra_cards (
 );
 ";
 
+/// A topic is weak when the average of its recent grades is below this.
+const WEAK_AVERAGE_BELOW: f64 = 4.0;
+
 /// Dates are stored as UTC text in one fixed format, so comparing the strings compares the instants.
 fn iso(t: DateTime<Utc>) -> String {
     t.to_rfc3339_opts(SecondsFormat::Secs, true)
+}
+
+/// A card is due when it was never graded, or its due date has come (`cutoff` is `iso(now)`).
+fn is_due(due: Option<&String>, cutoff: &str) -> bool {
+    due.is_none_or(|due| due.as_str() <= cutoff)
 }
 
 pub struct PrepStore {
@@ -50,11 +60,9 @@ pub struct PrepStore {
 impl PrepStore {
     pub fn open(path: &Path) -> Result<PrepStore> {
         let conn = Connection::open(path)?;
-        conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        conn.busy_timeout(BUSY_TIMEOUT)?;
         // Same rules as the main database; a version stamp arrives with this database's first migration.
-        let _ = conn
-            .pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get::<_, String>(0));
-        conn.pragma_update(None, "synchronous", "FULL")?;
+        use_wal(&conn)?;
         PrepStore::with_connection(conn)
     }
 
@@ -142,10 +150,9 @@ impl PrepStore {
             if topic.is_some_and(|t| q.topic != t) {
                 continue;
             }
-            match due_dates.get(&q.id) {
-                None => found.push((true, String::new(), index)),
-                Some(due) if *due <= cutoff => found.push((false, due.clone(), index)),
-                Some(_) => {}
+            let due = due_dates.get(&q.id);
+            if is_due(due, &cutoff) {
+                found.push((due.is_none(), due.cloned().unwrap_or_default(), index));
             }
         }
         found.sort();
@@ -184,7 +191,7 @@ impl PrepStore {
                 },
             )
             .optional()?;
-        let (ease, interval, reps) = current.unwrap_or((2.5, 0, 0));
+        let (ease, interval, reps) = current.unwrap_or((INITIAL_EASE, 0, 0));
         let (ease, interval, reps) = sm2(ease, interval, reps, grade);
         // `interval` is capped by `sm2`, but a stored value from before the cap may not be: the
         // date arithmetic must not be able to panic whatever the row says.
@@ -229,7 +236,7 @@ impl PrepStore {
                 let sum: f64 = grades.iter().map(|&g| f64::from(g)).sum();
                 (topic, sum / grades.len() as f64)
             })
-            .filter(|(_, average)| *average < 4.0)
+            .filter(|(_, average)| *average < WEAK_AVERAGE_BELOW)
             .collect();
         averages.sort_by(|a, b| a.1.total_cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
         averages.truncate(limit);
@@ -268,14 +275,12 @@ impl PrepStore {
                     due: 0,
                 });
             entry.total += 1;
-            match due_dates.get(&q.id) {
-                None => entry.due += 1,
-                Some(due) => {
-                    entry.seen += 1;
-                    if *due <= cutoff {
-                        entry.due += 1;
-                    }
-                }
+            let due = due_dates.get(&q.id);
+            if due.is_some() {
+                entry.seen += 1;
+            }
+            if is_due(due, &cutoff) {
+                entry.due += 1;
             }
         }
         Ok(by_topic.into_values().collect())
@@ -405,17 +410,40 @@ mod tests {
     }
 
     #[test]
-    fn weak_topics_and_stats() {
+    fn weak_topics_names_the_topic_whose_average_is_below_four() {
+        let store = PrepStore::in_memory().unwrap();
+        let qs = bank();
+        store.grade(&qs[0], 1, *NOW).unwrap();
+        store.grade(&qs[1], 2, *NOW).unwrap();
+        store.grade(&qs[2], 5, *NOW).unwrap();
+        assert_eq!(
+            store.weak_topics(3, 10).unwrap(),
+            vec![("javascript".to_string(), 1.5)]
+        );
+    }
+
+    #[test]
+    fn topic_progress_counts_due_cards_the_way_stats_does_including_the_due_instant() {
+        let store = PrepStore::in_memory().unwrap();
+        let qs = bank();
+        store.grade(&qs[0], 5, *NOW).unwrap(); // due one day later, exactly
+        let due_instant = *NOW + TimeDelta::days(1);
+        for (when, due_cards) in [(*NOW, 2), (due_instant, 3)] {
+            let by_topic = store.topic_progress(&qs, when).unwrap();
+            let progress_due: usize = by_topic.iter().map(|t| t.due).sum();
+            assert_eq!(progress_due, due_cards);
+            assert_eq!(store.stats(&qs, when).unwrap().due, due_cards);
+        }
+    }
+
+    #[test]
+    fn stats_counts_seen_and_due_cards() {
         let store = PrepStore::in_memory().unwrap();
         let qs = bank();
         let now = *NOW;
         store.grade(&qs[0], 1, now).unwrap();
         store.grade(&qs[1], 2, now).unwrap();
         store.grade(&qs[2], 5, now).unwrap();
-        assert_eq!(
-            store.weak_topics(3, 10).unwrap(),
-            vec![("javascript".to_string(), 1.5)]
-        );
         assert_eq!(
             store.stats(&qs, now).unwrap(),
             PrepStats {

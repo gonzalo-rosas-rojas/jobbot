@@ -17,17 +17,18 @@ import { createDrawer } from "../src/ui/drawer.js";
 import { createToast } from "../src/ui/toast.js";
 import { installKeys } from "../src/ui/keys.js";
 import { createAnnouncer } from "../src/ui/announce.js";
-import { h, fill } from "../src/core/dom.js";
+import { h, fill, trackHeldKeys } from "../src/core/dom.js";
 import { stopCounts } from "../src/core/model.js";
 import hoy from "../src/moments/hoy.js";
 import { createCursor } from "../src/ui/cursor.js";
 import { createMenu } from "../src/ui/menu.js";
 import { createStage, clockText } from "../src/stage/stage.js";
-import { mulberry32 } from "../src/stage/skyline.js";
+import { mulberry32 } from "../src/core/random.js";
 import { createHud } from "../src/ui/hud.js";
 import { createStops } from "../src/ui/stops.js";
 import { createBar } from "../src/ui/bar.js";
 import { STOP_IDS } from "../src/scene/poses.js";
+trackHeldKeys();   // the page does it at boot (src/main.js); a lab has no main
 
 initLang();
 const params = new URLSearchParams(location.search);
@@ -51,8 +52,8 @@ document.getElementById("shell").append(sheet, detailEl, toast.el, announcer.el)
 const jobKeys = () => [...new Set([...sheet.querySelectorAll("[data-card]")].map((e) => e.dataset.card))];
 const ctx = {
   t, tn, lang, session, sound,
-  drawer: { open: (key, origin) => drawer.open(key, origin), close: () => drawer.close(), isOpen: () => drawer.isOpen(), step: (dir) => drawer.step(dir), reload: () => drawer.reload(), get key() { return drawer.key; } },
-  go: (id) => { log.went.push(id); stopId = id; drawer.close({ silent: true }); },
+  drawer: { open: (key, origin) => drawer.open(key, origin), close: () => drawer.closeAndRestore(), isOpen: () => drawer.isOpen(), step: (dir) => drawer.step(dir), reload: () => drawer.reload(), get key() { return drawer.key; } },
+  go: (id) => { log.went.push(id); stopId = id; drawer.closeQuietly(); },
   model: () => session.model,
   announce: (text) => announcer.say(text),
   toast: (text, ok) => toast.show(text, ok),
@@ -120,7 +121,7 @@ session.subscribe((event) => {
 onLang(() => { drawer.rerender(); frame(); });
 installKeys({
   handlers: {
-    close: () => { if (drawer.isOpen()) drawer.close(); },
+    close: () => { if (drawer.isOpen()) drawer.closeAndRestore(); },
     move: (key) => { if (drawer.isOpen()) drawer.step(key === "j" ? 1 : -1); else if (real && window.__lab.cursor) window.__lab.cursor.move(key === "j" ? 1 : -1); },
     lang: () => setLang(lang() === "es" ? "en" : "es"),
     go: (key) => ctx.go(STOPS[Number(key) - 1]),
@@ -128,7 +129,8 @@ installKeys({
   stop: () => stopId,
   drawerOpen: () => drawer.isOpen(),
 });
-router.listen(({ job }) => (job ? drawer.open(job) : drawer.close({ fromPop: true })));
+router.listen(({ job }) => (job ? drawer.open(job) : drawer.closeFromHistory()));
 window.__lab = { ...(window.__lab || {}), log, reduced(on) { isReduced = !!on; } };
-window.__app = { session, sound, drawer, shell: { drawer }, model: () => session.model, rooms: { mounted: () => stopId }, go: ctx.go };
+// as on the real page: `__app.drawer` is the drawer the rooms get (open, close, step, reload) and `__app.shell.drawer` the whole one
+window.__app = { session, sound, drawer: ctx.drawer, shell: { drawer }, model: () => session.model, rooms: { mounted: () => stopId }, go: ctx.go };
 session.start();

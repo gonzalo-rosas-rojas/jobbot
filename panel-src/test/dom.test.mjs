@@ -34,7 +34,7 @@ after(async () => {
   if (server) server.kill();
 });
 
-const run = (expression) => page.eval(`(() => { const { h, sv, fill, link, twoStep, focusMark, restoreFocus, isTypingIn, readLaunch } = window.__dom; ${expression} })()`);
+const run = (expression) => page.eval(`(() => { const { h, sv, fill, link, twoStep, focusMark, restoreFocus, isTypingIn, takeLaunch } = window.__dom; ${expression} })()`);
 
 test("h builds the tree: attributes, dataset, text, nulls dropped, arrays flattened, nodes appended", async () => {
   const got = await run(`
@@ -245,14 +245,14 @@ test("isTypingIn is true only while a field inside the box has the focus", async
   assert.deepEqual(got, [true, false, true, true, false, false]);
 });
 
-test("readLaunch reads the token once and takes it out of the address", async () => {
+test("takeLaunch reads the token once and takes it out of the address", async () => {
   const got = await run(`
     const calls = [];
     const env = { location: { search: "?t=abc123&x=1", pathname: "/panel", hash: "#hoy" }, history: { replaceState: (a, b, url) => calls.push(url) } };
     env.top = env;
-    const alone = readLaunch(env);
-    const framed = readLaunch({ location: { search: "?t=zzz", pathname: "/", hash: "" }, history: { replaceState: (a, b, url) => calls.push(url) }, top: {} });
-    const embed = readLaunch({ location: { search: "?embed", pathname: "/", hash: "#cola" }, history: { replaceState: (a, b, url) => calls.push(url) }, top: null, });
+    const alone = takeLaunch(env);
+    const framed = takeLaunch({ location: { search: "?t=zzz", pathname: "/", hash: "" }, history: { replaceState: (a, b, url) => calls.push(url) }, top: {} });
+    const embed = takeLaunch({ location: { search: "?embed", pathname: "/", hash: "#cola" }, history: { replaceState: (a, b, url) => calls.push(url) }, top: null, });
     return { alone, framed, embed, calls };
   `);
   assert.deepEqual(got.alone, { token: "abc123", embedded: false });

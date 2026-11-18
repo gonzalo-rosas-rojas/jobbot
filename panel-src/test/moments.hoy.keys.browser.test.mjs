@@ -17,7 +17,7 @@ const settled = (t) => t.page.waitFor(`document.querySelector(".menu") && docume
 const acts = (t) => ev(t, `window.__lab.state().acts`);
 const headline = async (t) => (await ev(t, `document.querySelector(".hoy .mega").textContent`)).split(/\s+/).filter(Boolean).join(" ");
 const menu = (t) => ev(t, `(() => { const m = document.querySelector(".menu"); if (!m) return null; return { title: m.querySelector(".menu-title").textContent, items: [...m.querySelectorAll(".menu-item")].map((b) => [b.dataset.key, b.querySelector(".menu-label").textContent]),
-  local: m.hasAttribute("data-local-keys"), role: m.getAttribute("role"), focus: document.activeElement.dataset.key || document.activeElement.tagName }; })()`);
+  local: m.hasAttribute("data-local-keys"), role: (m.querySelector("[role=menu]") || m).getAttribute("role"), focus: document.activeElement.dataset.key || document.activeElement.tagName }; })()`);
 
 test("s asks until when beside the row, the menu owns the keyboard, and a digit chooses", async () => {
   const t = await open();

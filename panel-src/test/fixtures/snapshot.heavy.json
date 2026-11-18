@@ -584,6 +584,7 @@
       }
     ],
     "emails_total": 3,
+    "inbox": { "imported_at": "2026-10-07T13:00:00Z", "waiting": 6 },
     "emails": [
       {
         "received_at": "2026-10-07T14:10:00Z",

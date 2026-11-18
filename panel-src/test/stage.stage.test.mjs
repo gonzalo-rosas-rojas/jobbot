@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { recorder } from "./helpers/canvas.mjs";
 import { createStage, clockText, POOL, FRONT_FROM } from "../src/stage/stage.js";
 import { tokensOf, rgb } from "./helpers/color.mjs";
-import { mulberry32 } from "../src/stage/skyline.js";
+import { mulberry32 } from "../src/core/random.js";
 import { layoutOf } from "../src/stage/dial.js";
 import { dialPoseOf, sheetGeometry, skylineShift, STOP_IDS } from "../src/scene/poses.js";
 
