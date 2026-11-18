@@ -9,6 +9,12 @@ ignore = [
     # pdf-extract -> lopdf, a dev-dependency used by the tests to read the CV PDFs the program
     # itself renders; it is not part of the shipped binary. Revisit when pdf-extract moves.
     { id = "RUSTSEC-2026-0192", reason = "dev-only (pdf-extract via lopdf), not in the binary; no safe upgrade exists" },
+    # chrono and chrono-tz were declared unmaintained by their maintainer on 2026-11-17. These two
+    # ARE in the binary: every instant and the run window go through them. No flaw is named and no
+    # upgrade exists; jobbot moves to jiff in a change of its own
+    # (docs/adr/0015-dates-move-off-chrono.md). Remove both lines with that change.
+    { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained, no flaw named, no upgrade; the move to jiff is ADR 0015" },
+    { id = "RUSTSEC-2026-0555", reason = "chrono-tz unmaintained, no flaw named, no upgrade; the move to jiff is ADR 0015" },
     # (The three zip 8 advisories ignored here before are gone: playwright-rs 0.20.1 builds with
     # zip 9. Its build script still checks no hash of the driver it downloads, and jobbot runs that
     # driver: scripts/verify-playwright-driver.ps1 checks it against the publishers' hashes after

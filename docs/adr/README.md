@@ -20,6 +20,7 @@ and the old one is marked as superseded.
 | [0012](0012-hard-tests.md) | Properties, a hostile corpus, fuzz bodies and mutation testing | accepted |
 | [0013](0013-panel-guards.md) | The local panel's guards | accepted |
 | [0014](0014-one-request-per-connection.md) | One request per connection in the panel | accepted |
+| [0015](0015-dates-move-off-chrono.md) | Dates move off chrono, in a change of their own | accepted |
 
 The architecture as a whole is described in [`ARCHITECTURE.md`](../../ARCHITECTURE.md), the
 threats and their guards in [`docs/engineering/threat-model.md`](../engineering/threat-model.md).
