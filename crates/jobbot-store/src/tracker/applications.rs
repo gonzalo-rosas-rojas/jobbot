@@ -631,8 +631,8 @@ mod tests {
         let t = Tracker::in_memory().unwrap();
         let job = make_job_with(|j| {
             j.posted_at = Some(*NOW - TimeDelta::days(10));
-            j.salary_min_monthly_usd = Some(4000.0);
-            j.salary_max_monthly_usd = Some(6000.0);
+            j.salary_min_monthly_usd = Some(5200.0);
+            j.salary_max_monthly_usd = Some(7300.0);
         });
         let seen = *NOW - TimeDelta::days(2);
         t.add_job(&job, 70.0, &BTreeMap::new(), seen).unwrap();
@@ -642,7 +642,7 @@ mod tests {
         assert_eq!(row.first_seen, seen);
         assert_eq!(
             (row.salary_min, row.salary_max),
-            (Some(4000.0), Some(6000.0))
+            (Some(5200.0), Some(7300.0))
         );
         assert_eq!(row.state_since, Some(seen), "created at `scored` then");
 

@@ -402,8 +402,8 @@ mod tests {
             j.source = "greenhouse".into();
             j.external_id = "acme/42:x".into();
             j.description = "Línea uno\nLínea dos".into();
-            j.salary_min_monthly_usd = Some(4000.0);
-            j.salary_max_monthly_usd = Some(6000.0);
+            j.salary_min_monthly_usd = Some(5200.0);
+            j.salary_max_monthly_usd = Some(7300.0);
             j.posted_at = Some(*NOW);
         });
         t.add_job(&job, 61.5, &BTreeMap::new(), *NOW).unwrap();

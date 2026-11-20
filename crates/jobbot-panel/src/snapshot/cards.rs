@@ -571,8 +571,8 @@ mod tests {
         let dated = make_job_with(|j| {
             j.external_id = "dated".into();
             j.posted_at = Some(*NOW - TimeDelta::days(31));
-            j.salary_min_monthly_usd = Some(4000.0);
-            j.salary_max_monthly_usd = Some(6000.0);
+            j.salary_min_monthly_usd = Some(5200.0);
+            j.salary_max_monthly_usd = Some(7300.0);
         });
         let seen = *NOW - TimeDelta::days(2);
         t.add_job(&dated, 80.0, &BTreeMap::new(), seen).unwrap();
@@ -609,7 +609,7 @@ mod tests {
         assert_eq!(card["first_seen"], "2026-09-29T12:00:00Z");
         assert_eq!(
             (card["salary_min"].as_f64(), card["salary_max"].as_f64()),
-            (Some(4000.0), Some(6000.0))
+            (Some(5200.0), Some(7300.0))
         );
         assert_eq!(card["age_days"], 31);
         assert_eq!(card["prune_in_days"], max_age - 31);

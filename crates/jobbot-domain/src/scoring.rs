@@ -493,8 +493,8 @@ mod tests {
     #[test]
     fn monthly_range_is_kept() {
         assert_eq!(
-            parse_salary_monthly_usd("$4,000 - $6,000 per month"),
-            (Some(4000.0), Some(6000.0))
+            parse_salary_monthly_usd("$5,200 - $7,300 per month"),
+            (Some(5200.0), Some(7300.0))
         );
     }
 
@@ -519,8 +519,8 @@ mod tests {
         );
         // A word that is not about the pay does not set its period.
         assert_eq!(
-            parse_salary_monthly_usd("$4,000 - $6,000 plus an annual bonus"),
-            (Some(4000.0), Some(6000.0))
+            parse_salary_monthly_usd("$5,200 - $7,300 plus an annual bonus"),
+            (Some(5200.0), Some(7300.0))
         );
     }
 
@@ -528,15 +528,15 @@ mod tests {
     fn a_period_word_that_is_not_about_the_pay_does_not_set_its_period() {
         // Monthly by size: the word is not right after the range, or it starts another phrase.
         for text in [
-            "$4,000 - $6,000 + annual bonus",
-            "$4,000 – $6,000. Annual leave",
-            "$4,000-$6,000\nYearly learning budget",
-            "$4,000 - $6,000 yearly learning budget",
-            "Annual pay review included. Salary: $4,000 - $6,000",
+            "$5,200 - $7,300 + annual bonus",
+            "$5,200 – $7,300. Annual leave",
+            "$5,200-$7,300\nYearly learning budget",
+            "$5,200 - $7,300 yearly learning budget",
+            "Annual pay review included. Salary: $5,200 - $7,300",
         ] {
             assert_eq!(
                 parse_salary_monthly_usd(text),
-                (Some(4000.0), Some(6000.0)),
+                (Some(5200.0), Some(7300.0)),
                 "{text:?}"
             );
         }
@@ -586,13 +586,13 @@ mod tests {
     #[test]
     fn a_period_word_that_starts_another_phrase_falls_back_to_the_introduction_or_the_size() {
         for text in [
-            "$4,000 - $6,000 / year-end bonus",
-            "Monthly salary: $4,000 - $6,000 yearly learning budget",
-            "$4,000 - $6,000\nYearly learning budget",
+            "$5,200 - $7,300 / year-end bonus",
+            "Monthly salary: $5,200 - $7,300 yearly learning budget",
+            "$5,200 - $7,300\nYearly learning budget",
         ] {
             assert_eq!(
                 parse_salary_monthly_usd(text),
-                (Some(4000.0), Some(6000.0)),
+                (Some(5200.0), Some(7300.0)),
                 "{text:?}"
             );
         }
@@ -639,19 +639,19 @@ mod tests {
         // Known and accepted: the word after the range is about the review, but it still reads as
         // the period. A low posting is then held for the owner instead of being passed as a
         // monthly pay.
-        let (low, high) = parse_salary_monthly_usd("$4,000 - $6,000, annually reviewed");
+        let (low, high) = parse_salary_monthly_usd("$5,200 - $7,300, annually reviewed");
         assert_eq!(
             (low.map(f64::round), high.map(f64::round)),
-            (Some(333.0), Some(500.0))
+            (Some(433.0), Some(608.0))
         );
     }
 
     #[test]
     fn a_period_word_inside_a_longer_word_does_not_introduce_the_range() {
-        // `semiannual` is not `annual`: 4,000 - 6,000 stays monthly by size.
+        // `semiannual` is not `annual`: 5,200 - 7,300 stays monthly by size.
         assert_eq!(
-            parse_salary_monthly_usd("semiannual salary $4,000 - $6,000"),
-            (Some(4000.0), Some(6000.0))
+            parse_salary_monthly_usd("semiannual salary $5,200 - $7,300"),
+            (Some(5200.0), Some(7300.0))
         );
         let (low, _) = parse_salary_monthly_usd("Annual salary $15,000 - $19,000");
         assert_eq!(low.unwrap().round(), 1250.0);
@@ -665,8 +665,8 @@ mod tests {
             (None, None)
         );
         assert_eq!(
-            parse_salary_monthly_usd(&format!("${huge} - $1 and later $4,000 - $6,000 per month")),
-            (Some(4000.0), Some(6000.0))
+            parse_salary_monthly_usd(&format!("${huge} - $1 and later $5,200 - $7,300 per month")),
+            (Some(5200.0), Some(7300.0))
         );
     }
 
