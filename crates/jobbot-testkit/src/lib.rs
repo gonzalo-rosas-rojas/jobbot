@@ -30,6 +30,20 @@ pub use jobbot_domain::fixtures::{
 pub use jobbot_store::prep::PrepStore;
 pub use jobbot_store::tracker::Tracker;
 
+/// Makes the tracker database at `db` refuse every write of an application's screenshot path, as
+/// a locked or full disk would, so a test can check what a use case does when that one write
+/// fails. Open the tracker with `Tracker::open(db)` first; the rest of the database keeps working.
+pub fn refuse_screenshot_writes(db: &Path) {
+    rusqlite::Connection::open(db)
+        .and_then(|conn| {
+            conn.execute_batch(
+                "CREATE TRIGGER refuse_screenshots BEFORE UPDATE OF screenshot_path ON applications \
+                 BEGIN SELECT RAISE(ABORT, 'screenshot write refused'); END;",
+            )
+        })
+        .expect("the trigger is created");
+}
+
 /// The UTC instant `year-month-day hour:minute:second` (no fraction; add a `TimeDelta` for one).
 /// The one place the date tests of the crates that depend on this one build their input instants,
 /// so a change of date library touches this function and not each test. Panics on a date that

@@ -12,6 +12,7 @@ jobbot-domain = { path = "../jobbot-domain" }
 jobbot-store = { path = "../jobbot-store" }
 async-trait.workspace = true
 chrono.workspace = true
+rusqlite.workspace = true
 scraper.workspace = true
 serde.workspace = true
 serde_json.workspace = true

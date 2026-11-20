@@ -1659,13 +1659,7 @@ async fn a_screenshot_that_cannot_be_stored_does_not_abort_a_run_of_handoffs() {
     for n in [1, 2] {
         env.prepared(&ashby_job(n), 90.0 - f64::from(n));
     }
-    rusqlite::Connection::open(&db)
-        .unwrap()
-        .execute_batch(
-            "CREATE TRIGGER refuse_screenshots BEFORE UPDATE OF screenshot_path ON applications \
-             BEGIN SELECT RAISE(ABORT, 'screenshot write refused'); END;",
-        )
-        .unwrap();
+    jobbot_testkit::refuse_screenshot_writes(&db);
 
     let outcomes = env
         .run_with(&FakeFiller::new(), None, &open_gate(), SubmitMode::Live)
