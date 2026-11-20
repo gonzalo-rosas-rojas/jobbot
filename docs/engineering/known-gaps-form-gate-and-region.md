@@ -42,11 +42,18 @@ enough to match; the gate just does not stop it.
 - **"Tax No (if any)"**, "Tax reference no (if any)": a final "No" after a bracketed remark is read
   as a number only after a document word, and "tax" is not one.
 - **"Full name and ID (as on passport)"**: a weak "ID" with no number-word, in a name label.
-- **Banking blocks without "account"**: "Bank information", "Banking information", "Bank info",
-  "Payment details", "Payout details", "Wire transfer details", "Bank transfer details", "Direct
-  deposit information", "Payout account details", "Account details (for payouts)".
-- **Spanish account numbers in another order**: "N° cuenta", "Número cuenta", "Cuenta N°", "Cuenta
-  (número)". Only "número de cuenta" and the English order are read.
+- **Bank name and account type on their own**: "Banco", "Bank name", "Tipo de cuenta" are
+  answerable. Alone they cannot be told from an ordinary question ("Tipo de cuenta" also opens
+  "Tipo de cuenta de GitHub"), and the tests keep them answerable. "Nombre del banco" and "Account
+  type (checking/savings)" are never filled.
+- **Banking blocks worded another way**: only the whole label counts ("Bank information", "Payment
+  details", "Datos de pago", "Wire transfer details" and the others of `BANK_DETAILS_BLOCKS`). A
+  longer label that still asks for the details ("Please provide your bank information for
+  payroll", "Datos para transferencia del pago") is not caught unless one of the banking terms
+  of `NEVER_FILLED_TERMS` is in it.
+- **A word between the number-word and "cuenta" or "tarjeta"**: "Número de la cuenta", "N° de su
+  cuenta", "Número de mi tarjeta". Only the number-word right beside the noun, with or without
+  "de", is read.
 - **"Run" in title case**: "Run (sin puntos ni guión)", "Ingrese su Run". Only "RUN" in capitals
   and "numero de run" count, because lowercase "run" is a verb.
 - **Numbers of other countries and of immigration**: "Visa number", "Work permit number",
@@ -75,6 +82,11 @@ Harmless, and none is a common question:
 - Name labels that cite two documents or two languages: "Full name (as on ID) / Nombre completo
   (según cédula)", "Full legal name (as on passport), must match your ID".
 - "RFC writing experience" (mixed case, four words at most, reads as the Mexican tax ID).
+- "SWIFT" in capitals as the whole label ("SWIFT", "Please enter your SWIFT") in a form that asks
+  for the programming language: read as the banking code. "SWIFT messaging" and "Swift (iOS)" stay
+  answerable.
+- A Spanish label that ends in "cuenta" or "tarjeta" followed by a plain "no" or "n" ("¿Tiene
+  cuenta? No"): the final "no" is read as the abbreviation of "número".
 - A number-word or an answer right after "C.I." meaning continuous integration: "Experience with
   C.I.? No", "C.I. N/A", "C.I. number of builds per day", "C.I. #1 tool you use". A number-word
   beside "C.I." always makes it the ID card.
