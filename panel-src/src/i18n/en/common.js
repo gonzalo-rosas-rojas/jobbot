@@ -192,6 +192,7 @@ export default {
   "reason.group.missing_answers": "Answers needed",
   "reason.group.blocked": "A page stopped me",
   "reason.group.may_have_sent": "It may already have gone out",
+  "reason.group.out_of_region": "Outside the region",
   "reason.group.error": "The page failed",
   "reason.group.manual_apply": "Apply by hand from the posting",
   "reason.group.other": "Other",
@@ -200,6 +201,7 @@ export default {
   "reason.short.handoff": "Send the form yourself: the answer sheet is ready",
   "reason.short.blocked": "A page stopped me (captcha, login or block)",
   "reason.short.may_have_sent": "It may already have gone out: check before applying again",
+  "reason.short.out_of_region": "Outside the region by today's rules: review it before sending.",
   "reason.short.error": "The page failed while I filled it: it needs a look",
   "reason.short.other": "Needs a look from you",
 

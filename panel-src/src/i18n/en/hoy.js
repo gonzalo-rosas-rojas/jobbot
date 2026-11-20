@@ -71,6 +71,7 @@ export default {
   "hoy.kind.missing_answers": "Answers missing",
   "hoy.kind.blocked": "Blocked",
   "hoy.kind.may_have_sent": "Check if sent",
+  "hoy.kind.out_of_region": "Check the region",
   "hoy.kind.error": "Failed",
   "hoy.kind.manual_apply": "You apply",
   "hoy.kind.other": "Other",

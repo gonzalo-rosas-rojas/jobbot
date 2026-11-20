@@ -35,7 +35,7 @@ pub struct Card {
     /// Why it needs Gonza (only while it is in `needs_gonza`).
     pub reason: Option<String>,
     /// The kind of help behind `reason`, so the page can group the queue: "manual_apply",
-    /// "missing_answers", "handoff", "blocked", "may_have_sent", "error" or "other".
+    /// "missing_answers", "handoff", "blocked", "may_have_sent", "out_of_region", "error" or "other".
     pub reason_kind: Option<&'static str>,
     /// One plain sentence for `reason_kind`; the long `reason` stays behind a fold.
     pub reason_short: Option<&'static str>,
@@ -156,10 +156,10 @@ fn reason_kind(reason: &str) -> (&'static str, &'static str) {
     } else if reason.starts_with("page_error") {
         ("error", "La página falló al llenarla: hay que mirarla")
     // The submission gate parked it: outside the region by the rules of today. Not a form to send by hand
-    // without this warning. Its kind is "other" until the page knows a kind of its own.
+    // without this warning; the page treats the kind as cautiously as `may_have_sent`.
     } else if reason.starts_with(REASON_OUT_OF_REGION) {
         (
-            "other",
+            "out_of_region",
             "Fuera de la región con las reglas de hoy: revísala antes de enviar.",
         )
     } else {
@@ -370,7 +370,7 @@ mod tests {
     #[test]
     fn an_application_parked_for_its_region_says_so_in_its_card() {
         let (kind, short) = reason_kind(jobbot_domain::gate::OUT_OF_REGION_NOTE);
-        assert_eq!(kind, "other");
+        assert_eq!(kind, "out_of_region");
         assert_eq!(
             short,
             "Fuera de la región con las reglas de hoy: revísala antes de enviar."

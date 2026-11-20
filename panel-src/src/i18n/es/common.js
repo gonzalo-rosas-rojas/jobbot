@@ -193,6 +193,7 @@ export default {
   "reason.group.missing_answers": "Faltan respuestas",
   "reason.group.blocked": "Una página me frenó",
   "reason.group.may_have_sent": "Puede que ya se haya enviado",
+  "reason.group.out_of_region": "Fuera de región",
   "reason.group.error": "La página falló",
   "reason.group.manual_apply": "Postular a mano desde el aviso",
   "reason.group.other": "Otras",
@@ -201,6 +202,7 @@ export default {
   "reason.short.handoff": "Envía tú el formulario: la hoja de respuestas está lista",
   "reason.short.blocked": "Una página me frenó (captcha, ingreso o bloqueo)",
   "reason.short.may_have_sent": "Puede que ya se haya enviado: revisa antes de volver a postular",
+  "reason.short.out_of_region": "Fuera de la región con las reglas de hoy: revísala antes de enviar.",
   "reason.short.error": "La página falló al llenarla: hay que mirarla",
   "reason.short.other": "Necesita una mirada tuya",
 
