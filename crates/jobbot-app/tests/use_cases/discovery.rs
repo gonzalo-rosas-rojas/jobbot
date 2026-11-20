@@ -524,6 +524,86 @@ async fn the_same_role_in_two_different_places_is_two_postings() {
     assert!(tracker.get_job("test:2").unwrap().is_some());
     assert!(tracker.get_job("test:3").unwrap().is_none());
 }
+/// `good_at` as another source reports it, with its own place written its own way.
+fn good_from(source: &str, id: &str, apply_url: &str, location: &str) -> Job {
+    Job {
+        source: source.into(),
+        location: location.into(),
+        ..good_at(id, apply_url)
+    }
+}
+const LISTING_URL: &str = "https://himalayas.app/companies/acme/jobs/senior-ai-engineer";
+const FILLABLE_URL: &str = "https://boards.greenhouse.io/acme/jobs/55";
+#[tokio::test]
+async fn a_fillable_copy_is_not_queued_when_the_listing_copy_already_waits_for_gonza() {
+    let listing = good_from("himalayas", "1", LISTING_URL, "Remote - Latin America");
+    let tracker = stored_by_discovery(vec![listing]).await;
+    tracker
+        .transition(
+            "himalayas:1",
+            State::NeedsGonza,
+            Some("listing_only: envíalo tú"),
+            *NOW,
+        )
+        .unwrap();
+
+    let report = discover_again(
+        &tracker,
+        vec![good_from(
+            "ashby",
+            "2",
+            FILLABLE_URL,
+            "Remote - Latin America",
+        )],
+    )
+    .await;
+
+    // He may be sending the first one by hand: applying twice is worse than missing a copy.
+    assert_eq!((report.already_seen, report.queued), (1, 0));
+    assert!(tracker.get_job("ashby:2").unwrap().is_none());
+    assert_eq!(state_and_note(&tracker, "himalayas:1").0, State::NeedsGonza);
+}
+#[tokio::test]
+async fn a_listing_copy_that_arrives_after_the_fillable_one_was_submitted_is_not_queued() {
+    let fillable = good_from("ashby", "1", FILLABLE_URL, "Remote - Latin America");
+    let tracker = stored_by_discovery(vec![fillable]).await;
+    for state in [State::Prepared, State::Submitted] {
+        tracker.transition("ashby:1", state, None, *NOW).unwrap();
+    }
+
+    let report = discover_again(
+        &tracker,
+        vec![good_from(
+            "himalayas",
+            "2",
+            LISTING_URL,
+            "Remote - Latin America",
+        )],
+    )
+    .await;
+
+    assert_eq!((report.already_seen, report.queued), (1, 0));
+    assert!(tracker.get_job("himalayas:2").unwrap().is_none());
+}
+#[tokio::test]
+async fn the_same_role_from_two_sources_is_one_posting_however_each_writes_the_place() {
+    let first = good_from("ashby", "1", FILLABLE_URL, "Remote (LATAM)");
+    let tracker = stored_by_discovery(vec![first]).await;
+
+    let report = discover_again(
+        &tracker,
+        vec![good_from(
+            "greenhouse",
+            "2",
+            "https://boards.greenhouse.io/acme/jobs/56",
+            "Remote - Latin America",
+        )],
+    )
+    .await;
+
+    assert_eq!((report.already_seen, report.queued), (1, 0));
+    assert!(tracker.get_job("greenhouse:2").unwrap().is_none());
+}
 #[tokio::test]
 async fn a_stored_posting_that_the_source_now_dates_as_too_old_is_withdrawn() {
     let first = recently_dated("1", "Acme AI");

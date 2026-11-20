@@ -89,6 +89,12 @@ pub fn is_manual_only(url: &str) -> bool {
     host_matches(url, MANUAL_ONLY_HOSTS)
 }
 
+/// True when the posting is on a manual-only platform by its own link or by its apply link: the
+/// one rule the gate and discovery share for "Gonza applies to this one himself".
+pub fn is_manual_only_posting(job: &Job) -> bool {
+    is_manual_only(&job.apply_url) || is_manual_only(&job.url)
+}
+
 /// True when the URL points at a listing site whose apply button leads elsewhere.
 pub fn is_listing_only(url: &str) -> bool {
     host_matches(url, LISTING_ONLY_HOSTS)

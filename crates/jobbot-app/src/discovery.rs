@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use chrono::{DateTime, TimeDelta, Utc};
 use jobbot_domain::exclusion::check_exclusion;
-use jobbot_domain::gate::{is_listing_only, is_manual_only, is_stale, stale_note};
+use jobbot_domain::gate::{is_listing_only, is_manual_only_posting, is_stale, stale_note};
 use jobbot_domain::handoff::is_sent_by_hand;
 use jobbot_domain::models::{FetchError, Job};
 use jobbot_domain::rules::{Criteria, Exclusions};
@@ -126,10 +126,9 @@ pub async fn discover(
             let scored = score_job(&job, criteria);
             tracker.add_job(&job, scored.total, &detail_with_floor(&scored), now)?;
             let placement = place(&job, &scored, criteria, tracker, now)?;
-            if let (Some(old_key), false) = (
-                &listing_copy,
-                matches!(placement, Placement::BelowThreshold),
-            ) {
+            if let Some(old_key) = &listing_copy
+                && !matches!(placement, Placement::BelowThreshold)
+            {
                 withdraw_replaced_copy(tracker, old_key, &job.key(), now)?;
             }
             match placement {
@@ -157,17 +156,26 @@ pub async fn discover(
 /// bot. `None` for a job that is itself listing-only or manual-only, for the same posting seen
 /// again (same key) and when nothing like it is stored.
 fn listing_only_copy_of(job: &Job, tracker: &dyn Store) -> anyhow::Result<Option<String>> {
-    if is_listing_only(&job.apply_url) || is_manual_only(&job.apply_url) || is_manual_only(&job.url)
-    {
+    if is_listing_only(&job.apply_url) || is_manual_only_posting(job) {
         return Ok(None);
     }
     let Some(key) = tracker.find_job_key(job)?.filter(|key| *key != job.key()) else {
         return Ok(None);
     };
-    Ok(tracker
-        .get_job(&key)?
-        .filter(|stored| is_listing_only(&stored.apply_url))
-        .map(|_| key))
+    let Some(stored) = tracker.get_job(&key)? else {
+        return Ok(None);
+    };
+    if !is_listing_only(&stored.apply_url) {
+        return Ok(None);
+    }
+    // Only a copy nobody has acted on may be replaced. One waiting for Gonza, sent or answered
+    // may already have gone out by hand: the plain "already seen" rule must then keep this copy
+    // out, because applying twice to the same role is worse than missing a copy.
+    let untouched = match tracker.get_application(&key)? {
+        None => true,
+        Some(app) => matches!(app.state, State::Scored | State::Prepared),
+    };
+    Ok(untouched.then_some(key))
 }
 
 /// Withdraws the application of the listing-only copy that a fillable one replaces, when it is

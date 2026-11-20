@@ -108,7 +108,7 @@ fn decide(
             exclusion.reason.unwrap_or_default()
         )));
     }
-    if is_manual_only(&job.apply_url) || is_manual_only(&job.url) {
+    if is_manual_only_posting(job) {
         return Ok(GateDecision::block(REASON_MANUAL_ONLY));
     }
     if is_listing_only(&job.apply_url) {
@@ -161,6 +161,20 @@ mod tests {
             "https://example.com/apply?ref=linkedin.com"
         ));
         assert!(!is_manual_only(""));
+    }
+
+    #[test]
+    fn a_posting_is_manual_only_by_its_own_link_or_by_its_apply_link() {
+        let at = |url: &str, apply_url: &str| Job {
+            url: url.into(),
+            apply_url: apply_url.into(),
+            ..Job::default()
+        };
+        let upwork = "https://www.upwork.com/jobs/1";
+        let own = "https://boards.example.com/jobs/1";
+        assert!(is_manual_only_posting(&at(upwork, own)));
+        assert!(is_manual_only_posting(&at(own, upwork)));
+        assert!(!is_manual_only_posting(&at(own, own)));
     }
 
     #[test]
