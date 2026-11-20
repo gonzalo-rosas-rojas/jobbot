@@ -176,16 +176,22 @@ const MONTHLY_FLOOR: f64 = 1000.0;
 const RATE_TAIL_CHARS: usize = 24;
 
 /// Pay per piece of work: "per task", "per completed task", "per tasks completed", "per
-/// submission", "piece rate"... and "task-based" only when it qualifies the pay ("task-based
-/// rate"), not a duty ("task-based scheduling"). A separator is a space (a non-breaking one
-/// included, `\s` covers it), a hyphen or a non-breaking hyphen.
+/// submission", "for each task", "each completed task", "by the task", "piece rate"... and
+/// "task-based" only when it qualifies the pay ("task-based rate"), not a duty ("task-based
+/// scheduling"). "Per project" and "per assignment" are left out on purpose: hourly rates are
+/// said to vary by them ("Rates vary per project: $20-$40/hr"). A separator is a space (a
+/// non-breaking one included, `\s` covers it), a hyphen or a non-breaking hyphen.
 static PER_PIECE: LazyLock<Regex> = LazyLock::new(|| {
     let sep = r"[\s\x{2010}\x{2011}-]+";
     Regex::new(&format!(
-        r"(?i)\bper{sep}(?:(?:completed|approved|accepted){sep})?(?:tasks?|submissions?|assignments?|items?|units?|projects?)\b|\bpiece{sep}?rate\b|\btask{sep}based{sep}(?:pay|rate|compensation|payment)\b"
+        r"(?i)\bper{sep}(?:(?:completed|approved|accepted){sep})?(?:tasks?|submissions?|items?|units?)\b|\bfor{sep}each{sep}(?:completed{sep})?task\b|\beach{sep}completed{sep}task\b|\bby{sep}the{sep}task\b|\bpiece{sep}?rate\b|\btask{sep}based{sep}(?:pay|rate|compensation|payment)\b"
     ))
     .expect("PER_PIECE is a valid regex")
 });
+
+/// "$10-$20 a task": the amount is followed directly by "a task".
+static AMOUNT_A_TASK: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)^\s*(?:a|an)\s+task\b").expect("AMOUNT_A_TASK is valid"));
 
 /// How many characters on each side of a range are read for "per task" and the like.
 const TASK_WINDOW_CHARS: usize = 60;
@@ -203,7 +209,7 @@ fn paid_per_task(text: &str, start: usize, end: usize) -> bool {
     let before = chars_before(text, start, TASK_WINDOW_CHARS);
     let after: String = text[end..].chars().take(TASK_WINDOW_CHARS).collect();
     // A `|` between the two sides: "per" before the range and "task" after it are not "per task".
-    PER_PIECE.is_match(&format!("{before}|{after}"))
+    PER_PIECE.is_match(&format!("{before}|{after}")) || AMOUNT_A_TASK.is_match(&text[end..])
 }
 
 /// Reads the first pay range in `text` as `(min, max)` US dollars per month: hourly
@@ -516,11 +522,14 @@ mod tests {
             "per approved task",
             "per tasks completed",
             "per submission",
-            "per assignment",
+            "per accepted task",
             "per item",
             "per unit",
-            "per project",
+            "for each task",
+            "each completed task",
+            "by the task",
             "piece rate",
+            "per\u{2010}task",
             "piece-rate",
             "per\u{a0}task",
             "per\u{2011}task",
@@ -532,6 +541,41 @@ mod tests {
             let text = format!("$20 - $30 per hour equivalent, {phrase}");
             assert_eq!(parse_salary_monthly_usd(&text), (None, None), "{text:?}");
         }
+    }
+
+    #[test]
+    fn per_project_or_per_assignment_is_how_hourly_rates_vary_not_per_piece_pay() {
+        for (text, low, high) in [
+            ("$20-$30/hour, per project needs", 3200.0, 4800.0),
+            ("Rates vary per project: $20-$40/hr", 3200.0, 6400.0),
+            ("$25-$35/hr per assignment; length varies", 4000.0, 5600.0),
+        ] {
+            assert_eq!(
+                parse_salary_monthly_usd(text),
+                (Some(low), Some(high)),
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_amount_followed_directly_by_a_task_is_per_piece_pay() {
+        for text in [
+            "$15-$25/hr for each task you complete",
+            "$15-$25 a task, about $20/hr",
+        ] {
+            assert_eq!(parse_salary_monthly_usd(text), (None, None), "{text:?}");
+        }
+    }
+
+    /// What the code does today with a text that gives the per-task pay first and an hourly
+    /// equivalent after it: both ranges sit next to "each completed task", so neither is read.
+    #[test]
+    fn a_per_task_amount_with_an_hourly_equivalent_in_brackets_is_not_read_at_all() {
+        assert_eq!(
+            parse_salary_monthly_usd("Each completed task pays $10-$20 (about $20-$30/hr)"),
+            (None, None)
+        );
     }
 
     #[test]
