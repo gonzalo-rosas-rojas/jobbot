@@ -3,12 +3,14 @@
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, NaiveDate, Utc};
+use jobbot_domain::origin::Origin;
+use jobbot_domain::region::region_signal;
 use jobbot_domain::state::ANSWERED_STATES;
 use rusqlite::{params, params_from_iter};
 
 use super::{
     CohortRow, EventRow, FunnelRow, MoveRow, Result, State, Tracker, from_text, optional_from_text,
-    placeholders, state_from_text, to_text,
+    origin_from_text, placeholders, state_from_text, to_text,
 };
 
 /// The span the state changes of `moves_between` are read from (`?1` from, `?2` until), with the
@@ -16,6 +18,21 @@ use super::{
 /// `move_counts_between` must add up, so the three read this one text.
 const MOVES_IN_SPAN: &str =
     "FROM events e JOIN jobs j ON j.key = e.job_key WHERE e.at >= ?1 AND e.at <= ?2";
+
+/// What one application reached, with what the funnels group it by. Private to this file.
+struct Reached {
+    source: String,
+    origin: Origin,
+    title: String,
+    location: String,
+    remote: bool,
+    sent: bool,
+    answered: bool,
+    rejected: bool,
+    tests: bool,
+    interviews: bool,
+    offers: bool,
+}
 
 impl Tracker {
     /// Runs a COUNT query that lists states and then a `since` time: `sql` has `{marks}` where the
@@ -208,30 +225,33 @@ impl Tracker {
         )?)
     }
 
-    /// The all-time funnel split by the source the posting came from, sorted by source name. The
-    /// stages mean what `submitted_since` and `jobs_reaching` mean for the whole funnel: `sent`
-    /// is a submission stamp, the rest "reached that state at least once"; `n` is every
-    /// application of the source, sent or not, so the page can show a base with each count.
-    pub fn funnel_by_source(&self) -> Result<Vec<FunnelRow>> {
-        // `events` is read once, and only its moves to an answered state (few, found through the
-        // `to_state` index): one row per application that got an answer, with the stages it reached.
+    /// Every application whose posting is stored, with the stages it ever reached. `events` is read once, and
+    /// only its moves into an answered state (few, found through the `to_state` index). The `JOIN jobs` stays:
+    /// an application whose posting row is missing is in no funnel. `title` and `location` sit before
+    /// `description` in `jobs`, so this does not walk the descriptions.
+    fn reached_per_application(&self) -> Result<Vec<Reached>> {
         let marks = placeholders(ANSWERED_STATES.len());
         let sql = format!(
             "WITH reached AS ( \
-               SELECT job_key, MAX(to_state = ?) AS tests, \
-                      MAX(to_state = ?) AS interviews, MAX(to_state = ?) AS offers \
+               SELECT job_key, MAX(to_state = ?) AS tests, MAX(to_state = ?) AS interviews, \
+                      MAX(to_state = ?) AS offers, MAX(to_state = ?) AS rejected \
                FROM events \
                WHERE to_state IN ({marks}) \
                GROUP BY job_key) \
-             SELECT j.source, COUNT(*), SUM(a.submitted_at IS NOT NULL), COUNT(r.job_key), \
-                    SUM(COALESCE(r.tests, 0)), SUM(COALESCE(r.interviews, 0)), \
-                    SUM(COALESCE(r.offers, 0)) \
+             SELECT j.source, a.origin, j.title, j.location, j.remote, \
+                    a.submitted_at IS NOT NULL, r.job_key IS NOT NULL, \
+                    COALESCE(r.rejected, 0), COALESCE(r.tests, 0), COALESCE(r.interviews, 0), \
+                    COALESCE(r.offers, 0) \
              FROM applications a JOIN jobs j ON j.key = a.job_key \
-             LEFT JOIN reached r ON r.job_key = a.job_key \
-             GROUP BY j.source ORDER BY j.source"
+             LEFT JOIN reached r ON r.job_key = a.job_key"
         );
-        // In the order of the three `?` of the SELECT: tests, interviews, offers.
-        let stage_columns = [State::TechnicalTest, State::Interview, State::Offer];
+        // In the order of the four `?` of the SELECT, then the answered states of the WHERE.
+        let stage_columns = [
+            State::TechnicalTest,
+            State::Interview,
+            State::Offer,
+            State::Rejected,
+        ];
         let conn = self.lock();
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(
@@ -242,18 +262,72 @@ impl Tracker {
                     .map(|state| state.as_str()),
             ),
             |row| {
-                Ok(FunnelRow {
-                    group: row.get(0)?,
-                    n: row.get(1)?,
-                    sent: row.get(2)?,
-                    answered: row.get(3)?,
-                    tests: row.get(4)?,
-                    interviews: row.get(5)?,
-                    offers: row.get(6)?,
+                Ok(Reached {
+                    source: row.get(0)?,
+                    origin: origin_from_text(1, &row.get::<_, String>(1)?)?,
+                    title: row.get(2)?,
+                    location: row.get(3)?,
+                    remote: row.get(4)?,
+                    sent: row.get(5)?,
+                    answered: row.get(6)?,
+                    rejected: row.get(7)?,
+                    tests: row.get(8)?,
+                    interviews: row.get(9)?,
+                    offers: row.get(10)?,
                 })
             },
         )?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// The funnel of `reached_per_application` grouped by `group`, sorted by group name. The stages mean what
+    /// `submitted_since` and `jobs_reaching` mean for the whole funnel: `sent` is a submission stamp, the rest
+    /// "reached that state at least once"; `n` is every application of the group, sent or not, so the page can
+    /// show a base with each count.
+    fn funnel_grouped(&self, group: impl Fn(&Reached) -> String) -> Result<Vec<FunnelRow>> {
+        let mut groups: BTreeMap<String, FunnelRow> = BTreeMap::new();
+        for reached in self.reached_per_application()? {
+            let name = group(&reached);
+            let line = groups.entry(name.clone()).or_insert_with(|| FunnelRow {
+                group: name,
+                n: 0,
+                sent: 0,
+                answered: 0,
+                rejected: 0,
+                tests: 0,
+                interviews: 0,
+                offers: 0,
+            });
+            line.n += 1;
+            line.sent += i64::from(reached.sent);
+            line.answered += i64::from(reached.answered);
+            line.rejected += i64::from(reached.rejected);
+            line.tests += i64::from(reached.tests);
+            line.interviews += i64::from(reached.interviews);
+            line.offers += i64::from(reached.offers);
+        }
+        Ok(groups.into_values().collect())
+    }
+
+    /// The all-time funnel split by the source the posting came from, sorted by source name.
+    pub fn funnel_by_source(&self) -> Result<Vec<FunnelRow>> {
+        self.funnel_grouped(|reached| reached.source.clone())
+    }
+
+    /// The all-time funnel split by how each application came about (`Origin`), sorted by stored name. Only
+    /// the origins that have applications appear.
+    pub fn funnel_by_origin(&self) -> Result<Vec<FunnelRow>> {
+        self.funnel_grouped(|reached| reached.origin.as_str().to_string())
+    }
+
+    /// The all-time funnel split by `region::region_signal` of the posting's title, location and remote flag.
+    /// Nothing is stored: a change to the region rules changes this split for every application at once.
+    pub fn funnel_by_region(&self) -> Result<Vec<FunnelRow>> {
+        self.funnel_grouped(|reached| {
+            region_signal(&reached.title, &reached.location, reached.remote)
+                .as_str()
+                .to_string()
+        })
     }
 
     /// Submissions stamped at or after `since`.
@@ -297,6 +371,7 @@ mod tests {
 
     use chrono::{DateTime, TimeDelta, Utc};
     use jobbot_domain::fixtures::{NOW, make_job, make_job_with};
+    use jobbot_domain::origin::Origin;
 
     use crate::tracker::test_support::{stored_at, submit, submit_approved, three_scored};
     use crate::tracker::{FunnelRow, State, Tracker, to_text};
@@ -635,14 +710,15 @@ mod tests {
                 row.n,
                 row.sent,
                 row.answered,
+                row.rejected,
                 row.tests,
                 row.interviews,
                 row.offers,
             )
         };
-        assert_eq!(stages(&by_source[0]), (3, 2, 2, 0, 1, 1), "ashby");
-        assert_eq!(stages(&by_source[1]), (2, 1, 1, 1, 0, 0), "lever");
-        assert_eq!(stages(&by_source[2]), (1, 1, 0, 0, 0, 0), "workable");
+        assert_eq!(stages(&by_source[0]), (3, 2, 2, 1, 0, 1, 1), "ashby");
+        assert_eq!(stages(&by_source[1]), (2, 1, 1, 0, 1, 0, 0), "lever");
+        assert_eq!(stages(&by_source[2]), (1, 1, 0, 0, 0, 0, 0), "workable");
         assert!(
             Tracker::in_memory()
                 .unwrap()
@@ -650,6 +726,200 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    /// Stores a posting from `source` at `location` (remote), starts its application with `origin` and walks it
+    /// through `states`.
+    fn walk_to(
+        t: &Tracker,
+        id: &str,
+        source: &str,
+        location: &str,
+        origin: Origin,
+        states: &[State],
+    ) {
+        let job = make_job_with(|j| {
+            j.source = source.into();
+            j.external_id = id.into();
+            j.location = location.into();
+            j.remote = true;
+        });
+        t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
+        t.create_application(&job.key(), *NOW).unwrap();
+        t.set_origin(&job.key(), origin).unwrap();
+        for (n, state) in states.iter().enumerate() {
+            t.transition(
+                &job.key(),
+                *state,
+                None,
+                *NOW + TimeDelta::minutes(n as i64),
+            )
+            .unwrap();
+        }
+    }
+
+    /// A mixed data set: three origins, three regions, several stages.
+    fn mixed_funnel_data() -> Tracker {
+        let t = Tracker::in_memory().unwrap();
+        let sent = [State::Prepared, State::Submitted];
+        walk_to(&t, "1", "ashby", "Remote - LATAM", Origin::Cold, &sent);
+        walk_to(
+            &t,
+            "2",
+            "ashby",
+            "Remote",
+            Origin::Referral,
+            &[State::Prepared, State::Submitted, State::Rejected],
+        );
+        walk_to(
+            &t,
+            "3",
+            "lever",
+            "Remote - US",
+            Origin::Cold,
+            &[
+                State::Prepared,
+                State::Submitted,
+                State::Interview,
+                State::Offer,
+            ],
+        );
+        walk_to(&t, "4", "lever", "Remote", Origin::Unknown, &[]);
+        t
+    }
+
+    fn sums(rows: &[FunnelRow]) -> [i64; 7] {
+        let mut total = [0; 7];
+        for row in rows {
+            let line = [
+                row.n,
+                row.sent,
+                row.answered,
+                row.rejected,
+                row.tests,
+                row.interviews,
+                row.offers,
+            ];
+            for (sum, value) in total.iter_mut().zip(line) {
+                *sum += value;
+            }
+        }
+        total
+    }
+
+    #[test]
+    fn a_rejection_counts_as_answered_and_as_rejected_once() {
+        let t = Tracker::in_memory().unwrap();
+        walk_to(
+            &t,
+            "1",
+            "ashby",
+            "Remote",
+            Origin::Cold,
+            &[State::Prepared, State::Submitted, State::Rejected],
+        );
+        walk_to(
+            &t,
+            "2",
+            "ashby",
+            "Remote",
+            Origin::Cold,
+            &[
+                State::Prepared,
+                State::Submitted,
+                State::Ghosted,
+                State::Rejected,
+            ],
+        );
+        let rows = t.funnel_by_source().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!((rows[0].answered, rows[0].rejected), (2, 2));
+    }
+
+    #[test]
+    fn the_funnel_by_origin_groups_by_the_stored_origin() {
+        let t = Tracker::in_memory().unwrap();
+        walk_to(&t, "1", "ashby", "Remote", Origin::Cold, &[]);
+        walk_to(&t, "2", "ashby", "Remote", Origin::Cold, &[]);
+        walk_to(&t, "3", "ashby", "Remote", Origin::Referral, &[]);
+        let rows = t.funnel_by_origin().unwrap();
+        let shape: Vec<(&str, i64)> = rows.iter().map(|r| (r.group.as_str(), r.n)).collect();
+        assert_eq!(shape, [("cold", 2), ("referral", 1)]);
+    }
+
+    #[test]
+    fn the_funnel_by_region_reads_the_posting_and_stores_nothing() {
+        let t = Tracker::in_memory().unwrap();
+        walk_to(&t, "1", "ashby", "Remote - LATAM", Origin::Cold, &[]);
+        walk_to(&t, "2", "ashby", "Remote", Origin::Cold, &[]);
+        walk_to(&t, "3", "ashby", "Remote - US", Origin::Cold, &[]);
+        let groups = |rows: Vec<FunnelRow>| -> Vec<(String, i64)> {
+            rows.into_iter().map(|r| (r.group, r.n)).collect()
+        };
+        assert_eq!(
+            groups(t.funnel_by_region().unwrap()),
+            [
+                ("open".to_string(), 1),
+                ("other".to_string(), 1),
+                ("silent".to_string(), 1)
+            ]
+        );
+        // The posting is read again with a place that names an open region: the split moves, with no
+        // write to `applications`.
+        let silent = make_job_with(|j| {
+            j.source = "ashby".into();
+            j.external_id = "2".into();
+            j.location = "Worldwide".into();
+            j.remote = true;
+        });
+        t.refresh_posting(&silent).unwrap();
+        assert_eq!(
+            groups(t.funnel_by_region().unwrap()),
+            [("open".to_string(), 2), ("other".to_string(), 1)]
+        );
+    }
+
+    #[test]
+    fn the_three_funnels_split_the_same_applications() {
+        let t = mixed_funnel_data();
+        let by_source = sums(&t.funnel_by_source().unwrap());
+        assert_eq!(by_source[0], 4);
+        assert_eq!(sums(&t.funnel_by_origin().unwrap()), by_source);
+        assert_eq!(sums(&t.funnel_by_region().unwrap()), by_source);
+    }
+
+    #[test]
+    fn every_funnel_of_an_empty_database_is_empty() {
+        let t = Tracker::in_memory().unwrap();
+        assert!(t.funnel_by_source().unwrap().is_empty());
+        assert!(t.funnel_by_origin().unwrap().is_empty());
+        assert!(t.funnel_by_region().unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_application_whose_posting_is_missing_is_in_no_funnel() {
+        let t = mixed_funnel_data();
+        let before = (
+            t.funnel_by_source().unwrap(),
+            t.funnel_by_origin().unwrap(),
+            t.funnel_by_region().unwrap(),
+        );
+        {
+            let conn = t.lock();
+            conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
+            conn.execute(
+                "INSERT INTO applications (job_key, company_norm, state, updated_at)
+                 VALUES ('gone:1', 'acme', 'scored', '2026-10-01T12:00:00Z')",
+                [],
+            )
+            .unwrap();
+        }
+        let after = (
+            t.funnel_by_source().unwrap(),
+            t.funnel_by_origin().unwrap(),
+            t.funnel_by_region().unwrap(),
+        );
+        assert_eq!(before, after);
     }
 
     #[test]

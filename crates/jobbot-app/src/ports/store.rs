@@ -111,7 +111,10 @@ pub struct FunnelRow {
     /// Applications in the group, whatever their state.
     pub n: i64,
     pub sent: i64,
+    /// Any answer, a rejection included.
     pub answered: i64,
+    /// Of `answered`, the ones that reached `rejected`.
+    pub rejected: i64,
     pub tests: i64,
     pub interviews: i64,
     pub offers: i64,
@@ -601,6 +604,12 @@ pub trait HistoryRepo {
     /// is a submission stamp, the rest "reached that state at least once"; `n` is every
     /// application of the source, sent or not, so the page can show a base with each count.
     fn funnel_by_source(&self) -> StoreResult<Vec<FunnelRow>>;
+    /// The same funnel split by how each application came about (`Origin`), sorted by stored name; only the
+    /// origins that have applications appear.
+    fn funnel_by_origin(&self) -> StoreResult<Vec<FunnelRow>>;
+    /// The same funnel split by what the posting names about its region (`region::region_signal`: `open`,
+    /// `silent`, `other`), read from each posting now. Nothing is stored.
+    fn funnel_by_region(&self) -> StoreResult<Vec<FunnelRow>>;
     /// Every posting first seen at or after `since`, with its application when it has one
     /// (`jobs LEFT JOIN applications`, one query). Withdrawn applications are in too.
     fn cohort_since(&self, since: DateTime<Utc>) -> StoreResult<Vec<CohortRow>>;
