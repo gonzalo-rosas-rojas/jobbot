@@ -102,7 +102,7 @@ pub fn explain(error: &StoreError) -> String {
         StoreError::UnknownKey(key) => format!("no existe la postulación {key}"),
         StoreError::IllegalTransition { from, to } => {
             let hint = if from == State::NeedsGonza.as_str() {
-                ". Está en «necesita a Gonza»: usa confirm si ya se envió, o resolve para devolverla a la cola"
+                ". Está en «necesita a Gonza»: usa confirm si ya se envió, o resolve para devolverla a la cola (una que quedó fuera de región vuelve con resolve --send-outside-region)"
             } else {
                 ""
             };
