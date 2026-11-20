@@ -864,9 +864,9 @@ async fn hand_off(
     if let Some(seen) = seen {
         note.push_str(&format!(" · el bot vio: {seen}"));
     }
-    tracker.transition(&key, State::NeedsGonza, Some(&note), now)?;
-    // The move to needs_gonza is done: like the log line below, a screenshot that cannot be stored
-    // must not become a page error (needs_gonza -> needs_gonza is illegal and ends the run).
+    // The screenshot is stored before the move: a failure then is only a warning and a line in
+    // the note the owner reads, never a page error after the application is already with him
+    // (needs_gonza -> needs_gonza is illegal and would end the run).
     if let Some(screenshot) = &result.screenshot
         && let Err(err) = tracker.set_screenshot(&key, screenshot)
     {
@@ -875,7 +875,9 @@ async fn hand_off(
             error = %format!("{err:#}"),
             "could not store the handoff screenshot; the run goes on"
         );
+        note.push_str(" · no se guardó la captura de pantalla");
     }
+    tracker.transition(&key, State::NeedsGonza, Some(&note), now)?;
     // The application is already with Gonza and the sheet is written. A log line that cannot be
     // written must not turn into a page error: that would try needs_gonza -> needs_gonza and
     // abort the whole run, as in the main path (which only warns).

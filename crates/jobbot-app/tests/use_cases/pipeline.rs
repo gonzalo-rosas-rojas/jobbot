@@ -1673,7 +1673,13 @@ async fn a_screenshot_that_cannot_be_stored_does_not_abort_a_run_of_handoffs() {
         [("test:1", "needs_gonza"), ("test:2", "needs_gonza")]
     );
     let row = env.tracker.get_application("test:1").unwrap().unwrap();
-    assert!(row.needs_reason.unwrap().starts_with("handoff:"));
+    let reason = row.needs_reason.unwrap();
+    assert!(reason.starts_with("handoff:"), "{reason}");
+    // The owner sees in the reason that the screenshot is missing.
+    assert!(
+        reason.ends_with(" · no se guardó la captura de pantalla"),
+        "{reason}"
+    );
 }
 #[tokio::test]
 async fn the_sheet_names_the_job_the_link_the_cv_and_what_the_bank_could_not_answer() {
