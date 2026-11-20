@@ -484,6 +484,15 @@ static SPANISH_NUMBER_FORMAT_HINT: LazyLock<Regex> = LazyLock::new(|| {
         .expect("SPANISH_NUMBER_FORMAT_HINT is valid")
 });
 
+/// Spanish words for an identity document. A label that holds one beside "CI" names the ID card
+/// as one of the documents the form accepts ("CI o pasaporte", "Tipo de documento: CI"). Spanish
+/// only: the English "document" and "documentation" also sit beside continuous integration
+/// ("Document your CI process").
+static SPANISH_IDENTITY_DOCUMENT_WORD: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\b(?:pasaporte|documento|c[eé]dula|carnet|carn[eé]|dni)\b")
+        .expect("SPANISH_IDENTITY_DOCUMENT_WORD is valid")
+});
+
 /// Words around "C.I." that make it continuous integration, not the ID card.
 const CONTINUOUS_INTEGRATION_WORDS: &[&str] = &[
     "pipeline",
@@ -663,8 +672,9 @@ fn nothing_but_wrapping_words(before: &str, after: &str) -> bool {
 /// often means continuous integration ("Which CI tools have you used?", "GitLab CI"), and no word
 /// in such a question reliably says so ("Describe your CI setup", "Your CI stack"). So the token
 /// alone is not enough, as "C.I." is: it is the ID card only with a number-word beside it
-/// ("Número de CI", "CI Nro."), with a Spanish format hint ("CI (sin puntos)"), or as the whole
-/// label ("CI", "Ingrese su CI"). The pair "CI/CD" is never the ID card.
+/// ("Número de CI", "CI Nro."), with a Spanish format hint ("CI (sin puntos)"), with a Spanish
+/// word for an identity document in the label ("CI o pasaporte"), or as the whole label ("CI",
+/// "Ingrese su CI"). The pair "CI/CD" is never the ID card.
 fn carnet_capitals_are_an_id(label: &str) -> bool {
     CARNET_CAPITALS.captures_iter(label).any(|found| {
         let token_starts = found.get(1).map_or(0, |before| before.end());
@@ -673,6 +683,7 @@ fn carnet_capitals_are_an_id(label: &str) -> bool {
         !CONTINUOUS_DELIVERY_PAIR.is_match(after)
             && (number_word_is_beside(before, after)
                 || SPANISH_NUMBER_FORMAT_HINT.is_match(label)
+                || SPANISH_IDENTITY_DOCUMENT_WORD.is_match(label)
                 || nothing_but_wrapping_words(before, after))
     })
 }
@@ -1240,6 +1251,14 @@ mod tests {
         "CI:",
         "CI",
         "Su CI",
+        // "CI" beside a Spanish word for an identity document: it names the ID card as one of
+        // the documents the form accepts.
+        "Documento: CI",
+        "Tipo de documento: CI",
+        "CI o pasaporte",
+        "CI / Pasaporte",
+        "CI/Pasaporte",
+        "Carnet (CI)",
         // A number-word right beside "C.I." makes it the ID card whatever else the label says:
         // a word of continuous integration elsewhere ("experience", "test") does not undo it.
         "Enter your C.I. number and years of experience",
@@ -1383,6 +1402,10 @@ mod tests {
         "Travis CI",
         "Circle CI",
         "Familiarity with CI",
+        // English words that only look like the Spanish ones for a document.
+        "Document your CI process",
+        "CI documentation you have written",
+        "Documentación de CI/CD",
         // "ci" inside ordinary words, or not in capitals, is never the ID card.
         "ci",
         "Ci",

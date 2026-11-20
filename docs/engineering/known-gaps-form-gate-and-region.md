@@ -27,12 +27,13 @@ Which direction is safe:
 Whether any of these would really be answered depends on the answer bank having a pattern loose
 enough to match; the gate just does not stop it.
 
-- **"CI" in capitals with no number-word, hint or whole-label role**: "CI" is the ID card of
-  Uruguay, Bolivia, Paraguay, Venezuela and Ecuador, but in forms for software people it is far
-  more often continuous integration. It is read as the ID card only with a number-word beside it
-  ("Número de CI", "Nro. CI", "CI Nro."), with a Spanish format hint ("CI (sin puntos)", "CI
-  (solo números)") or as the whole label. "Cédula CI", "Documento: CI" or "CI del postulante" are
-  not caught.
+- **"CI" in capitals with nothing that says it is a document**: "CI" is the ID card of Uruguay,
+  Bolivia, Paraguay, Venezuela and Ecuador, but in forms for software people it is far more often
+  continuous integration. It is read as the ID card only with a number-word beside it ("Número de
+  CI", "Nro. CI", "CI Nro."), with a Spanish format hint ("CI (sin puntos)", "CI (solo números)"),
+  with a Spanish word for an identity document in the label ("CI o pasaporte", "Tipo de
+  documento: CI") or as the whole label. "CI del postulante", "Nombre y CI" and the English "CI
+  or passport" are not caught.
 - **A format hint as the only number-word**: "Document (numbers only)", "Driver's license (numbers
   only)", "License (numbers only)", "Medicare (numbers only)", "Account (numbers only)", "Card
   (numbers only)". The hint is stripped so that "Years of experience (numbers only)" stays
@@ -67,6 +68,9 @@ Harmless, and none is a common question:
 - "CI" alone as a whole label, or wrapped only in "your" or "please enter", in a form about
   continuous integration ("Your CI", "CI:"): read as the ID card, because nothing honest tells the
   two meanings apart.
+- A question about continuous integration written with a number-word beside "CI" or with a Spanish
+  format hint: "Número de CI pipelines", "CI number of builds per day", "Años de experiencia con CI
+  (solo números)". With "CI/CD" the same questions are answerable.
 - Yes/no questions about a document: "Do you have a tax ID?", "Do you have a (Chilean) RUT?".
 - Name labels that cite two documents or two languages: "Full name (as on ID) / Nombre completo
   (según cédula)", "Full legal name (as on passport), must match your ID".
