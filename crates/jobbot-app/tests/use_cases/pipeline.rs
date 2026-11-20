@@ -464,7 +464,7 @@ async fn a_refresh_that_fails_later_still_names_the_copies_it_could_not_refresh_
     .await
     .unwrap_err();
 
-    let text = err.to_string();
+    let text = format!("{err:#}");
     assert!(text.contains("the renderer stopped"), "{text}");
     assert!(
         text.contains(&first.key()),

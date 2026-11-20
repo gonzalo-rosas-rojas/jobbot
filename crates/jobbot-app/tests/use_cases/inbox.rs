@@ -890,6 +890,31 @@ fn an_email_from_the_company_between_scoring_and_the_hand_off_moves_nothing() {
     );
 }
 #[test]
+fn an_email_after_the_hand_off_and_before_the_confirm_moves_the_application() {
+    let t = Tracker::in_memory().unwrap();
+    // Scored on day -10, handed to Gonza on day -4, confirmed on day -1. The company wrote on
+    // day -2: after the form could have gone out, so it is about the application.
+    let key = dated_app(
+        &t,
+        "1",
+        10,
+        &[
+            (State::Prepared, 9),
+            (State::NeedsGonza, 4),
+            (State::Submitted, 1),
+        ],
+    );
+    let after = with(
+        msg("m1", "rejection"),
+        json!({ "job_key": key, "received_at": (*NOW - TimeDelta::days(2)).to_rfc3339() }),
+    );
+
+    let report = run(&t, &[after]);
+
+    assert_eq!(report.state_changes, 1, "{:?}", report.lines);
+    assert_eq!(state_of(&t, &key), State::Rejected);
+}
+#[test]
 fn a_below_the_floor_flag_is_not_a_send_so_an_older_email_from_the_company_moves_nothing() {
     let t = Tracker::in_memory().unwrap();
     // Scored on day -12 and flagged below the pay floor on day -11 (nothing was sent); the
@@ -1020,6 +1045,10 @@ fn a_reply_imported_before_the_confirm_moves_the_application_when_it_is_seen_aga
     let again = run(&t, std::slice::from_ref(&reply));
 
     assert_eq!(again.state_changes, 1, "{:?}", again.lines);
+    assert_eq!(state_of(&t, &key), State::Replied);
+    // Once moved, a third import changes nothing. This pins the behaviour whatever mechanism
+    // provides it (the retry guard, or the move itself being refused).
+    assert_eq!(run(&t, &[reply]).state_changes, 0);
     assert_eq!(state_of(&t, &key), State::Replied);
 }
 #[test]

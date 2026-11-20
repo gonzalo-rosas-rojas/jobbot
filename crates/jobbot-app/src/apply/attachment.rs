@@ -99,7 +99,9 @@ pub async fn keep_before_replacing(
 /// already there are rewritten; the folder `cv_dir` is the one `attachments_folder` takes. A
 /// folder that does not exist (`NotFound`) means the application has no copy; any other failure
 /// is returned, never swallowed, and never stops the run (the same courtesy rule as
-/// `attachment_for`).
+/// `attachment_for`). A copy that cannot be kept or overwritten is one failure for that copy. An
+/// error while reading the folder's entries records one failure for the application and the rest
+/// of its folder is not checked, so the owner is told not to attach that application's copies.
 pub async fn refresh_attachment_copies(
     cv_dir: &Path,
     cv_pdf: &Path,

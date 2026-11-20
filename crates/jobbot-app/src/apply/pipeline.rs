@@ -387,20 +387,24 @@ struct RefreshPlaces<'a> {
 }
 
 /// `err` with, when copies were found stale before it, a line naming their job keys (only keys,
-/// no paths) and telling Gonza not to attach them. Without such copies, `err` as it is.
+/// no paths) and telling Gonza not to attach them. The line is added as context, so the cause
+/// chain stays. Without such copies, or for a typed error (the warn already records the copies),
+/// `err` as it is.
 fn with_copy_failures(err: CvError, failures: &[CopyFailure]) -> CvError {
-    if failures.is_empty() {
+    let CvError::Other(cause) = err else {
         return err;
+    };
+    if failures.is_empty() {
+        return CvError::Other(cause);
     }
     let keys = failures
         .iter()
         .map(|failure| failure.job_key.as_str())
         .collect::<Vec<_>>()
         .join(", ");
-    CvError::Other(anyhow::anyhow!(
-        "{err}. Antes de fallar, estas copias legibles de CV no se pudieron actualizar y todavía \
-         tienen el CV anterior, no las adjuntes: {keys}"
-    ))
+    CvError::Other(cause.context(format!(
+        "estas copias legibles de CV no se pudieron actualizar antes de que el refresco fallara y          todavía tienen el CV anterior, no las adjuntes: {keys}"
+    )))
 }
 
 /// The rows of `refresh_cvs`, filling `report` as it goes so that a failure leaves what was done.
