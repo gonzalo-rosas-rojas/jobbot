@@ -73,6 +73,16 @@ const FIELD_NEVER: &[&str] = &[
     "pan card",
     "utr number",
     "sin number",
+    "rol unico nacional",
+    "rol unico tributario",
+    "carnet de identidad",
+    "fiscal code",
+    "codice fiscale",
+    "identificacion fiscal",
+    "ss number",
+    "datos bancarios",
+    "banking details",
+    "account details",
     "tax id",
     "tax identification",
     "tax number",
@@ -160,6 +170,7 @@ const DOCUMENT_WORDS: &[&str] = &[
     "document",
     "documento",
     "cedula",
+    "carnet",
     "taxpayer",
     "tributario",
     "contribuyente",
@@ -187,6 +198,7 @@ const DOCUMENT_ONLY_FILLER: &[&str] = &[
     "please",
     "enter",
     "provide",
+    "doc",
     "tu",
     "su",
     "el",
@@ -273,6 +285,25 @@ static TAX_BASIS: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\b(?:pre|post|before|after)[\s-]*tax(?:es)?\b").expect("TAX_BASIS is valid")
 });
 
+/// "e.g.", "ej:", "if applicable", "si aplica": a remark about the label, not words of it. Taken
+/// out so that "Identification (e.g. passport)" is read as the documents it names.
+static LABEL_ASIDE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\b(?:e\.?\s?g\.?|ej\.?|i\.e\.)\s*:?|\b(?:if\s+applicable|si\s+aplica|si\s+corresponde)\b")
+        .expect("LABEL_ASIDE is valid")
+});
+
+/// "C.I." (cédula/carnet de identidad) with its dots, in any case. Only in the raw label: the
+/// normalized "c i" would match far too much.
+static CARNET_ABBREVIATION: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\bc\.\s*i\.").expect("CARNET_ABBREVIATION is valid"));
+
+/// Document and tax-ID tokens that are only the ID when written in capitals: "RUN", "NIT", "RFC"...
+/// Lowercase "run" is a verb and "rfc" a standard ("Experience writing RFCs"), so this reads the
+/// raw label and `read_label` never lowercases it first.
+static CAPITAL_TOKENS: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b(?:RUN|NIT|RFC|TIN|CBU|CUIT|CUIL)\b").expect("CAPITAL_TOKENS is valid")
+});
+
 /// "Nº", "N°", "N˚": the ordinal sign makes the "N" an abbreviation of "number".
 static ORDINAL_NUMBER: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)\bn[º°˚]").expect("ORDINAL_NUMBER is a valid regex"));
@@ -288,6 +319,8 @@ static DOTTED_NUMBER: LazyLock<Regex> = LazyLock::new(|| {
 /// "c dula") and everything else as `normalize` reads it.
 fn read_label(label: &str) -> String {
     let text = TAX_BASIS.replace_all(label, " ");
+    let text = LABEL_ASIDE.replace_all(&text, " ");
+    let text = CARNET_ABBREVIATION.replace_all(&text, " carnet de identidad ");
     let text = ORDINAL_NUMBER.replace_all(&text, " number ");
     let text = text.replace(['º', '°', '˚'], ".").replace('#', " number ");
     let text = YES_NO.replace_all(&text, " ");
@@ -297,6 +330,9 @@ fn read_label(label: &str) -> String {
 
 /// True when `label` is a field the program never fills (see `FIELD_NEVER` and `AnswerBank::lookup`).
 pub fn is_never_filled(label: &str) -> bool {
+    if CAPITAL_TOKENS.is_match(label) {
+        return true;
+    }
     let text = read_label(label);
     GENERIC_LABELS.contains(&text.trim()) || is_held_after_reading(&without_named_document(&text))
 }
@@ -313,13 +349,32 @@ fn is_held_after_reading(text: &str) -> bool {
         || number_beside_document(&words)
         || number_beside_banking_noun(&words)
         || ends_with_no_after_a_document(&words)
+        || spanish_no_de_a_document(&words)
         || only_document_words(&words)
+}
+
+/// "No de pasaporte" without the dot: Spanish "no" directly before "de" and a document word is
+/// the abbreviation of "número".
+fn spanish_no_de_a_document(words: &[&str]) -> bool {
+    words.windows(3).any(|triple| {
+        triple[0] == "no"
+            && triple[1] == "de"
+            && (DOCUMENT_WORDS.contains(&triple[2])
+                || STRONG_DOCUMENT_TERMS.contains(&triple[2])
+                || NUMBER_THEN_DE_NOUNS.contains(&triple[2]))
+    })
 }
 
 /// True for a label made only of document words and filler ("Your ID", "Passport or ID", "ID
 /// (passport or national)"), with at least one anchor among them: nothing in it says it is not the
 /// document's number. "LinkedIn ID" and "Job ID" have a word of their own and are not.
 fn only_document_words(words: &[&str]) -> bool {
+    // "Pasaporte (opcional)" is the document; the marker is not a word of the label.
+    let words: Vec<&str> = words
+        .iter()
+        .copied()
+        .filter(|w| !REQUIRED_MARKERS.contains(w))
+        .collect();
     words
         .iter()
         .all(|w| DOCUMENT_ONLY_FILLER.contains(w) || DOCUMENT_ONLY_ANCHORS.contains(w))
@@ -564,6 +619,46 @@ mod tests {
         "Tax registration number",
     ];
 
+    /// Terms that hold alone by phrase (any case), in Chilean, foreign and banking wording.
+    const MORE_TERMS_THAT_HOLD_ALONE: &[&str] = &[
+        "Rol Único Nacional / Tributario",
+        "Número de carnet",
+        "Carnet de identidad",
+        "N° de carnet de identidad",
+        "No de pasaporte",
+        "Doc. identidad",
+        "Doc. de identidad",
+        "Pasaporte (opcional)",
+        "Passport (optional)",
+        "Passport (if applicable)",
+        "Identification (e.g. passport)",
+        "Fiscal code",
+        "Codice fiscale",
+        "Identificación fiscal",
+        "SS#",
+        "Datos bancarios",
+        "Banking details",
+        "Account details",
+    ];
+
+    /// Held through a token written in capitals or with dots in the RAW label ("RUN", "C.I."):
+    /// lowercase "run" is a verb, so these are tried as written, not lowercased.
+    const RAW_TOKEN_LABELS: &[&str] = &[
+        "RUN (sin puntos ni guión)",
+        "RUN (ej: 12345678-9)",
+        "Ingrese su RUN",
+        "RUN del postulante",
+        "C.I.",
+        "c.i.",
+        "C.I. N°",
+        "NIT",
+        "RFC",
+        "TIN",
+        "CBU",
+        "CUIT",
+        "CUIL",
+    ];
+
     /// Held on purpose although they could be read as ordinary: holding is the safe side. "Job ID
     /// number" and "Employee ID number" hold through "id number", "bank accounts" through "bank
     /// account".
@@ -647,6 +742,16 @@ mod tests {
         "Skype ID",
         "Employee referral ID",
         "Licencia de conducir (S/N)",
+        "¿Tienes carnet de conducir? (Sí/No)",
+        "How do you run tests?",
+        "Can you run on-call?",
+        "Experience writing RFCs",
+        "Banco",
+        "Bank name",
+        "Tipo de cuenta",
+        "Account holder name",
+        "Passport expiry date",
+        "Passport country",
         "Are you a U.S. taxpayer?",
         "Do you have a valid passport? (Yes/No)",
         "Do you have a valid passport? Yes or No",
@@ -733,6 +838,42 @@ mod tests {
                 label.to_string(),
                 label.to_uppercase(),
                 label.to_lowercase(),
+                format!("Please enter your {label} *"),
+                format!("{label} (required)"),
+            ] {
+                let bank = loose_and_exact_bank(&shown);
+                assert!(
+                    bank.lookup(&shown).is_none(),
+                    "a bank entry answered {shown:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn terms_that_hold_alone_hold_in_any_case_and_with_a_marker() {
+        for label in MORE_TERMS_THAT_HOLD_ALONE {
+            for shown in [
+                label.to_string(),
+                label.to_uppercase(),
+                label.to_lowercase(),
+                format!("Please enter your {label} *"),
+                format!("{label} (required)"),
+            ] {
+                let bank = loose_and_exact_bank(&shown);
+                assert!(
+                    bank.lookup(&shown).is_none(),
+                    "a bank entry answered {shown:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_token_in_capitals_or_with_dots_holds_as_written() {
+        for label in RAW_TOKEN_LABELS {
+            for shown in [
+                label.to_string(),
                 format!("Please enter your {label} *"),
                 format!("{label} (required)"),
             ] {
