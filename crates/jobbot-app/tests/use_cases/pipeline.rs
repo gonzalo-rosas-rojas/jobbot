@@ -470,7 +470,11 @@ async fn a_refresh_that_fails_later_still_names_the_copies_it_could_not_refresh_
         text.contains(&first.key()),
         "the earlier copy is named: {text}"
     );
-    assert!(text.contains("no las adjuntes"), "{text}");
+    // The whole sentence, so a line break inside the literal cannot leave a run of spaces in it.
+    assert!(
+        text.contains("fallara y todavía tienen el CV anterior, no las adjuntes"),
+        "{text}"
+    );
     assert!(
         !text.contains(&env.out_dir().display().to_string()),
         "only keys, no paths: {text}"

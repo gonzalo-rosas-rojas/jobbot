@@ -604,8 +604,7 @@ mod tests {
             "$15,000 - $19,000 annually",
             "$15,000 - $19,000 annually.",
             "$15,000 - $19,000 annually, plus equity",
-            "$15,000 - $19,000 annually
-Requirements",
+            "$15,000 - $19,000 annually\nRequirements",
             "$15,000 - $19,000 p.a., plus equity",
             "Compensation: $15,000 - $19,000 annually depending on experience",
             "$12,000 - $18,000 annually plus performance bonus",

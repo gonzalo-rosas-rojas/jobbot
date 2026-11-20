@@ -403,7 +403,8 @@ fn with_copy_failures(err: CvError, failures: &[CopyFailure]) -> CvError {
         .collect::<Vec<_>>()
         .join(", ");
     CvError::Other(cause.context(format!(
-        "estas copias legibles de CV no se pudieron actualizar antes de que el refresco fallara y          todavía tienen el CV anterior, no las adjuntes: {keys}"
+        "estas copias legibles de CV no se pudieron actualizar antes de que el refresco fallara \
+         y todavía tienen el CV anterior, no las adjuntes: {keys}"
     )))
 }
 
