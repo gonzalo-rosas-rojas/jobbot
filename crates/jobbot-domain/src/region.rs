@@ -988,14 +988,33 @@ mod tests {
         }
     }
 
+    /// Every signal, listed by hand: `slot` below has no `_` arm, so a new variant does not compile until it gets
+    /// a slot there, and `every_region_signal_is_listed_once` then fails until it is listed here too.
+    const ALL: [RegionSignal; 3] = [
+        RegionSignal::NamesOpen,
+        RegionSignal::Silent,
+        RegionSignal::Other,
+    ];
+
+    /// The position of a signal among the variants; the match is exhaustive on purpose.
+    fn slot(signal: RegionSignal) -> usize {
+        match signal {
+            RegionSignal::NamesOpen => 0,
+            RegionSignal::Silent => 1,
+            RegionSignal::Other => 2,
+        }
+    }
+
+    #[test]
+    fn every_region_signal_is_listed_once() {
+        let mut slots: Vec<usize> = ALL.into_iter().map(slot).collect();
+        slots.sort_unstable();
+        assert_eq!(slots, (0..=2).collect::<Vec<_>>());
+    }
+
     #[test]
     fn region_signal_names_are_open_silent_and_other() {
-        // The match has no `_` arm, so a new signal does not compile until its name is decided here.
-        for signal in [
-            RegionSignal::NamesOpen,
-            RegionSignal::Silent,
-            RegionSignal::Other,
-        ] {
+        for signal in ALL {
             let expected = match signal {
                 RegionSignal::NamesOpen => "open",
                 RegionSignal::Silent => "silent",
