@@ -40,6 +40,12 @@ fn format_report(r: &DiscoveryReport) -> String {
         r.pruned_stale,
         r.pruned_region
     );
+    if r.pruned_excluded > 0 {
+        text.push_str(&format!(
+            "\n  {} postulaciones retiradas: su empresa o dominio quedó excluido después de encolarlas",
+            r.pruned_excluded
+        ));
+    }
     if r.rate_limited > 0 {
         text.push_str(&format!(
             "\n  {} consultas en pausa: el sitio pidió esperar y se retoman en otra corrida",
@@ -259,6 +265,7 @@ mod tests {
             stale: 6,
             already_seen: 7,
             refreshed: 8,
+            pruned_excluded: 0,
             pruned_stale: 9,
             pruned_region: 11,
             rate_limited: 0,
@@ -269,6 +276,19 @@ mod tests {
             "Descubrimiento: 10 avisos · 2 en cola · 1 bajo el piso (excepción) · 3 bajo el umbral · \
              4 excluidos · 5 fuera de región · 6 vencidos · 7 ya vistos · 8 actualizados · \
              podados: 9 vencidos, 11 fuera de región\n  ERROR ashby:acme: boom"
+        );
+    }
+
+    #[test]
+    fn format_report_says_how_many_applications_an_exclusion_withdrew() {
+        let report = DiscoveryReport {
+            pruned_excluded: 2,
+            ..DiscoveryReport::default()
+        };
+        assert!(
+            format_report(&report).contains("2 postulaciones retiradas: su empresa o dominio"),
+            "{}",
+            format_report(&report)
         );
     }
 
