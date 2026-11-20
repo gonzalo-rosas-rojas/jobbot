@@ -180,7 +180,12 @@ async fn refresh_also_replaces_the_readable_copy_a_handoff_sheet_names() {
     let env = Env::new();
     let master = env.cv_master(MASTER);
     let job = make_job_with(|j| j.external_id = "attached".into());
+    let sent = make_job_with(|j| {
+        j.external_id = "already_sent".into();
+        j.company = "Sent Co".into();
+    });
     env.scored(&job, 80.0);
+    env.scored(&sent, 70.0);
     prepare_all(
         &env.tracker,
         &master,
@@ -190,10 +195,14 @@ async fn refresh_also_replaces_the_readable_copy_a_handoff_sheet_names() {
     )
     .await
     .unwrap();
-    // The copy `attachment_for` made next to the CVs, and one of another application.
+    // A sent application is the record of what went out: its copy must stay as it was.
+    env.tracker
+        .transition(&sent.key(), State::Submitted, None, *NOW)
+        .unwrap();
+    // The copy `attachment_for` made next to the CVs, and the one of the sent application.
     let copies = env.out_dir().join("adjuntos");
     let mine = copies.join(safe_key(&job.key()));
-    let other = copies.join("other_key");
+    let other = copies.join(safe_key(&sent.key()));
     for dir in [&mine, &other] {
         std::fs::create_dir_all(dir).unwrap();
         std::fs::write(dir.join("cv_name_Title.pdf"), b"%PDF-before").unwrap();
@@ -269,6 +278,7 @@ async fn refresh_reports_each_readable_copy_it_could_not_refresh_and_not_a_missi
         .join(safe_key(&jobs[1].key()))
         .join("cv_name_Title.pdf");
     std::fs::create_dir_all(&stuck).unwrap();
+    std::fs::write(stuck.join("old.txt"), b"old content").unwrap();
     // jobs[2] never had a copy: no folder at all.
 
     let report = refresh_cvs(
@@ -299,8 +309,15 @@ async fn refresh_reports_each_readable_copy_it_could_not_refresh_and_not_a_missi
             .iter()
             .all(|failure| !failure.reason.is_empty())
     );
-    // Nothing was replaced, and the failure is on record.
-    assert!(stuck.is_dir());
+    // Nothing was replaced: what is in the way is still what it was.
+    assert_eq!(
+        std::fs::read(stuck.join("old.txt")).unwrap(),
+        b"old content"
+    );
+    assert_eq!(
+        std::fs::read(copies.join(safe_key(&jobs[0].key()))).unwrap(),
+        b"in the way"
+    );
 }
 #[tokio::test]
 async fn refresh_renders_waiting_cvs_again_keeps_the_old_ones_and_never_touches_sent_ones() {
@@ -386,6 +403,78 @@ async fn refresh_renders_waiting_cvs_again_keeps_the_old_ones_and_never_touches_
     // No state moved.
     assert_eq!(env.state(&sydney.key()), State::Prepared);
     assert_eq!(env.state(&latam.key()), State::NeedsGonza);
+}
+/// Renders the first CV it is given and refuses every later one.
+struct RendersOnlyOnce {
+    calls: Mutex<usize>,
+}
+#[async_trait::async_trait]
+impl Renderer for RendersOnlyOnce {
+    async fn render(&self, _md_text: &str, out_path: &Path) -> anyhow::Result<PathBuf> {
+        let mut calls = self.calls.lock().unwrap();
+        *calls += 1;
+        if *calls > 1 {
+            anyhow::bail!("the renderer stopped");
+        }
+        std::fs::write(out_path, b"%PDF-fake")?;
+        Ok(out_path.to_path_buf())
+    }
+}
+#[tokio::test]
+async fn a_refresh_that_fails_later_still_names_the_copies_it_could_not_refresh_before() {
+    let env = Env::new();
+    let master = env.cv_master(MASTER);
+    let first = make_job_with(|j| {
+        j.external_id = "first".into();
+        j.company = "First Co".into();
+    });
+    let second = make_job_with(|j| {
+        j.external_id = "second".into();
+        j.company = "Second Co".into();
+    });
+    env.scored(&first, 80.0);
+    env.scored(&second, 70.0);
+    prepare_all(
+        &env.tracker,
+        &master,
+        &env.out_dir(),
+        &FakeRenderer::default(),
+        *NOW,
+    )
+    .await
+    .unwrap();
+    // The first application has a file where its copies' folder should be: it cannot be read.
+    let copies = env.out_dir().join("adjuntos");
+    std::fs::create_dir_all(&copies).unwrap();
+    std::fs::write(copies.join(safe_key(&first.key())), b"in the way").unwrap();
+
+    let err = refresh_cvs(
+        &env.tracker,
+        &master,
+        &env.out_dir(),
+        &RendersOnlyOnce {
+            calls: Mutex::new(0),
+        },
+        Relocation {
+            places: &[],
+            to: None,
+        },
+        *NOW,
+    )
+    .await
+    .unwrap_err();
+
+    let text = err.to_string();
+    assert!(text.contains("the renderer stopped"), "{text}");
+    assert!(
+        text.contains(&first.key()),
+        "the earlier copy is named: {text}"
+    );
+    assert!(text.contains("no las adjuntes"), "{text}");
+    assert!(
+        !text.contains(&env.out_dir().display().to_string()),
+        "only keys, no paths: {text}"
+    );
 }
 #[tokio::test]
 async fn placeholder_cv_leaves_state_untouched() {
@@ -1683,6 +1772,34 @@ async fn a_screenshot_that_cannot_be_stored_does_not_abort_a_run_of_handoffs() {
         reason.ends_with(" · no se guardó la captura de pantalla"),
         "{reason}"
     );
+}
+#[tokio::test]
+async fn a_screenshot_that_cannot_be_stored_does_not_abort_a_run_of_ordinary_applications() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("jobbot.db");
+    let env = Env {
+        tracker: Tracker::open(&db).unwrap(),
+        dir,
+    };
+    for n in [1, 2] {
+        let job = make_job_with(|j| {
+            j.external_id = n.to_string();
+            j.company = format!("Co{n}");
+        });
+        env.prepared(&job, 90.0 - f64::from(n));
+    }
+    jobbot_testkit::refuse_screenshot_writes(&db);
+
+    let outcomes = env
+        .run_with(&FakeFiller::new(), None, &open_gate(), SubmitMode::DryRun)
+        .await
+        .expect("the run goes on");
+
+    let statuses: Vec<(&str, &str)> = outcomes
+        .iter()
+        .map(|o| (o.job_key.as_str(), o.status.as_str()))
+        .collect();
+    assert_eq!(statuses, [("test:1", "dry_run"), ("test:2", "dry_run")]);
 }
 #[tokio::test]
 async fn the_sheet_names_the_job_the_link_the_cv_and_what_the_bank_could_not_answer() {

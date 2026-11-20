@@ -18,7 +18,9 @@ use jobbot_domain::rules::{Criteria, Exclusions};
 use jobbot_domain::state::State;
 use jobbot_domain::text::safe_key;
 
-use crate::apply::attachment::{CopyFailure, attachment_for, refresh_attachment_copies};
+use crate::apply::attachment::{
+    CopyFailure, attachment_for, keep_before_replacing, refresh_attachment_copies,
+};
 use crate::apply::cv::{
     CvError, Renderer, assert_no_new_skills, ensure_ready, relocating_to, tailor,
 };
@@ -347,17 +349,13 @@ pub async fn refresh_cvs(
 ) -> Result<RefreshReport, CvError> {
     let master = read_master(cv_master).await?;
     let stamp = now.format("%Y%m%dT%H%M%SZ").to_string();
-    let replaced_dir = cv_dir.join(REPLACED_CV_DIR);
+    let places = RefreshPlaces {
+        cv_dir,
+        replaced_dir: &cv_dir.join(REPLACED_CV_DIR),
+        stamp: &stamp,
+    };
     let mut report = RefreshReport::default();
-    let result = refresh_rows(
-        tracker,
-        &master,
-        renderer,
-        relocation,
-        (cv_dir, &replaced_dir, &stamp),
-        &mut report,
-    )
-    .await;
+    let result = refresh_rows(tracker, &master, renderer, relocation, places, &mut report).await;
     if let Err(err) = result {
         // Rendering stopped half way: the copies already found stale must not be forgotten.
         for failure in &report.copy_failures {
@@ -368,7 +366,7 @@ pub async fn refresh_cvs(
                 "a readable CV copy could not be refreshed; the refresh then failed"
             );
         }
-        return Err(err);
+        return Err(with_copy_failures(err, &report.copy_failures));
     }
     crate::record_counts(&[
         ("refreshed", report.refreshed.len()),
@@ -377,17 +375,48 @@ pub async fn refresh_cvs(
     Ok(report)
 }
 
+/// Where a refresh reads and keeps files, and the time mark of the copies it keeps.
+#[derive(Clone, Copy)]
+struct RefreshPlaces<'a> {
+    /// The folder of the tailored CVs, `<data_dir>/cv`.
+    cv_dir: &'a Path,
+    /// The folder that keeps what the refresh replaced.
+    replaced_dir: &'a Path,
+    /// The UTC time mark in the names of the kept copies.
+    stamp: &'a str,
+}
+
+/// `err` with, when copies were found stale before it, a line naming their job keys (only keys,
+/// no paths) and telling Gonza not to attach them. Without such copies, `err` as it is.
+fn with_copy_failures(err: CvError, failures: &[CopyFailure]) -> CvError {
+    if failures.is_empty() {
+        return err;
+    }
+    let keys = failures
+        .iter()
+        .map(|failure| failure.job_key.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    CvError::Other(anyhow::anyhow!(
+        "{err}. Antes de fallar, estas copias legibles de CV no se pudieron actualizar y todavía \
+         tienen el CV anterior, no las adjuntes: {keys}"
+    ))
+}
+
 /// The rows of `refresh_cvs`, filling `report` as it goes so that a failure leaves what was done.
-/// `places` is `(cv_dir, replaced_dir, stamp)`.
 async fn refresh_rows(
     tracker: &dyn Store,
     master: &str,
     renderer: &dyn Renderer,
     relocation: Relocation<'_>,
-    places: (&Path, &Path, &str),
+    places: RefreshPlaces<'_>,
     report: &mut RefreshReport,
 ) -> Result<(), CvError> {
-    let (cv_dir, replaced_dir, stamp) = places;
+    let RefreshPlaces {
+        cv_dir,
+        replaced_dir,
+        stamp,
+    } = places;
     for state in [State::Prepared, State::NeedsGonza] {
         for row in tracker.list_by_state(state)? {
             let Some(cv_path) = row.cv_path.as_deref() else {
@@ -397,15 +426,11 @@ async fn refresh_rows(
             let variant = tailored_variant(master, &job, relocation)?;
             let pdf_path = Path::new(cv_path);
             if pdf_path.exists() {
-                tokio::fs::create_dir_all(replaced_dir)
-                    .await
-                    .with_context(|| format!("creating {}", replaced_dir.display()))?;
                 let stem = pdf_path
                     .file_stem()
                     .map(|stem| stem.to_string_lossy().into_owned())
                     .unwrap_or_else(|| safe_key(&row.job_key));
-                let copy = replaced_dir.join(format!("{stem}.{stamp}.pdf"));
-                tokio::fs::copy(pdf_path, &copy)
+                keep_before_replacing(pdf_path, replaced_dir, &format!("{stem}.{stamp}.pdf"))
                     .await
                     .with_context(|| format!("keeping {}", pdf_path.display()))?;
             }
@@ -413,13 +438,10 @@ async fn refresh_rows(
             // The copy a handoff sheet names is a file of its own: it carries the new CV too,
             // and one that could not be replaced is reported, so nobody attaches it believing
             // it was refreshed.
-            report.copy_failures.extend(refresh_attachment_copies(
-                cv_dir,
-                pdf_path,
-                &row.job_key,
-                replaced_dir,
-                stamp,
-            ));
+            report.copy_failures.extend(
+                refresh_attachment_copies(cv_dir, pdf_path, &row.job_key, replaced_dir, stamp)
+                    .await,
+            );
             report.refreshed.push(row.job_key);
         }
     }
@@ -722,8 +744,16 @@ pub async fn submit_all_while(
             }
         };
         close_intent(tracker, intent, status, now)?;
-        if let Some(screenshot) = &result.screenshot {
-            tracker.set_screenshot(&row.job_key, screenshot)?;
+        // The state is already saved; a screenshot that cannot be stored is a warning, not a
+        // reason to end the run with the rest of the applications unprocessed.
+        if let Some(screenshot) = &result.screenshot
+            && let Err(err) = tracker.set_screenshot(&row.job_key, screenshot)
+        {
+            tracing::warn!(
+                key = %row.job_key,
+                error = %format!("{err:#}"),
+                "could not store the screenshot of the submit; the run goes on"
+            );
         }
         // The filler does not count the questions it answered, only name the ones it lacked.
         let tally = FormTally {

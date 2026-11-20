@@ -8,7 +8,7 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use jobbot_app::reporting::status::describe_auto_approve;
 
-use jobbot_app::apply::attachment::CopyFailure;
+use jobbot_app::apply::attachment::{CV_DIR_NAME, CopyFailure};
 
 use super::{Deps, EXIT_CV_NOT_READY, EXIT_ERROR, EXIT_OK, open_tracker};
 use crate::actions;
@@ -142,7 +142,7 @@ pub(super) async fn cmd_prepare(
 ) -> Result<i32> {
     let criteria = load_criteria(&paths.profile_dir.join("criteria.toml"))?;
     let tracker = open_tracker(paths)?;
-    let cv_dir = paths.data_dir.join("cv");
+    let cv_dir = paths.data_dir.join(CV_DIR_NAME);
     let result = prepare_report_relocating(
         &tracker,
         &paths.cv_master,
@@ -172,10 +172,11 @@ pub(super) async fn cmd_prepare_refresh(
 ) -> Result<i32> {
     let criteria = load_criteria(&paths.profile_dir.join("criteria.toml"))?;
     let tracker = open_tracker(paths)?;
+    let cv_dir = paths.data_dir.join(CV_DIR_NAME);
     let result = refresh_cvs(
         &tracker,
         &paths.cv_master,
-        &paths.data_dir.join("cv"),
+        &cv_dir,
         deps.renderer.as_ref(),
         Relocation::from_criteria(&criteria),
         now,
@@ -328,7 +329,7 @@ mod tests {
     }
 
     #[test]
-    fn format_report_warns_about_excluded_applications_waiting_for_gonza_by_key_only() {
+    fn format_report_ends_with_a_warning_listing_the_keys_of_excluded_applications_waiting() {
         let quiet = format_report(&DiscoveryReport::default());
         assert!(!quiet.contains("ATENCIÓN"));
         let report = DiscoveryReport {
@@ -336,7 +337,7 @@ mod tests {
             ..DiscoveryReport::default()
         };
         let text = format_report(&report);
-        // Only the job keys: the text of an exclusion rule can name a former client.
+        // The report holds job keys only, so no exclusion rule text can reach the line.
         assert!(
             text.ends_with(
                 "\n  ATENCIÓN: 2 postulaciones que te esperan son de una empresa o dominio \
@@ -352,8 +353,8 @@ mod tests {
         let failure = CopyFailure {
             job_key: "ashby:7".into(),
             file: data
-                .join("cv")
-                .join("adjuntos")
+                .join(CV_DIR_NAME)
+                .join(jobbot_app::apply::attachment::ATTACHMENTS_DIR_NAME)
                 .join("ashby_7")
                 .join("cv_ana_gomez_Engineer.pdf"),
             reason: "access denied".into(),

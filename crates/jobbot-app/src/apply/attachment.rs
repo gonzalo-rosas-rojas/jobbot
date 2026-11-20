@@ -56,11 +56,17 @@ fn clean_title(title: &str) -> String {
     }
 }
 
+/// Name of the folder of the tailored CVs inside the data folder: `<data_dir>/cv`.
+pub const CV_DIR_NAME: &str = "cv";
+
+/// Name, inside the folder of the tailored CVs, of the folder of readable copies.
+pub const ATTACHMENTS_DIR_NAME: &str = "adjuntos";
+
 /// The folder that holds the readable copies of one application's CV: `adjuntos/<job key>/` inside
 /// the folder of the tailored CVs (`<data_dir>/cv`). The one place that says where they live, for
 /// `attachment_for` (which makes them) and `refresh_attachment_copies` (which replaces them).
 pub fn attachments_folder(cv_dir: &Path, job_key: &str) -> PathBuf {
-    cv_dir.join("adjuntos").join(safe_key(job_key))
+    cv_dir.join(ATTACHMENTS_DIR_NAME).join(safe_key(job_key))
 }
 
 /// A readable CV copy that could not be refreshed: it still holds the CV that was replaced, and
@@ -73,6 +79,18 @@ pub struct CopyFailure {
     pub reason: String,
 }
 
+/// Keeps a copy of `file` in `keep_in` (created when needed) under `kept_name`, so that what is
+/// about to be replaced can still be found.
+pub async fn keep_before_replacing(
+    file: &Path,
+    keep_in: &Path,
+    kept_name: &str,
+) -> std::io::Result<()> {
+    tokio::fs::create_dir_all(keep_in).await?;
+    tokio::fs::copy(file, keep_in.join(kept_name)).await?;
+    Ok(())
+}
+
 /// Overwrites the readable copies `attachment_for` made of an application's CV with `cv_pdf`, its
 /// freshly rendered tailored PDF. The copies sit in `attachments_folder`, and the handoff sheet
 /// names them, so they must not keep the CV that was replaced. Each copy is kept first in
@@ -82,7 +100,7 @@ pub struct CopyFailure {
 /// folder that does not exist (`NotFound`) means the application has no copy; any other failure
 /// is returned, never swallowed, and never stops the run (the same courtesy rule as
 /// `attachment_for`).
-pub fn refresh_attachment_copies(
+pub async fn refresh_attachment_copies(
     cv_dir: &Path,
     cv_pdf: &Path,
     job_key: &str,
@@ -95,18 +113,19 @@ pub fn refresh_attachment_copies(
         file: file.to_path_buf(),
         reason: err.to_string(),
     };
-    let entries = match std::fs::read_dir(&folder) {
+    let mut entries = match tokio::fs::read_dir(&folder).await {
         Ok(entries) => entries,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
         Err(err) => return vec![failure(&folder, &err)],
     };
     let mut failures = Vec::new();
-    for entry in entries {
-        let path = match entry {
-            Ok(entry) => entry.path(),
+    loop {
+        let path = match entries.next_entry().await {
+            Ok(Some(entry)) => entry.path(),
+            Ok(None) => break,
             Err(err) => {
                 failures.push(failure(&folder, &err));
-                continue;
+                break;
             }
         };
         let is_pdf = path
@@ -119,10 +138,12 @@ pub fn refresh_attachment_copies(
             .file_stem()
             .map(|stem| stem.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let kept = keep_in.join(format!("{}.{stem}.{stamp}.pdf", safe_key(job_key)));
-        let replaced = std::fs::create_dir_all(keep_in)
-            .and_then(|()| std::fs::copy(&path, &kept))
-            .and_then(|_| std::fs::copy(cv_pdf, &path));
+        let kept_name = format!("{}.{stem}.{stamp}.pdf", safe_key(job_key));
+        let replaced = async {
+            keep_before_replacing(&path, keep_in, &kept_name).await?;
+            tokio::fs::copy(cv_pdf, &path).await
+        }
+        .await;
         if let Err(err) = replaced {
             tracing::warn!(error = %err, file = %path.display(), "the readable CV copy could not be refreshed");
             failures.push(failure(&path, &err));
@@ -135,7 +156,7 @@ pub fn refresh_attachment_copies(
 /// The name is a courtesy, never a reason to stop a run: if the copy fails the form gets the
 /// tailored PDF as it is.
 pub fn attachment_for(cv_pdf: &Path, job: &Job, bank: &AnswerBank, data_dir: &Path) -> PathBuf {
-    let dir = attachments_folder(&data_dir.join("cv"), &job.key());
+    let dir = attachments_folder(&data_dir.join(CV_DIR_NAME), &job.key());
     let target = dir.join(attachment_name(&job.title, bank));
     let copied = std::fs::create_dir_all(&dir).and_then(|()| std::fs::copy(cv_pdf, &target));
     match copied {
