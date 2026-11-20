@@ -10,7 +10,7 @@ use jobbot_domain::answers::{AnswerBank, australian_salary_ask};
 use jobbot_domain::form::{SubmitMode, SubmitStatus};
 use jobbot_domain::gate::{
     OUT_OF_REGION_NOTE, REASON_LISTING_ONLY, REASON_MANUAL_ONLY, REASON_OUT_OF_REGION,
-    REASON_STALE, stale_note,
+    REASON_STALE, is_out_of_region_reason, stale_note,
 };
 use jobbot_domain::handoff::{
     FormInspection, FormTally, HANDOFF_REASON_PREFIX, is_handoff_job, missing_labels,
@@ -105,13 +105,13 @@ enum CapStage {
 
 /// Whether a row is an application on its way to an answer. A posting below the pay floor that
 /// discovery set aside for Gonza to decide on (`needs_gonza`, `below_floor_exception`) is only a
-/// question: it holds no place at its company and does not compete for one.
+/// question: it holds no place at its company and does not compete for one. The same goes for a posting parked
+/// because it is outside the region by today's rules: until Gonza clears it, it is not going anywhere.
 fn is_application(row: &ApplicationRow) -> bool {
     !(row.state == State::NeedsGonza
-        && row
-            .needs_reason
-            .as_deref()
-            .is_some_and(|reason| reason.starts_with("below_floor_exception")))
+        && row.needs_reason.as_deref().is_some_and(|reason| {
+            reason.starts_with("below_floor_exception") || is_out_of_region_reason(reason)
+        }))
 }
 
 /// Which applications of the competing state a company's cap leaves out: the best-scored ones

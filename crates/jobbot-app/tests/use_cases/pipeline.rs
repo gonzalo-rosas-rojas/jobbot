@@ -2622,6 +2622,29 @@ async fn submit_does_not_let_a_posting_set_aside_below_the_floor_take_a_place() 
     );
 }
 #[tokio::test]
+async fn submit_does_not_let_a_posting_parked_for_its_region_take_a_place() {
+    let env = Env::new();
+    env.scored(&at("Acme", 1), 95.0);
+    env.tracker
+        .transition("test:1", State::NeedsGonza, Some(OUT_OF_REGION_NOTE), *NOW)
+        .unwrap();
+    env.prepared(&at("Acme", 2), 80.0);
+    env.prepared(&at("Acme", 3), 70.0);
+    let filler = FakeFiller::new();
+
+    let outcomes = env.run(&filler, &criteria(), SubmitMode::DryRun).await;
+
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|o| o.status == "dry_run")
+            .map(|o| o.job_key.as_str())
+            .collect::<Vec<_>>(),
+        vec!["test:2", "test:3"],
+        "{outcomes:?}"
+    );
+}
+#[tokio::test]
 async fn prepare_all_applies_the_cap_too() {
     let env = Env::new();
     let master = env.cv_master(MASTER);
