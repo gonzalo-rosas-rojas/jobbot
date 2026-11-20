@@ -458,6 +458,10 @@ static CONFINING: LazyLock<RegexSet> = LazyLock::new(|| {
         format!(
             r"\b{candidate}\s+(?:also\s+)?(?:be\s+)?(?:currently\s+|physically\s+|legally\s+)?(?:located|reside|residing|resident|living|live|based|work(?:ing)? from)\s+(?:in|within|from)\s+(?:the\s+)?{CONFINING_PLACES}\b"
         ),
+        // "required location in North American time zones": North America is the US and Canada
+        // (and Mexico), so the job is done on their clock. "North or South American time zones"
+        // has another word between the two and is not matched.
+        r"\b(?:location|located|based|reside|residing|living|working|work)\s+(?:in|within)\s+(?:the\s+)?north\s+americ(?:a|an)\s+time\s*zones?\b".to_string(),
         // "can be based remotely anywhere in the United States", "remote within the US"
         format!(r"\b(?:anywhere|everywhere|remotely|remote)\s+(?:in|within|across)\s+(?:the\s+)?{US_PLACES}\b"),
         // "US-based candidates only", "this is a US-based role", "must be US-based". Candidates
@@ -490,6 +494,21 @@ static CONFINING: LazyLock<RegexSet> = LazyLock::new(|| {
         format!(r"\b{US_PLACES}\s+(?:residents?|citizens?)\s+only\b"),
     ])
     .expect("CONFINING is a valid set of regexes")
+});
+
+/// Sentences that ask for a US government clearance, read after `fold`. Only a citizen can hold
+/// one, so the job cannot be done from Chile. Each pattern names the clearance itself (a bare
+/// "public trust" or "secret" is ordinary English: "we earn the public's trust") and a sentence
+/// with a negation is skipped ("no clearance required", "no active clearance needed").
+static CLEARANCE: LazyLock<RegexSet> = LazyLock::new(|| {
+    RegexSet::new([
+        r"\bts\s*[/-]\s*sci\b",
+        r"\bpolygraph\b",
+        r"\b(?:top\s+)?secret\s+(?:security\s+)?clearance\b",
+        r"\b(?:active|current|valid|existing)\s+(?:security\s+)?clearance\b",
+        r"\bpublic\s+trust\s+(?:security\s+)?(?:clearance|investigation|background|position|designation|determination)\b",
+    ])
+    .expect("CLEARANCE is a valid set of regexes")
 });
 
 /// Sentences of a posting based in one of the extra places that say the candidate must already
@@ -641,6 +660,10 @@ fn description_confinement(description: &str, extra: Option<&Regex>) -> Confinem
     let mut found = Confinement::None;
     for sentence in fold(description).split(['.', '!', '?', '\n']) {
         let sentence = CITIZENSHIP_DENIED.replace_all(sentence, " ");
+        let needs_clearance = CLEARANCE.is_match(&sentence) && !NEGATION.is_match(&sentence);
+        if needs_clearance && !has_open_term(&sentence) {
+            return Confinement::Closed;
+        }
         if !CONFINING.is_match(&sentence) || has_open_term(&sentence) {
             continue;
         }
@@ -1088,6 +1111,75 @@ mod tests {
             "You must be based in Europe.",
         ] {
             assert!(!passes_saying(sentence), "{sentence:?} confines the job");
+        }
+    }
+
+    #[test]
+    fn a_requirement_to_sit_in_north_american_time_zones_closes_the_job() {
+        for sentence in [
+            "required location in North American time zones",
+            "Required location in North American time zones.",
+            "Must be located in North American time zones.",
+        ] {
+            assert!(!passes_saying(sentence), "{sentence:?} confines the job");
+        }
+        // A zone range that spans the Americas, or both of them, does not.
+        for sentence in [
+            "North or South America timezones",
+            "North or South American time zones",
+            "required location in North or South American time zones",
+            "Required location in North or South America timezones.",
+        ] {
+            assert!(passes_saying(sentence), "{sentence:?} leaves the job open");
+        }
+    }
+
+    /// There is no rule that closes a job on a GMT/UTC offset range alone. These pin the safe
+    /// direction: a range that holds Chile's offsets (-3 in summer, -4 in winter), or one of them,
+    /// or neither, never closes by itself (a posting that holds none of them is not dropped
+    /// because of an offset; the person looks at it).
+    #[test]
+    fn a_gmt_or_utc_range_never_closes_a_job_by_itself() {
+        for sentence in [
+            "GMT+2 through GMT-8",
+            "UTC-8 to UTC+2",
+            "Working hours overlap: UTC-5 to UTC+1",
+            "Time zone: GMT-4 to GMT+4",
+            "GMT+0 to GMT+3",
+        ] {
+            assert!(passes_saying(sentence), "{sentence:?} leaves the job open");
+        }
+    }
+
+    #[test]
+    fn a_us_clearance_requirement_closes_the_job() {
+        for sentence in [
+            "Requires an active TS/SCI clearance.",
+            "TS/SCI",
+            "Active Secret clearance required.",
+            "Candidates need an active Secret clearance.",
+            "Must hold a Public Trust clearance.",
+            "Public Trust clearance required.",
+            "Applicants must pass a polygraph.",
+            "Polygraph required",
+        ] {
+            assert!(!passes_saying(sentence), "{sentence:?} needs a clearance");
+        }
+    }
+
+    #[test]
+    fn no_clearance_requirement_or_a_word_alike_leaves_the_job_open() {
+        for sentence in [
+            "no clearance required",
+            "No security clearance needed.",
+            "Security clearance is not required for this role.",
+            "We earn the public's trust every day.",
+            "Public trust in AI matters to us.",
+            "We build tools that improve the public trust in elections.",
+            "Our secret sauce is a small team.",
+            "Clearance sale of old laptops.",
+        ] {
+            assert!(passes_saying(sentence), "{sentence:?} leaves the job open");
         }
     }
 
