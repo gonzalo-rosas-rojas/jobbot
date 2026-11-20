@@ -1494,6 +1494,32 @@ async fn a_handoff_application_goes_to_needs_gonza_with_the_sheet_path_in_the_re
     assert_eq!(env.state("test:1"), State::Submitted);
 }
 #[tokio::test]
+async fn a_results_log_that_cannot_be_written_does_not_abort_a_run_of_handoffs() {
+    let env = Env::new();
+    for n in [1, 2] {
+        env.prepared(&ashby_job(n), 90.0 - f64::from(n));
+    }
+    // A folder where the log file should be: every append to it fails.
+    std::fs::create_dir(results_path(env.dir.path())).unwrap();
+    let outcomes = env
+        .run_with(&FakeFiller::new(), None, &open_gate(), SubmitMode::Live)
+        .await
+        .expect("the run goes on");
+    let statuses: Vec<(&str, &str)> = outcomes
+        .iter()
+        .map(|o| (o.job_key.as_str(), o.status.as_str()))
+        .collect();
+    assert_eq!(
+        statuses,
+        [("test:1", "needs_gonza"), ("test:2", "needs_gonza")]
+    );
+    let row = env.tracker.get_application("test:1").unwrap().unwrap();
+    assert!(
+        row.needs_reason.unwrap().starts_with("handoff:"),
+        "the handoff reason is kept, not replaced by a page error"
+    );
+}
+#[tokio::test]
 async fn the_sheet_names_the_job_the_link_the_cv_and_what_the_bank_could_not_answer() {
     let env = Env::new();
     env.prepared(&ashby_job(1), 90.0);

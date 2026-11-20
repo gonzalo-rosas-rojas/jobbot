@@ -840,7 +840,10 @@ async fn hand_off(
     if let Some(screenshot) = &result.screenshot {
         tracker.set_screenshot(&key, screenshot)?;
     }
-    log_attempt(
+    // The application is already with Gonza and the sheet is written. A log line that cannot be
+    // written must not turn into a page error: that would try needs_gonza -> needs_gonza and
+    // abort the whole run, as in the main path (which only warns).
+    if let Err(err) = log_attempt(
         tracker,
         data_dir,
         job,
@@ -849,7 +852,13 @@ async fn hand_off(
         result.screenshot.as_deref(),
         Some(&sheet),
         now,
-    )?;
+    ) {
+        tracing::warn!(
+            key = %key,
+            error = %format!("{err:#}"),
+            "could not append the handoff to results.jsonl; the run goes on"
+        );
+    }
     Ok(outcome(&key, "needs_gonza", Some(&note)))
 }
 
