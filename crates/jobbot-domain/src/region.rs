@@ -503,60 +503,99 @@ static TIME_ZONE_PLACE: LazyLock<Regex> = LazyLock::new(|| {
     .expect("TIME_ZONE_PLACE is a valid regex")
 });
 
+/// Words that make a sentence a wish or an alternative, not a requirement: "Preferably based in
+/// North American time zones", "...or willing to work those hours". Such a sentence never closes
+/// the job on its time zones.
+static HEDGE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b(?:preferabl[ey]|preferred|prefer|ideally|ideal|willing|plus|bonus)\b")
+        .expect("HEDGE is a valid regex")
+});
+
 /// Sentences that ask for a US government clearance, read after `fold`. Only a citizen can hold
 /// one, so the job cannot be done from Chile. Each pattern names the clearance itself (a bare
 /// "public trust" or "secret" is ordinary English: "we earn the public's trust"). A denial counts
 /// only when attached to the clearance (`CLEARANCE_DENIED`).
 static CLEARANCE: LazyLock<RegexSet> = LazyLock::new(|| {
+    // "must have", "need to hold", "required to obtain"...; the verbs may be chained: "must have or
+    // be able to obtain and maintain".
+    let must = r"(?:must|need\s+to|needs\s+to|required\s+to|have\s+to)";
+    let verb = r"(?:eligible\s+(?:for|to\s+obtain)|obtain|hold|have|possess|maintain)";
+    let more = format!(r"(?:\s+(?:and|or)\s+(?:be\s+)?(?:able\s+to\s+)?{verb})*");
+    // The clearance must be named: "active", "security" or a level, never a bare "clearance"
+    // ("you must have clearance from your manager").
+    let named = r"(?:(?:active|current)\s+(?:(?:u\s?s\s+)?security\s+)?|(?:u\s?s\s+)?security\s+|(?:top\s+secret|secret|ts|sci|dod|public\s+trust)\s+)";
+    let levels = r"(?:top\s+secret|secret|ts|sci|dod|public\s+trust|security)";
     RegexSet::new([
-        r"\bts\s*[/-]\s*sci\b",
-        r"\bpolygraph\b",
+        r"\bts\s*[/-]\s*sci\b".to_string(),
+        r"\bpolygraph\b".to_string(),
         // "Secret clearance", "Top Secret/SCI clearance", "Secret-level clearance", "Top Secret
         // (TS) clearance".
-        r"\b(?:top\s+)?secret(?:\s*[/-]\s*(?:level|sci))?(?:\s*\((?:ts|s)\))?\s+(?:security\s+)?clearance\b",
+        r"\b(?:top\s+)?secret(?:\s*[/-]\s*(?:level|sci))?(?:\s*\((?:ts|s)\))?\s+(?:security\s+)?clearance\b".to_string(),
         // "Clearance Level: Top Secret".
-        r"\bclearance(?:\s+level)?\s*:\s*(?:top\s+secret|secret|ts|sci)\b",
-        r"\bdod\s+(?:security\s+)?clearance\b",
-        // "active clearance" stands alone; the others need a level (`CLEARANCE_NEEDS_LEVEL`).
-        r"\bactive\s+(?:security\s+)?clearance\b",
-        r"\b(?:active|current|valid|existing)\s+(?:top\s+secret|secret|ts|sci|dod|public\s+trust)\s+clearance\b",
-        r"\bpublic\s+trust\s+(?:security\s+)?(?:clearance|investigation|background|position|designation|determination)\b",
-        r"\bbe\s+clearable\b",
-        r"\bcleared\s+(?:candidates?|applicants?)\s+only\b",
+        r"\bclearance(?:\s+level)?\s*:\s*(?:top\s+secret|secret|ts|sci)\b".to_string(),
+        r"\bdod\s+(?:security\s+)?clearance\b".to_string(),
+        // "active clearance" stands alone; "current/valid/existing clearance" needs the level
+        // right before it ("current security clearance") or right after as a label ("current
+        // clearance level: secret"), so a level word elsewhere in the sentence is not enough.
+        r"\bactive\s+(?:security\s+)?clearance\b".to_string(),
+        format!(r"\b(?:active|current|valid|existing)\s+{levels}\s+clearance\b"),
+        format!(r"\b(?:current|valid|existing)\s+clearance\s+(?:level|status)\s*:?\s*{levels}\b"),
+        r"\bpublic\s+trust\s+(?:security\s+)?(?:clearance|investigation|background|position|designation|determination)\b".to_string(),
+        // "Must be clearable": only at the end of the sentence ("clearable through the CCP" is
+        // not a person).
+        r"\bbe\s+clearable\W*$".to_string(),
+        r"\bcleared\s+(?:candidates?|applicants?)\s+only\b".to_string(),
+        // "Security clearance required", "US Security Clearance: Required", "Requires a security
+        // clearance", "Active Secret required", "Interim Secret acceptable". "Requires Secret"
+        // alone is too ambiguous and is not here.
+        r"\bsecurity\s+clearance\s*:?\s*(?:is\s+)?(?:required|mandatory|needed|necessary)\b".to_string(),
+        r"\brequires?\s+(?:an?\s+)?(?:active\s+|current\s+)?(?:u\s?s\s+)?security\s+clearance\b".to_string(),
+        r"\bactive\s+(?:top\s+secret|secret|ts)\s+(?:required|needed)\b".to_string(),
+        r"\binterim\s+(?:top\s+secret|secret|ts)\b".to_string(),
         // "must be eligible for / able to obtain a security clearance"; "ability to obtain one is
         // a plus" has no "must" and stays open.
-        r"\b(?:must|need\s+to|needs\s+to|required\s+to|have\s+to)\s+(?:be\s+)?(?:able\s+to\s+)?(?:eligible\s+for|obtain|hold|have|possess|maintain)\s+(?:an?\s+|the\s+)?(?:active\s+|current\s+)?(?:u\s?s\s+)?(?:security\s+)?clearance\b",
+        format!(r"\b{must}\s+(?:be\s+)?(?:able\s+to\s+)?{verb}{more}\s+(?:an?\s+|the\s+)?{named}clearance\b"),
     ])
     .expect("CLEARANCE is a valid set of regexes")
 });
 
-/// "current clearance", "valid clearance", "existing clearance": clearance procedures for customs
-/// are not a government clearance, so the sentence also needs a level word (`CLEARANCE_LEVEL`).
-static CLEARANCE_NEEDS_LEVEL: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b(?:current|valid|existing)\s+(?:security\s+)?clearance\b")
-        .expect("CLEARANCE_NEEDS_LEVEL is a valid regex")
-});
-
-static CLEARANCE_LEVEL: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b(?:security|secret|ts|sci|dod|public\s+trust)\b")
-        .expect("CLEARANCE_LEVEL is a valid regex")
-});
-
-/// A denial attached to the clearance: "no ... clearance" or "without ... clearance" with at most
-/// three words between, or "clearance (is) not required". A "no" or "not" elsewhere in the
-/// sentence ("which cannot be transferred", "(no interim)") says nothing about it.
-static CLEARANCE_DENIED: LazyLock<Regex> = LazyLock::new(|| {
+/// A negation before the clearance, with up to six words between ("not required to hold a
+/// security clearance", "don't need a TS/SCI clearance"). The captured words are the ones between.
+static DENIAL_BEFORE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"\b(?:no|not|without)\s+(?:\w+\s+){0,3}?(?:clearance|ts\s*[/-]\s*sci|polygraph)\b|\b(?:clearance|ts\s*[/-]\s*sci|polygraph)\s+(?:is\s+|are\s+)?(?:not|never)\s+(?:be\s+)?(?:required|needed|necessary|mandatory)\b|\b(?:clearance|ts\s*[/-]\s*sci|polygraph)\s+(?:is|are)n't\b",
+        r"(?:\b(?:no|not|without|never)\b|n't)\s+((?:[^\s,;:()]+\s+){0,6}?)(?:clearance|ts\s*[/-]\s*sci|polygraph)\b",
     )
-    .expect("CLEARANCE_DENIED is a valid regex")
+    .expect("DENIAL_BEFORE is a valid regex")
 });
+
+/// A negation that makes the words after it a condition, not a denial: "Don't apply UNLESS you
+/// hold an active TS/SCI clearance" asks for the clearance.
+static CONDITION: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b(?:unless|except|but|however|if|until)\b").expect("CONDITION is a valid regex")
+});
+
+/// "clearance (is) not required/needed", "clearance isn't...".
+static DENIAL_AFTER: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"\b(?:clearance|ts\s*[/-]\s*sci|polygraph)\s+(?:(?:is|are)\s+)?(?:not|never)\s+(?:be\s+)?(?:required|needed|necessary|mandatory)\b|\b(?:clearance|ts\s*[/-]\s*sci|polygraph)\s+(?:is|are)n't\b",
+    )
+    .expect("DENIAL_AFTER is a valid regex")
+});
+
+/// Whether a negation is attached to the clearance: "no ... clearance", "without ... clearance",
+/// "n't ... clearance" with at most six words between and no "unless" among them, or "clearance
+/// (is) not required". A "no" or "not" elsewhere ("which cannot be transferred", "(no interim)")
+/// says nothing about it.
+fn clearance_denied(sentence: &str) -> bool {
+    DENIAL_AFTER.is_match(sentence)
+        || DENIAL_BEFORE
+            .captures_iter(sentence)
+            .any(|caps| !CONDITION.is_match(&caps[1]))
+}
 
 /// Whether a folded sentence asks for a US government clearance.
 fn needs_clearance(sentence: &str) -> bool {
-    let asked = CLEARANCE.is_match(sentence)
-        || (CLEARANCE_NEEDS_LEVEL.is_match(sentence) && CLEARANCE_LEVEL.is_match(sentence));
-    asked && !CLEARANCE_DENIED.is_match(sentence)
+    CLEARANCE.is_match(sentence) && !clearance_denied(sentence)
 }
 
 /// Sentences of a posting based in one of the extra places that say the candidate must already
@@ -716,6 +755,7 @@ fn description_confinement(description: &str, extra: Option<&Regex>) -> Confinem
         // A zone-bound place is a confinement unless denied or offered with an open place.
         if TIME_ZONE_PLACE.is_match(&sentence)
             && !NEGATION.is_match(&sentence)
+            && !HEDGE.is_match(&sentence)
             && !has_open_term(&sentence)
         {
             return Confinement::Closed;
@@ -1188,6 +1228,9 @@ mod tests {
             "You don't need to be located in North American time zones.",
             "overlap with North American time zones",
             "Required location in North American time zones or LATAM.",
+            "Preferably based in North American time zones",
+            "Ideally located in North American time zones",
+            "Must be located in North American time zones or willing to work those hours",
             "North or South America timezones",
             "North or South American time zones",
             "required location in North or South American time zones",
@@ -1245,6 +1288,14 @@ mod tests {
             "Active TS/SCI clearance required (no interim).",
             // An open place in the same sentence does not rescue a clearance requirement.
             "As a global leader in defense we require an active TS/SCI clearance",
+            "U.S. Security Clearance: Required",
+            "Security clearance required",
+            "Requires a security clearance",
+            "Must be able to obtain and maintain a security clearance",
+            "Must be eligible to obtain a security clearance",
+            "Must have or be able to obtain a security clearance",
+            "Active Secret required",
+            "Interim Secret acceptable",
         ] {
             assert!(!passes_saying(sentence), "{sentence:?} needs a clearance");
         }
@@ -1259,6 +1310,20 @@ mod tests {
             "ability to obtain a security clearance is a plus",
             "Knowledge of current clearance procedures for customs",
             "Experience with valid clearance certificates for imports",
+            // A denial reaches up to six words before the clearance.
+            "Candidates are not required to hold a security clearance",
+            "No need to obtain a security clearance",
+            "You will not need to obtain a security clearance",
+            "You don't need to hold a clearance",
+            "You don't need a TS/SCI clearance",
+            "Don't have a TS/SCI clearance? No problem.",
+            // Ordinary clearance words that are not a government clearance.
+            "You must have clearance from your manager before deploying",
+            "Trades must be clearable through the CCP",
+            "Improve the existing clearance workflow following security best practices",
+            "Experience with TS and React; customs clearance knowledge is a plus",
+            // "Requires Secret" alone is too ambiguous to close on.
+            "Requires Secret",
         ] {
             assert!(passes_saying(sentence), "{sentence:?} leaves the job open");
         }
