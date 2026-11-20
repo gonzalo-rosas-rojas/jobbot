@@ -152,8 +152,11 @@ impl Tracker {
     }
 
     /// The question behind `has_posting` and `has_posting_since`: the same key, or the same title
-    /// at the same company (only when `live_since` is given, one dated or first seen at or after
-    /// it).
+    /// at the same company in a compatible place (when `live_since` is given, one dated or first
+    /// seen at or after it). Places are compatible when either is blank or one contains the
+    /// other, so `Remote` and `Remote - Latin America` are one posting but a company's `Berlin`
+    /// and `Lisbon` openings are two. The trade-off: two sources that write the same place in
+    /// unrelated words (`Worldwide` and `Anywhere`) now store the role twice.
     fn posting_known(&self, job: &Job, live_since: Option<DateTime<Utc>>) -> Result<bool> {
         let (company_norm, title_lc) = posting_identity(job);
         let conn = self.lock();
@@ -161,8 +164,16 @@ impl Tracker {
             .query_row(
                 "SELECT 1 FROM jobs WHERE key = ?1 \
                  OR (?2 <> '' AND ?3 <> '' AND company_norm = ?2 AND title_lc = ?3 \
+                     AND (?5 = '' OR location = '' OR instr(lower(location), ?5) > 0 \
+                          OR instr(?5, lower(location)) > 0) \
                      AND (?4 IS NULL OR COALESCE(posted_at, first_seen) >= ?4)) LIMIT 1",
-                params![job.key(), company_norm, title_lc, live_since.map(to_text)],
+                params![
+                    job.key(),
+                    company_norm,
+                    title_lc,
+                    live_since.map(to_text),
+                    job.location.trim().to_lowercase()
+                ],
                 |_| Ok(()),
             )
             .optional()?;

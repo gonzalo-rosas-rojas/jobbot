@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use chrono::{DateTime, TimeDelta, Utc};
 use jobbot_domain::exclusion::check_exclusion;
-use jobbot_domain::gate::{is_stale, stale_note};
+use jobbot_domain::gate::{is_listing_only, is_manual_only, is_stale, stale_note};
 use jobbot_domain::handoff::is_sent_by_hand;
 use jobbot_domain::models::{FetchError, Job};
 use jobbot_domain::rules::{Criteria, Exclusions};
@@ -98,7 +98,10 @@ pub async fn discover(
         for job in result.jobs {
             report.fetched += 1;
             // The same role posted again once the old posting is stale is a new posting.
-            if tracker.has_posting_since(&job, repost_cutoff)? {
+            // A role first stored from an aggregator that only links to it is not a duplicate of
+            // the same role found on the company's own form: this copy can be filled.
+            let listing_copy = listing_only_copy_of(&job, tracker)?;
+            if listing_copy.is_none() && tracker.has_posting_since(&job, repost_cutoff)? {
                 report.already_seen += 1;
                 if tracker.refresh_posting(&job)? {
                     report.refreshed += 1;
@@ -122,7 +125,14 @@ pub async fn discover(
             }
             let scored = score_job(&job, criteria);
             tracker.add_job(&job, scored.total, &detail_with_floor(&scored), now)?;
-            match place(&job, &scored, criteria, tracker, now)? {
+            let placement = place(&job, &scored, criteria, tracker, now)?;
+            if let (Some(old_key), false) = (
+                &listing_copy,
+                matches!(placement, Placement::BelowThreshold),
+            ) {
+                withdraw_replaced_copy(tracker, old_key, &job.key(), now)?;
+            }
+            match placement {
                 Placement::BelowThreshold => report.below_threshold += 1,
                 Placement::Flagged => report.below_floor_flagged += 1,
                 Placement::Queued => report.queued += 1,
@@ -140,6 +150,45 @@ pub async fn discover(
         ("rate_limited", report.rate_limited),
     ]);
     Ok(report)
+}
+
+/// The key of the stored posting `job` would be taken for (same company and title in a compatible
+/// place) when that one only links to the role (`is_listing_only`) and `job` can be filled by the
+/// bot. `None` for a job that is itself listing-only or manual-only, for the same posting seen
+/// again (same key) and when nothing like it is stored.
+fn listing_only_copy_of(job: &Job, tracker: &dyn Store) -> anyhow::Result<Option<String>> {
+    if is_listing_only(&job.apply_url) || is_manual_only(&job.apply_url) || is_manual_only(&job.url)
+    {
+        return Ok(None);
+    }
+    let Some(key) = tracker.find_job_key(job)?.filter(|key| *key != job.key()) else {
+        return Ok(None);
+    };
+    Ok(tracker
+        .get_job(&key)?
+        .filter(|stored| is_listing_only(&stored.apply_url))
+        .map(|_| key))
+}
+
+/// Withdraws the application of the listing-only copy that a fillable one replaces, when it is
+/// still `scored` or `prepared`. One waiting for Gonza stays: he may be sending that form by hand.
+fn withdraw_replaced_copy(
+    tracker: &dyn Store,
+    old_key: &str,
+    new_key: &str,
+    now: DateTime<Utc>,
+) -> anyhow::Result<()> {
+    let Some(old) = tracker.get_application(old_key)? else {
+        return Ok(());
+    };
+    if !matches!(old.state, State::Scored | State::Prepared) {
+        return Ok(());
+    }
+    let note = format!("duplicado: el mismo aviso con formulario rellenable es {new_key}");
+    match tracker.transition(old_key, State::Withdrawn, Some(&note), now) {
+        Ok(()) | Err(StoreError::IllegalTransition { .. }) => Ok(()),
+        Err(other) => Err(other.into()),
+    }
 }
 
 /// What a prune pass withdrew, counted by the rule that decided each application.
