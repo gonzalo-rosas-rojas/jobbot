@@ -183,6 +183,27 @@ const MONTHLY_FLOOR: f64 = 1000.0;
 /// How many characters after a range are read for "per hour" and the like.
 const RATE_TAIL_CHARS: usize = 24;
 
+static PER_TASK: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\bper[- ]task\b|\btask[- ]based\b").unwrap());
+
+/// How many characters on each side of a range are read for "per task" and the like.
+const TASK_WINDOW_CHARS: usize = 60;
+
+/// Whether the text right around the range (`start..end`) says the pay is per task or
+/// task-based. Only a window is read, so a duty elsewhere in a long description does not count.
+fn paid_per_task(text: &str, start: usize, end: usize) -> bool {
+    let before: String = text[..start]
+        .chars()
+        .rev()
+        .take(TASK_WINDOW_CHARS)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    let after: String = text[end..].chars().take(TASK_WINDOW_CHARS).collect();
+    PER_TASK.is_match(&format!("{before} {after}"))
+}
+
 /// Reads the first pay range in `text` as `(min, max)` US dollars per month: hourly
 /// rates times `HOURS_PER_MONTH`, annual amounts divided by 12, monthly amounts as they are. A range
 /// that is not clearly pay (`$5 - $10 million`, or a number too long for any pay) is ignored,
@@ -226,6 +247,11 @@ pub fn parse_salary_monthly_usd(text: &str) -> (Option<f64>, Option<f64>) {
         let tail: String = text[whole.end()..].chars().take(RATE_TAIL_CHARS).collect();
         if high < HOURLY_CEILING {
             if HOURLY.is_match(&tail) {
+                // Task pay quoted at an hourly equivalent is not hours worked every month: 160
+                // hours would invent an income, so the range is not read at all.
+                if paid_per_task(text, whole.start(), whole.end()) {
+                    continue;
+                }
                 return (Some(low * HOURS_PER_MONTH), Some(high * HOURS_PER_MONTH));
             }
             continue;
@@ -467,6 +493,33 @@ mod tests {
             parse_salary_monthly_usd("$25 - $30 per hour"),
             (Some(4000.0), Some(4800.0))
         );
+    }
+
+    #[test]
+    fn an_hourly_looking_range_paid_per_task_is_not_a_monthly_income() {
+        for text in [
+            "$20 - $30 per hour, paid per task",
+            "Paid per task: $20 - $30/hr equivalent",
+            "Task-based contract, $20 - $30 per hour",
+            "$20 - $30/hr (task based work)",
+        ] {
+            assert_eq!(parse_salary_monthly_usd(text), (None, None), "{text:?}");
+        }
+    }
+
+    #[test]
+    fn contractor_or_flexible_hours_alone_still_read_an_hourly_range() {
+        for text in [
+            "Contractor role, $20 - $30 per hour",
+            "$20 - $30 per hour. Flexible hours, work when you like.",
+            "Flexible hours: $20 - $30/hr",
+        ] {
+            assert_eq!(
+                parse_salary_monthly_usd(text),
+                (Some(3200.0), Some(4800.0)),
+                "{text:?}"
+            );
+        }
     }
 
     #[test]
