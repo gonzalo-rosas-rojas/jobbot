@@ -369,10 +369,26 @@ mod tests {
 
     #[test]
     fn an_application_parked_for_its_region_says_so_in_its_card() {
-        let (kind, short) = reason_kind(jobbot_domain::gate::OUT_OF_REGION_NOTE);
-        assert_eq!(kind, "out_of_region");
+        let (panel, _dir) = panel();
+        let t = &panel.tracker;
+        let job = make_job_with(|j| j.external_id = "parked".into());
+        t.add_job(&job, 80.0, &BTreeMap::new(), *NOW).unwrap();
+        t.start_application(&job.key(), jobbot_domain::origin::Origin::Cold, *NOW)
+            .unwrap();
+        t.transition(
+            &job.key(),
+            State::NeedsGonza,
+            Some(jobbot_domain::gate::OUT_OF_REGION_NOTE),
+            *NOW,
+        )
+        .unwrap();
+
+        let snap = build_snapshot(&panel).unwrap();
+
+        let card = card_of(&snap, &job.key());
+        assert_eq!(card["reason_kind"], "out_of_region");
         assert_eq!(
-            short,
+            card["reason_short"],
             "Fuera de la región con las reglas de hoy: revísala antes de enviar."
         );
     }
