@@ -17,6 +17,56 @@ static RANGE: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
+/// The period a pay range names right after it: `per year`, `a month`, `/yr`, `annually`, with
+/// only a currency word allowed in between. A word further on (`plus an annual bonus`) is not
+/// about the pay.
+static PERIOD_AFTER: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?i)^[^a-z/]*(?:(?:usd|us\$|dollars?|gross|net)\W*)*(?:(?:per|a|each|/)\s?)?(year|yr|annum|annual|annually|yearly|month|mo|monthly)\b",
+    )
+    .unwrap()
+});
+
+/// The period a pay range is introduced with: `Annual salary: $15,000 - $19,000`.
+static PERIOD_BEFORE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?i)(annual|yearly|monthly)\s+(?:base\s+)?(?:salary|pay|compensation|range)\b[^0-9]*$",
+    )
+    .unwrap()
+});
+
+/// A pay period the text states.
+#[derive(Clone, Copy, PartialEq)]
+enum Period {
+    Yearly,
+    Monthly,
+}
+
+fn period_named(word: &str) -> Option<Period> {
+    match word.to_lowercase().as_str() {
+        "year" | "yr" | "annum" | "annual" | "annually" | "yearly" => Some(Period::Yearly),
+        "month" | "mo" | "monthly" => Some(Period::Monthly),
+        _ => None,
+    }
+}
+
+/// The period the text says for the range that starts at `start`: the word right after it, else the one
+/// that introduces it. `None` when it says none (the size of the numbers decides then).
+fn stated_period(text: &str, start: usize, tail: &str) -> Option<Period> {
+    if let Some(word) = PERIOD_AFTER.captures(tail).and_then(|caps| caps.get(1)) {
+        return period_named(word.as_str());
+    }
+    let before: String = {
+        let mut chars: Vec<char> = text[..start].chars().rev().take(40).collect();
+        chars.reverse();
+        chars.into_iter().collect()
+    };
+    PERIOD_BEFORE
+        .captures(&before)
+        .and_then(|caps| caps.get(1))
+        .and_then(|word| period_named(word.as_str()))
+}
+
 static HOURLY: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)/\s?h(?:ou)?r|per hour|hourly|/h\b").unwrap());
 
@@ -138,6 +188,14 @@ pub fn parse_salary_monthly_usd(text: &str) -> (Option<f64>, Option<f64>) {
                 return (Some(low * HOURS_PER_MONTH), Some(high * HOURS_PER_MONTH));
             }
             continue;
+        }
+        // What the text says about the period beats the size of the numbers.
+        if high >= MONTHLY_FLOOR {
+            match stated_period(text, whole.start(), &tail) {
+                Some(Period::Yearly) => return (Some(low / 12.0), Some(high / 12.0)),
+                Some(Period::Monthly) => return (Some(low), Some(high)),
+                None => {}
+            }
         }
         if high >= ANNUAL_FLOOR {
             return (Some(low / 12.0), Some(high / 12.0));
@@ -395,6 +453,32 @@ mod tests {
     fn monthly_range_is_kept() {
         assert_eq!(
             parse_salary_monthly_usd("$4,000 - $6,000 per month"),
+            (Some(4000.0), Some(6000.0))
+        );
+    }
+
+    #[test]
+    fn the_period_the_text_names_beats_the_size_of_the_numbers() {
+        // 19,000 is under the size that reads as a yearly salary, but the text says per year.
+        for text in [
+            "$15,000 – $19,000 USD per year",
+            "$15,000 - $19,000 a year",
+            "$15,000 - $19,000/yr",
+            "$15,000 - $19,000 annually",
+            "Annual salary: $15,000 - $19,000",
+        ] {
+            let (low, high) = parse_salary_monthly_usd(text);
+            assert_eq!(low.unwrap().round(), 1250.0, "{text}");
+            assert_eq!(high.unwrap().round(), 1583.0, "{text}");
+        }
+        // And a monthly pay that is large stays monthly.
+        assert_eq!(
+            parse_salary_monthly_usd("$20,000 - $25,000 per month"),
+            (Some(20_000.0), Some(25_000.0))
+        );
+        // A word that is not about the pay does not set its period.
+        assert_eq!(
+            parse_salary_monthly_usd("$4,000 - $6,000 plus an annual bonus"),
             (Some(4000.0), Some(6000.0))
         );
     }
