@@ -178,7 +178,7 @@ pub const MAY_HAVE_BEEN_SENT: [&str; 4] = [
     "assist_timeout",
 ];
 
-fn may_have_been_sent(reason: &str) -> bool {
+pub(crate) fn may_have_been_sent(reason: &str) -> bool {
     is_sent_by_hand(reason)
         || MAY_HAVE_BEEN_SENT
             .iter()

@@ -802,9 +802,22 @@ fn an_email_from_before_the_application_was_sent_is_kept_but_moves_nothing() {
     );
     assert_eq!(run(&t, &[same]).state_changes, 1);
 }
+/// An application waiting for Gonza with a form he sends by hand (the note of a listing-only
+/// posting), moved there when the others of these tests were sent.
+fn waiting_by_hand(t: &Tracker, id: &str) -> String {
+    let key = app(t, id, "Acme AI", &[State::Prepared]);
+    t.transition(
+        &key,
+        State::NeedsGonza,
+        Some("listing_only: envíalo tú"),
+        sent_at(),
+    )
+    .unwrap();
+    key
+}
 /// An application prepared and sent by hand: `confirm` ran a day ago, long after the form went out.
 fn confirmed_late(t: &Tracker, id: &str) -> String {
-    let key = app(t, id, "Acme AI", &[State::Prepared, State::NeedsGonza]);
+    let key = waiting_by_hand(t, id);
     actions::confirm(t, &key, *NOW - TimeDelta::days(1)).unwrap();
     key
 }
@@ -836,7 +849,9 @@ fn dated_app(t: &Tracker, id: &str, scored_days_ago: i64, steps: &[(State, i64)]
     t.create_application(&job.key(), ago(scored_days_ago))
         .unwrap();
     for (state, days) in steps {
-        t.transition(&job.key(), *state, None, ago(*days)).unwrap();
+        // A form that waits for Gonza is one he sends by hand: that note says it may have gone.
+        let note = (*state == State::NeedsGonza).then_some("listing_only: envíalo tú");
+        t.transition(&job.key(), *state, note, ago(*days)).unwrap();
     }
     job.key()
 }
@@ -862,6 +877,63 @@ fn an_email_from_the_company_between_scoring_and_sending_moves_nothing() {
         "{:?}",
         report.lines
     );
+}
+#[test]
+fn a_below_the_floor_flag_is_not_a_send_so_an_older_email_from_the_company_moves_nothing() {
+    let t = Tracker::in_memory().unwrap();
+    // Scored on day -12 and flagged below the pay floor on day -11 (nothing was sent); the
+    // company wrote on day -9 about something else; the form went out and was confirmed on day -2.
+    let job: Job = make_job_with(|j| {
+        j.external_id = "1".into();
+        j.company = "Acme AI".into();
+    });
+    let key = job.key();
+    let ago = |days: i64| *NOW - TimeDelta::days(days);
+    t.add_job(&job, 80.0, &BTreeMap::new(), ago(12)).unwrap();
+    t.create_application(&key, ago(12)).unwrap();
+    t.transition(
+        &key,
+        State::NeedsGonza,
+        Some("below_floor_exception: aprendizaje o estabilidad"),
+        ago(11),
+    )
+    .unwrap();
+    t.transition(&key, State::Submitted, None, ago(2)).unwrap();
+    let earlier = with(
+        msg("m1", "rejection"),
+        json!({ "job_key": key, "received_at": ago(9).to_rfc3339() }),
+    );
+
+    let report = run(&t, &[earlier]);
+
+    assert_eq!(report.state_changes, 0, "{:?}", report.lines);
+    assert_eq!(state_of(&t, &key), State::Submitted);
+}
+#[test]
+fn an_email_that_could_belong_to_a_form_sent_by_hand_does_not_move_the_older_application() {
+    let t = Tracker::in_memory().unwrap();
+    let older = sent(&t, "1", "Acme AI");
+    // A newer application of the same company waits for Gonza with a form he sends by hand: it
+    // may already be sent, so an email from the company may be about it.
+    let newer = app(&t, "2", "Acme AI", &[State::Prepared]);
+    t.transition(
+        &newer,
+        State::NeedsGonza,
+        Some("listing_only: envíalo tú"),
+        *NOW - TimeDelta::days(1),
+    )
+    .unwrap();
+    let by_company = with(msg("m1", "rejection"), json!({ "company": "Acme AI" }));
+
+    let report = run(&t, &[by_company]);
+
+    assert_eq!(
+        (report.state_changes, report.unmatched),
+        (0, 1),
+        "{:?}",
+        report.lines
+    );
+    assert_eq!(state_of(&t, &older), State::Submitted);
 }
 #[test]
 fn a_reply_between_the_hand_off_and_the_late_confirm_moves_with_distinct_dates() {
@@ -891,7 +963,7 @@ fn a_reply_between_the_hand_off_and_the_late_confirm_moves_with_distinct_dates()
 #[test]
 fn a_reply_imported_before_the_confirm_moves_the_application_when_it_is_seen_again() {
     let t = Tracker::in_memory().unwrap();
-    let key = app(&t, "1", "Acme AI", &[State::Prepared, State::NeedsGonza]);
+    let key = waiting_by_hand(&t, "1");
     let reply = with(
         msg("m1", "recruiter"),
         json!({ "job_key": key, "received_at": (*NOW - TimeDelta::days(2)).to_rfc3339() }),

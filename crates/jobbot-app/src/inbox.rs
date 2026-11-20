@@ -12,6 +12,7 @@ use jobbot_domain::text::normalize;
 use serde_json::{Map, Value};
 
 use crate::actions;
+use crate::discovery::may_have_been_sent;
 use crate::ports::store::{EmailAdded, EmailKind, EmailRow, NewEmail, NewTask, Store};
 use tracing::field::Empty;
 
@@ -38,7 +39,8 @@ pub const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 pub const INBOX_IMPORTED_AT: &str = "inbox_imported_at";
 
 /// The states in which a company may still answer: the ones a company name can match. Silence
-/// (`Ghosted`) and an `Offer` are in: a late reply or a withdrawn offer is real.
+/// (`Ghosted`) and an `Offer` are in: a late reply or a withdrawn offer is real. A `NeedsGonza`
+/// application whose form may already have gone out is a candidate too (see `resolve_job`).
 pub const LIVE_STATES: [State; 6] = [
     State::Submitted,
     State::Replied,
@@ -287,7 +289,19 @@ fn resolve_job(tracker: &dyn Store, item: &Item) -> Result<Link> {
             why.unwrap_or_else(|| "sin job_key ni empresa".to_string()),
         ));
     };
-    let keys = tracker.job_keys_of_company(&normalize(company), &LIVE_STATES)?;
+    let mut keys = tracker.job_keys_of_company(&normalize(company), &LIVE_STATES)?;
+    // A waiting application whose form may already have gone out (sent by hand, or a click the
+    // page did not confirm) is a candidate too: an email of the company may be about it, and
+    // moving an older application of the same company instead would be a guess.
+    let company_norm = normalize(company);
+    for row in tracker.list_by_state(State::NeedsGonza)? {
+        if row.company_norm == company_norm
+            && row.needs_reason.as_deref().is_some_and(may_have_been_sent)
+            && !keys.contains(&row.job_key)
+        {
+            keys.push(row.job_key);
+        }
+    }
     let by_company = match keys.as_slice() {
         [only] => return Ok(Link::Found(only.clone())),
         [] => format!("ninguna postulación enviada de «{company}»"),
@@ -390,16 +404,21 @@ pub fn import(tracker: &dyn Store, items: &[Value], now: DateTime<Utc>) -> Resul
     Ok(report)
 }
 
-/// The earliest moment the form of `key` can have gone out: the first history entry that put the
-/// application in `needs_gonza` (Gonza sends it by hand from then) or `submitted`, else its
-/// `submitted_at`. Never the `scored` entry: an application is scored days before anything is
-/// sent, and mail from the company in between answers something else. `None` when the
-/// application never got that far.
+/// The earliest moment the form of `key` can have gone out: the first history entry that is a
+/// `submitted`, or a `needs_gonza` whose note says the form may have gone out (a form Gonza sends
+/// by hand, or a click the page did not confirm); else its `submitted_at`. Not the `scored` entry
+/// (an application is scored days before anything is sent) and not a `needs_gonza` for another
+/// reason (below the pay floor, missing answers): nothing was sent then, and mail from the
+/// company in between answers something else. `None` when the application never got that far.
 fn form_could_have_gone_out_at(tracker: &dyn Store, key: &str) -> Result<Option<DateTime<Utc>>> {
     let from_history = tracker
         .events_for(key)?
         .into_iter()
-        .find(|event| matches!(event.to_state, State::NeedsGonza | State::Submitted))
+        .find(|event| match event.to_state {
+            State::Submitted => true,
+            State::NeedsGonza => event.note.as_deref().is_some_and(may_have_been_sent),
+            _ => false,
+        })
         .map(|event| event.at);
     Ok(match from_history {
         Some(at) => Some(at),
