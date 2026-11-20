@@ -55,7 +55,8 @@ pub const REASON_STALE: &str = "stale_posting";
 pub struct GateDecision {
     pub allowed: bool,
     /// Set when `allowed` is false: `stop_file`, `manual_only_platform`, `listing_only`,
-    /// `excluded:<why>`, `stale_posting`, `daily_cap`, `company_cooldown`, `warmup_hold` or
+    /// `excluded:<kind>` (the kind of rule, never its text: `domain`, `name` or `category`),
+    /// `stale_posting`, `daily_cap`, `company_cooldown`, `warmup_hold` or
     /// `review_required`.
     pub reason: Option<String>,
 }

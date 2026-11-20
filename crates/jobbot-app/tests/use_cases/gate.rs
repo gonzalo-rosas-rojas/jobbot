@@ -348,7 +348,7 @@ fn exclusion_is_rechecked() {
     let job = make_job_with(|j| j.company = sample_exclusions().names[0].clone());
     prepared(&tracker, &job, true, false);
     let decision = decide(&tracker, &job, &criteria(), &stop, *NOW);
-    assert!(decision.reason.unwrap().starts_with("excluded:"));
+    assert_eq!(decision.reason.unwrap(), "excluded:name");
 }
 #[test]
 fn an_excluded_company_is_withdrawn_even_when_its_form_is_one_to_fill_by_hand() {
@@ -362,7 +362,7 @@ fn an_excluded_company_is_withdrawn_even_when_its_form_is_one_to_fill_by_hand() 
     });
     prepared(&tracker, &job, true, false);
     let decision = decide(&tracker, &job, &criteria(), &stop, *NOW);
-    assert!(decision.reason.unwrap().starts_with("excluded:"));
+    assert_eq!(decision.reason.unwrap(), "excluded:name");
 }
 #[test]
 fn daily_cap() {

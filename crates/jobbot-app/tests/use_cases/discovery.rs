@@ -435,20 +435,11 @@ async fn an_application_that_is_stale_is_withdrawn_as_stale_even_when_it_is_excl
     assert_eq!(report.pruned_stale, 2);
     assert_eq!(report.pruned_excluded, 9);
     assert_eq!(state_and_note(&tracker, "test:1").1.unwrap(), STALE_NOTE);
-    assert!(
-        state_and_note(&tracker, "test:5")
-            .1
-            .unwrap()
-            .starts_with("excluded:")
+    // The note names the kind of rule, never the rule's own text.
+    assert_eq!(
+        state_and_note(&tracker, "test:5").1.unwrap(),
+        "excluded:name"
     );
-}
-#[tokio::test]
-async fn stale_ones_are_counted_as_stale_and_the_rest_as_excluded_however_many() {
-    let (report, tracker) = excluded_with_two_stale(13).await;
-
-    assert_eq!(report.pruned_stale, 2);
-    assert_eq!(report.pruned_excluded, 11);
-    assert_eq!(state_and_note(&tracker, "test:2").1.unwrap(), STALE_NOTE);
     assert_eq!(state_and_note(&tracker, "test:5").0, State::Withdrawn);
 }
 #[tokio::test]
@@ -481,9 +472,10 @@ async fn an_unconfirmed_click_on_an_excluded_company_is_listed_and_kept() {
     assert_eq!(report.excluded_waiting, ["test:1"]);
 }
 #[tokio::test]
-async fn an_excluded_company_already_on_the_by_hand_list_is_kept_and_reported() {
+async fn a_plain_by_hand_card_of_an_excluded_company_is_withdrawn() {
     let first = good("1", "Later Excluded Co");
     let tracker = stored_by_discovery(vec![first.clone()]).await;
+    // Waiting for Gonza to fill it in himself; nobody has clicked or confirmed anything.
     tracker
         .transition(
             "test:1",
@@ -504,7 +496,37 @@ async fn an_excluded_company_already_on_the_by_hand_list_is_kept_and_reported() 
     .await
     .unwrap();
 
-    // He may have sent it already, so it is not withdrawn; he is told not to send it.
+    let (state, note) = state_and_note(&tracker, "test:1");
+    assert_eq!(state, State::Withdrawn);
+    assert_eq!(note.unwrap(), "excluded:name");
+    assert_eq!(report.pruned_excluded, 1);
+    assert!(report.excluded_waiting.is_empty());
+}
+#[tokio::test]
+async fn a_form_confirmed_sent_by_hand_of_an_excluded_company_is_kept_and_reported() {
+    let first = good("1", "Later Excluded Co");
+    let tracker = stored_by_discovery(vec![first.clone()]).await;
+    tracker
+        .transition(
+            "test:1",
+            State::NeedsGonza,
+            Some("manual_record: lo envié yo"),
+            *NOW,
+        )
+        .unwrap();
+    let (criteria, exclusions) = rules_excluding("Later Excluded Co");
+
+    let report = discover(
+        &[fake(vec![first], &[])],
+        &criteria,
+        &exclusions,
+        &tracker,
+        *NOW,
+    )
+    .await
+    .unwrap();
+
+    // He says he sent it, so it is not withdrawn; he is told not to send it again.
     assert_eq!(state_and_note(&tracker, "test:1").0, State::NeedsGonza);
     assert_eq!(report.pruned_excluded, 0);
     assert_eq!(report.excluded_waiting, ["test:1"]);
@@ -528,7 +550,7 @@ async fn a_company_excluded_after_its_posting_was_queued_has_the_application_wit
 
     let (state, note) = state_and_note(&tracker, "test:1");
     assert_eq!(state, State::Withdrawn);
-    assert!(note.unwrap().starts_with("excluded:"));
+    assert_eq!(note.unwrap(), "excluded:name");
 }
 #[tokio::test]
 async fn rescore_does_not_queue_a_posting_of_a_company_excluded_since_it_was_stored() {

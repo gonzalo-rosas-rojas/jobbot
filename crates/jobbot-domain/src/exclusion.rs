@@ -29,6 +29,24 @@ impl ExclusionResult {
     }
 }
 
+/// What an application's note starts with when it is withdrawn for an exclusion.
+pub const EXCLUDED_NOTE_PREFIX: &str = "excluded:";
+
+/// The note (and gate reason) of an application withdrawn for an exclusion: `excluded:` and the
+/// KIND of rule that matched (`domain`, `name` or `category`), never the rule's text, which can
+/// name a former client and would end up in the history and in what `submit` prints. A reason of
+/// another shape is `excluded:other`, so every reader of the prefix still recognises it.
+pub fn exclusion_note(result: &ExclusionResult) -> String {
+    let kind = result
+        .reason
+        .as_deref()
+        .and_then(|reason| reason.split_once(':'))
+        .map(|(kind, _)| kind)
+        .filter(|kind| matches!(*kind, "domain" | "name" | "category"))
+        .unwrap_or("other");
+    format!("{EXCLUDED_NOTE_PREFIX}{kind}")
+}
+
 /// Checks, in order, the apply and posting URL hosts (domains), the company name and
 /// the title and description (names), and finally the category phrases. Empty fields
 /// never match anything.
@@ -268,5 +286,28 @@ mod tests {
             j.apply_url.clear();
         });
         assert!(!check_exclusion(&blank, &rules).excluded);
+    }
+
+    #[test]
+    fn the_note_of_an_exclusion_names_the_kind_of_rule_and_never_its_text() {
+        let rules = Exclusions {
+            names: vec!["Zorblax Holdings".into()],
+            domains: vec!["zorblax.example".into()],
+            categories: vec!["quokka farming".into()],
+        };
+        let by_name = make_job_with(|j| j.company = "Zorblax Holdings".into());
+        let by_domain = make_job_with(|j| j.apply_url = "https://jobs.zorblax.example/1".into());
+        let by_category = make_job_with(|j| j.description = "We do quokka farming.".into());
+        for (job, note) in [
+            (by_name, "excluded:name"),
+            (by_domain, "excluded:domain"),
+            (by_category, "excluded:category"),
+        ] {
+            let result = check_exclusion(&job, &rules);
+            assert!(result.excluded);
+            assert_eq!(exclusion_note(&result), note);
+        }
+        let odd = ExclusionResult::excluded("something else".into());
+        assert_eq!(exclusion_note(&odd), "excluded:other");
     }
 }

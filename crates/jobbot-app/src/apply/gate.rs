@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use chrono::{DateTime, TimeDelta, Utc};
-use jobbot_domain::exclusion::check_exclusion;
+use jobbot_domain::exclusion::{check_exclusion, exclusion_note};
 use jobbot_domain::models::Job;
 use jobbot_domain::rules::{Criteria, Exclusions};
 use jobbot_domain::text::normalize;
@@ -103,10 +103,7 @@ fn decide(
     // company must never be.
     let exclusion = check_exclusion(job, exclusions);
     if exclusion.excluded {
-        return Ok(GateDecision::block(format!(
-            "excluded:{}",
-            exclusion.reason.unwrap_or_default()
-        )));
+        return Ok(GateDecision::block(exclusion_note(&exclusion)));
     }
     if is_manual_only_posting(job) {
         return Ok(GateDecision::block(REASON_MANUAL_ONLY));

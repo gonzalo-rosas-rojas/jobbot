@@ -3,9 +3,9 @@
 use std::collections::{BTreeMap, HashSet};
 
 use chrono::{DateTime, TimeDelta, Utc};
-use jobbot_domain::exclusion::check_exclusion;
+use jobbot_domain::exclusion::{check_exclusion, exclusion_note};
 use jobbot_domain::gate::{is_stale, stale_note};
-use jobbot_domain::handoff::is_sent_by_hand;
+use jobbot_domain::handoff::{form_may_have_gone_out, may_have_been_sent};
 use jobbot_domain::models::{FetchError, Job};
 use jobbot_domain::rules::{Criteria, Exclusions};
 use jobbot_domain::scoring::{ScoreResult, score_job};
@@ -13,7 +13,7 @@ use jobbot_domain::state::State;
 
 use crate::apply::gate::is_stale_stored;
 use crate::ports::Source;
-use crate::ports::store::{INTENT_SUBMIT, INTERRUPTED_PREFIX, Store, StoreError};
+use crate::ports::store::{INTENT_SUBMIT, Store, StoreError};
 use tracing::field::Empty;
 
 // The region rules are pure and live in the domain crate.
@@ -162,28 +162,11 @@ pub struct PruneReport {
 /// (`gate::stale_note`, `stale_posting: aviso de más de N días`).
 const OUT_OF_REGION_NOTE: &str = "fuera_de_region: no se puede hacer desde Chile";
 
-/// Reasons under which a form may have gone out although the application never reached
-/// `Submitted`: the page did not confirm a click, or Gonza finished an assisted form himself and
-/// closed it, or the run that clicked it died before recording the result. Withdrawing such an
-/// application would hide a real submission. The forms Gonza sends by hand
-/// (`handoff::is_sent_by_hand`) are protected the same way: he may have sent one and not yet run
-/// `confirm`, and withdrawn is terminal.
-///
-/// The panel sorts a waiting card by the same prefixes (`reason_kind` in the panel's `snapshot/cards.rs`), so it can
-/// tell Gonza to look before he applies again.
-pub const MAY_HAVE_BEEN_SENT: [&str; 4] = [
-    "unconfirmed_submit",
-    INTERRUPTED_PREFIX,
-    "assist_closed",
-    "assist_timeout",
-];
-
-pub(crate) fn may_have_been_sent(reason: &str) -> bool {
-    is_sent_by_hand(reason)
-        || MAY_HAVE_BEEN_SENT
-            .iter()
-            .any(|prefix| reason.starts_with(prefix))
-}
+/// The reasons under which a form may have gone out although the application never reached
+/// `Submitted` live in the domain (`handoff::MAY_HAVE_BEEN_SENT`, `may_have_been_sent`,
+/// `form_may_have_gone_out`). The panel sorts a waiting card by the same prefixes (`reason_kind`
+/// in the panel's `snapshot/cards.rs`), so it can tell Gonza to look before he applies again.
+pub use jobbot_domain::handoff::MAY_HAVE_BEEN_SENT;
 
 /// Withdraws the applications that were never sent and whose posting is not eligible any more.
 /// Withdrawal is terminal, so the pass only acts on what is clear:
@@ -194,13 +177,16 @@ pub(crate) fn may_have_been_sent(reason: &str) -> bool {
 ///   (a run is clicking it or died clicking it). Everything submitted, answered, finished or
 ///   withdrawn stays.
 /// * A posting whose company, domain or category is excluded now (`check_exclusion`: the rule was
-///   added after the posting was queued) is withdrawn with the gate's own `excluded:<rule>` note,
-///   after the two reasons below (an application that is stale or out of region is withdrawn for
-///   that reason even if it is excluded too). The submission gate would withdraw it too, but only
-///   once the application reached `prepared` and a run looked at it. One limit, because
-///   withdrawal is terminal: an application that may have gone out already (waiting for Gonza by
-///   hand, or with a click the page did not confirm, or an open submit intent) is kept and its
-///   key listed in `excluded_waiting`, so he does not send it.
+///   added after the posting was queued) is withdrawn with the gate's own `excluded:<kind>` note
+///   (the kind of rule, never its text), after the two reasons below (an application that is stale
+///   or out of region is withdrawn for that reason even if it is excluded too). The submission
+///   gate would withdraw it too, but only once the application reached `prepared` and a run
+///   looked at it. One limit, because withdrawal is terminal: an application whose form may
+///   really have gone out (a click the page did not confirm, a run cut after the click, an
+///   assisted form closed or left open, an open submit intent, or a form recorded as sent by
+///   hand: `handoff::form_may_have_gone_out`) is kept and its key listed in `excluded_waiting`, so
+///   he does not send it again. A plain by-hand card (`listing_only`, `manual_only_platform`,
+///   `handoff`) is not that: nothing says it was sent, so it is withdrawn like any other.
 /// * A stale posting (the gate's `is_stale_stored`: the posting's date, or for a source that
 ///   publishes none, the day it was first seen) is withdrawn with `stale_posting`. The date needs
 ///   no fresh fetch: the submission gate would withdraw the same row anyway.
@@ -230,31 +216,33 @@ pub fn prune_ineligible(
         .map(|intent| intent.job_key)
         .collect();
     for row in tracker.unsent_applications()? {
-        let may_be_sent = clicking.contains(&row.job_key)
-            || (row.state == State::NeedsGonza
-                && row.needs_reason.as_deref().is_some_and(may_have_been_sent));
+        let waiting_reason = (row.state == State::NeedsGonza)
+            .then_some(row.needs_reason.as_deref())
+            .flatten();
+        // It may have been sent by hand, or by a click: age and region leave it alone.
+        let may_be_sent =
+            clicking.contains(&row.job_key) || waiting_reason.is_some_and(may_have_been_sent);
+        // A click that may have gone through, or a form recorded as sent: that one really may
+        // have gone out. A plain by-hand card (`listing_only`, `handoff`...) has not: it waits.
+        let gone_out =
+            clicking.contains(&row.job_key) || waiting_reason.is_some_and(form_may_have_gone_out);
         let Some(job) = tracker.get_job(&row.job_key)? else {
             continue;
         };
         let exclusion = check_exclusion(&job, exclusions);
-        if may_be_sent {
-            // Not withdrawn (it may have gone out already), but Gonza must not send it again.
-            if exclusion.excluded {
-                report.excluded_waiting.push(row.job_key);
-            }
-            continue;
-        }
         // Age and region first, whether or not the company is also excluded: the reason that
         // needs no rule is the one that goes on record.
-        let (note, counter) = if is_stale_stored(&job, tracker, criteria, now)? {
+        let (note, counter) = if !may_be_sent && is_stale_stored(&job, tracker, criteria, now)? {
             (stale_note(criteria), &mut report.stale)
-        } else if refreshed.contains(&row.job_key) && !region_ok_for(&job, criteria) {
+        } else if !may_be_sent && refreshed.contains(&row.job_key) && !region_ok_for(&job, criteria)
+        {
             (OUT_OF_REGION_NOTE.to_string(), &mut report.out_of_region)
+        } else if exclusion.excluded && gone_out {
+            // Not withdrawn (it may have gone out already), but Gonza must not send it again.
+            report.excluded_waiting.push(row.job_key);
+            continue;
         } else if exclusion.excluded {
-            (
-                format!("excluded:{}", exclusion.reason.unwrap_or_default()),
-                &mut report.excluded,
-            )
+            (exclusion_note(&exclusion), &mut report.excluded)
         } else {
             continue;
         };
@@ -269,8 +257,11 @@ pub fn prune_ineligible(
     // may have gone through), and it is the waiting application most likely to be sent already:
     // it is listed too when its company is excluded now.
     for row in tracker.list_by_state(State::NeedsGonza)? {
-        let unconfirmed = row.needs_reason.as_deref().is_some_and(may_have_been_sent);
-        if !unconfirmed || report.excluded_waiting.contains(&row.job_key) {
+        let gone_out = row
+            .needs_reason
+            .as_deref()
+            .is_some_and(form_may_have_gone_out);
+        if !gone_out || report.excluded_waiting.contains(&row.job_key) {
             continue;
         }
         let excluded = tracker

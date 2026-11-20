@@ -49,6 +49,37 @@ pub fn is_sent_by_hand(reason: &str) -> bool {
 /// `submitted`): the form already went out by hand.
 pub const MANUAL_RECORD_PREFIX: &str = "manual_record:";
 
+/// The `needs_gonza` reason of a run that died between the click and its confirmation.
+pub const INTERRUPTED_PREFIX: &str = "interrupted_submit";
+
+/// Reasons under which a click may have gone through although the application never reached
+/// `Submitted`: the page did not confirm a click, the run that clicked died before recording the
+/// result, or Gonza finished an assisted form himself and closed it (or left it open).
+pub const MAY_HAVE_BEEN_SENT: [&str; 4] = [
+    "unconfirmed_submit",
+    INTERRUPTED_PREFIX,
+    "assist_closed",
+    "assist_timeout",
+];
+
+/// True when `reason` says a click may have gone through or that Gonza recorded the form as sent
+/// by hand (`MANUAL_RECORD_PREFIX`): the form of such an application may really have gone out.
+/// A plain by-hand card (`is_sent_by_hand` without a record) is not that: it waits for his send.
+pub fn form_may_have_gone_out(reason: &str) -> bool {
+    reason.starts_with(MANUAL_RECORD_PREFIX)
+        || MAY_HAVE_BEEN_SENT
+            .iter()
+            .any(|prefix| reason.starts_with(prefix))
+}
+
+/// True when the form of an application waiting for Gonza with this `needs_gonza` reason may have
+/// gone out: it is his to send by hand (`is_sent_by_hand`) or a click may have gone through
+/// (`form_may_have_gone_out`). The one rule behind "nothing withdraws it, nothing moves another
+/// application in its place": discovery's prune, the mailbox cut-off and the mailbox matcher.
+pub fn may_have_been_sent(reason: &str) -> bool {
+    is_sent_by_hand(reason) || form_may_have_gone_out(reason)
+}
+
 /// What the bank gives for one question of the form.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SheetAnswer {

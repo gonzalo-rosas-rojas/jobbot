@@ -36,8 +36,9 @@ pub type StoreResult<T> = Result<T, StoreError>;
 pub const INTENT_SUBMIT: &str = "submit";
 
 /// Start of the `needs_reason` of an application whose run was cut between the click and its
-/// confirmation. Discovery refuses to overwrite a row carrying it (see `MAY_HAVE_BEEN_SENT`).
-pub const INTERRUPTED_PREFIX: &str = "interrupted_submit";
+/// confirmation. Discovery refuses to overwrite a row carrying it (see `MAY_HAVE_BEEN_SENT`). It
+/// lives in the domain next to the rule that reads it.
+pub use jobbot_domain::handoff::INTERRUPTED_PREFIX;
 
 /// An act announced and not yet closed.
 #[derive(Debug, Clone, PartialEq, Eq)]
