@@ -447,11 +447,15 @@ static CITIZENSHIP_DENIED: LazyLock<Regex> = LazyLock::new(|| {
     .expect("CITIZENSHIP_DENIED is a valid regex")
 });
 
+/// The words that make a sentence about the candidate ("you must", "needs to", "should"), shared by
+/// every confining rule so that a sentence about the team or the clients never closes a job.
+const CANDIDATE: &str = r"(?:must|need to|needs to|have to|has to|required to|should|will need to)";
+
 /// Sentences that confine a job to one country, read after `fold`. Each one needs the words that
 /// make it about the candidate ("must", "only", "authorized to work"): a company that is "US-based"
 /// or a benefit "for US residents" says nothing about who may apply.
 static CONFINING: LazyLock<RegexSet> = LazyLock::new(|| {
-    let candidate = r"(?:must|need to|needs to|have to|has to|required to|should|will need to)";
+    let candidate = CANDIDATE;
     let negative = r"(?:cannot|can not|can't|unable to|do not|don't|will not|won't|not able to)";
     RegexSet::new([
         // "must be located in US East, Central, or West timezone", "must reside in the United States"
@@ -497,18 +501,27 @@ static CONFINING: LazyLock<RegexSet> = LazyLock::new(|| {
 /// "able to work in" or "overlap with" those zones is a working-hours request, not a place, and
 /// "North or South American time zones" has another word between the two and does not match.
 static TIME_ZONE_PLACE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"\b(?:location|located|based|reside|residing)\s+(?:in|within)\s+(?:the\s+)?north\s+americ(?:a|an)\s+time\s*zones?\b",
-    )
+    let zones = r"(?:in|within)\s+(?:the\s+)?north\s+americ(?:a|an)\s+time\s*zones?\b";
+    // "Required location in ..." names the candidate's place by itself; the other forms need the
+    // candidate prefix, so "Our team is based in North American time zones" does not close.
+    Regex::new(&format!(
+        r"\brequired\s+location\s+{zones}|\b{CANDIDATE}\s+(?:also\s+)?(?:be\s+)?(?:currently\s+)?(?:located|based|reside|residing)\s+{zones}"
+    ))
     .expect("TIME_ZONE_PLACE is a valid regex")
 });
 
-/// Words that make a sentence a wish or an alternative, not a requirement: "Preferably based in
-/// North American time zones", "...or willing to work those hours". Such a sentence never closes
-/// the job on its time zones.
-static HEDGE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b(?:preferabl[ey]|preferred|prefer|ideally|ideal|willing|plus|bonus)\b")
-        .expect("HEDGE is a valid regex")
+/// Words of a wish, not a requirement: "...is a plus", "preferred", "nice to have".
+const PREFERENCE_WORDS: &str = r"preferabl[ey]|preferred|prefer|ideally|ideal|plus|bonus|nice\s+to\s+have|desirable|an\s+advantage|beneficial";
+
+/// A sentence that only wishes ("Preferably based in North American time zones", "Security
+/// clearance preferred") never closes a job; for time zones "...or willing to work those hours"
+/// is an alternative and counts too.
+static PREFERENCE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(&format!(r"\b(?:{PREFERENCE_WORDS})\b")).expect("PREFERENCE is a valid regex")
+});
+
+static TIME_ZONE_HEDGE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(&format!(r"\b(?:{PREFERENCE_WORDS}|willing)\b")).expect("TIME_ZONE_HEDGE is valid")
 });
 
 /// Sentences that ask for a US government clearance, read after `fold`. Only a citizen can hold
@@ -595,7 +608,7 @@ fn clearance_denied(sentence: &str) -> bool {
 
 /// Whether a folded sentence asks for a US government clearance.
 fn needs_clearance(sentence: &str) -> bool {
-    CLEARANCE.is_match(sentence) && !clearance_denied(sentence)
+    CLEARANCE.is_match(sentence) && !clearance_denied(sentence) && !PREFERENCE.is_match(sentence)
 }
 
 /// Sentences of a posting based in one of the extra places that say the candidate must already
@@ -755,7 +768,7 @@ fn description_confinement(description: &str, extra: Option<&Regex>) -> Confinem
         // A zone-bound place is a confinement unless denied or offered with an open place.
         if TIME_ZONE_PLACE.is_match(&sentence)
             && !NEGATION.is_match(&sentence)
-            && !HEDGE.is_match(&sentence)
+            && !TIME_ZONE_HEDGE.is_match(&sentence)
             && !has_open_term(&sentence)
         {
             return Confinement::Closed;
@@ -1212,6 +1225,9 @@ mod tests {
             "Required location in North American time zones.",
             "Must be located in North American time zones.",
             "Candidates must be based in North American time zones.",
+            "You must be located in North American time zones",
+            "Candidates must be based in US time zones",
+            "You should be located in North American time zones.",
             "You must reside in North American time zones.",
         ] {
             assert!(!passes_saying(sentence), "{sentence:?} confines the job");
@@ -1223,6 +1239,9 @@ mod tests {
             "You don't need to be located in North American time zones.",
             "overlap with North American time zones",
             "Required location in North American time zones or LATAM.",
+            // About the team or the clients, not about who may apply.
+            "Our clients are located in North American time zones, so you'll overlap until 5pm ET",
+            "Our team is based in North American time zones",
             "Preferably based in North American time zones",
             "Ideally located in North American time zones",
             "Must be located in North American time zones or willing to work those hours",
@@ -1274,6 +1293,7 @@ mod tests {
             "Must be eligible for a security clearance",
             "Must be able to obtain a security clearance",
             "Active clearance required",
+            "Must hold an active security clearance",
             "A current security clearance is required.",
             "Valid TS clearance needed.",
             // A denial elsewhere in the sentence, not attached to the clearance, does not count.
@@ -1312,6 +1332,11 @@ mod tests {
             "You don't need to hold a clearance",
             "You don't need a TS/SCI clearance",
             "Don't have a TS/SCI clearance? No problem.",
+            // A preference is not a requirement.
+            "Experience with projects that require a security clearance is a plus",
+            "Security clearance preferred",
+            "An active Secret clearance is a bonus",
+            "Active TS/SCI clearance is nice to have",
             // Ordinary clearance words that are not a government clearance.
             "You must have clearance from your manager before deploying",
             "Trades must be clearable through the CCP",
