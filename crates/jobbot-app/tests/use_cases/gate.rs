@@ -27,7 +27,7 @@ fn exclusions() -> Exclusions {
 fn prepared(tracker: &Tracker, job: &Job, approved: bool, submit: bool) -> ApplicationRow {
     let key = job.key();
     tracker.add_job(job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-    tracker.create_application(&key, *NOW).unwrap();
+    tracker.start_cold_for_tests(&key, *NOW).unwrap();
     tracker
         .transition(&key, State::Prepared, None, *NOW)
         .unwrap();
@@ -298,7 +298,7 @@ fn submitted_hours_ago(tracker: &Tracker, id: &str, hours: i64) {
         j.company = format!("Co{id}");
     });
     tracker.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-    tracker.create_application(&job.key(), *NOW).unwrap();
+    tracker.start_cold_for_tests(&job.key(), *NOW).unwrap();
     tracker
         .transition(&job.key(), State::Prepared, None, *NOW)
         .unwrap();

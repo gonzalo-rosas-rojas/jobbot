@@ -72,7 +72,7 @@ impl Env {
         self.tracker
             .add_job(job, score, &BTreeMap::new(), *NOW)
             .unwrap();
-        self.tracker.create_application(&job.key(), *NOW).unwrap();
+        self.tracker.start_cold_for_tests(&job.key(), *NOW).unwrap();
     }
 
     fn state(&self, key: &str) -> State {
@@ -1106,7 +1106,7 @@ async fn an_assisted_form_confirmed_from_elsewhere_stays_submitted_when_its_tab_
     };
     let job = numbered(1);
     tracker.add_job(&job, 90.0, &BTreeMap::new(), *NOW).unwrap();
-    tracker.create_application(&job.key(), *NOW).unwrap();
+    tracker.start_cold_for_tests(&job.key(), *NOW).unwrap();
     tracker
         .set_cv_path(&job.key(), Path::new("cv.pdf"))
         .unwrap();
@@ -1176,7 +1176,7 @@ async fn a_live_click_is_preceded_by_a_durable_intent_and_closes_it() {
     };
     let job = numbered(1);
     tracker.add_job(&job, 90.0, &BTreeMap::new(), *NOW).unwrap();
-    tracker.create_application(&job.key(), *NOW).unwrap();
+    tracker.start_cold_for_tests(&job.key(), *NOW).unwrap();
     tracker
         .set_cv_path(&job.key(), Path::new("cv.pdf"))
         .unwrap();

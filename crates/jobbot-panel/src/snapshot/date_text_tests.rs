@@ -85,7 +85,11 @@ fn panel_with_application(
         .unwrap();
     panel
         .tracker
-        .create_application(&job.key(), at(11, 0, 0, 250_000_000))
+        .start_application(
+            &job.key(),
+            jobbot_domain::origin::Origin::Cold,
+            at(11, 0, 0, 250_000_000),
+        )
         .unwrap();
     let key = job.key();
     (panel, dir, key)
@@ -173,7 +177,11 @@ fn the_days_a_card_has_waited_are_whole_days_of_the_stored_seconds() {
             .unwrap();
         panel
             .tracker
-            .create_application(&job.key(), at(12, 0, 0, 900_000_000))
+            .start_application(
+                &job.key(),
+                jobbot_domain::origin::Origin::Cold,
+                at(12, 0, 0, 900_000_000),
+            )
             .unwrap();
         let snap = snapshot(&panel);
         let found = card(&snap, &job.key());
@@ -192,7 +200,11 @@ fn the_detail_of_an_application_lists_its_history_with_z_text_and_no_fraction() 
         .unwrap();
     panel
         .tracker
-        .create_application(&job.key(), at(9, 0, 0, 5))
+        .start_application(
+            &job.key(),
+            jobbot_domain::origin::Origin::Cold,
+            at(9, 0, 0, 5),
+        )
         .unwrap();
     panel
         .tracker
@@ -345,7 +357,11 @@ fn the_activity_is_cut_in_half_hours_of_the_utc_clock_whatever_fraction_now_has(
             .unwrap();
         panel
             .tracker
-            .create_application(&job.key(), at(12, 10, 0, 500_000_000))
+            .start_application(
+                &job.key(),
+                jobbot_domain::origin::Origin::Cold,
+                at(12, 10, 0, 500_000_000),
+            )
             .unwrap();
         job.key()
     };

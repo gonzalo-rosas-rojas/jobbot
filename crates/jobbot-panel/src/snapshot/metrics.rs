@@ -356,7 +356,10 @@ mod tests {
                 .tracker
                 .add_job(&job, 80.0, &BTreeMap::new(), *NOW)
                 .unwrap();
-            panel.tracker.create_application(&job.key(), *NOW).unwrap();
+            panel
+                .tracker
+                .start_application(&job.key(), jobbot_domain::origin::Origin::Cold, *NOW)
+                .unwrap();
             for state in states {
                 panel
                     .tracker
@@ -408,7 +411,10 @@ mod tests {
                 .tracker
                 .add_job(&job, 80.0, &BTreeMap::new(), *NOW)
                 .unwrap();
-            panel.tracker.create_application(&job.key(), *NOW).unwrap();
+            panel
+                .tracker
+                .start_application(&job.key(), jobbot_domain::origin::Origin::Cold, *NOW)
+                .unwrap();
             panel.tracker.set_origin(&job.key(), origin).unwrap();
         };
         walk("1", "Remote - LATAM", Origin::Cold);

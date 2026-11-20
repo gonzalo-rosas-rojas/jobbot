@@ -593,7 +593,8 @@ mod tests {
         });
         let seen = *NOW - TimeDelta::days(2);
         t.add_job(&dated, 80.0, &BTreeMap::new(), seen).unwrap();
-        t.create_application(&dated.key(), seen).unwrap();
+        t.start_application(&dated.key(), jobbot_domain::origin::Origin::Cold, seen)
+            .unwrap();
         t.transition(
             &dated.key(),
             State::NeedsGonza,
@@ -605,8 +606,12 @@ mod tests {
         let sent = make_job_with(|j| j.external_id = "sent".into());
         t.add_job(&sent, 80.0, &BTreeMap::new(), *NOW - TimeDelta::days(50))
             .unwrap();
-        t.create_application(&sent.key(), *NOW - TimeDelta::days(50))
-            .unwrap();
+        t.start_application(
+            &sent.key(),
+            jobbot_domain::origin::Origin::Cold,
+            *NOW - TimeDelta::days(50),
+        )
+        .unwrap();
         for state in [State::Prepared, State::Submitted] {
             t.transition(&sent.key(), state, None, *NOW - TimeDelta::days(1))
                 .unwrap();
@@ -615,8 +620,12 @@ mod tests {
         let old = make_job_with(|j| j.external_id = "old".into());
         t.add_job(&old, 80.0, &BTreeMap::new(), *NOW - TimeDelta::days(50))
             .unwrap();
-        t.create_application(&old.key(), *NOW - TimeDelta::days(50))
-            .unwrap();
+        t.start_application(
+            &old.key(),
+            jobbot_domain::origin::Origin::Cold,
+            *NOW - TimeDelta::days(50),
+        )
+        .unwrap();
 
         let snap = build_snapshot(&panel).unwrap();
         let max_age = sample_criteria().max_posting_age_days;

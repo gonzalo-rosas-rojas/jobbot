@@ -147,7 +147,7 @@ pub(super) fn tracker_of(root: &Path) -> Tracker {
 pub(super) fn seed(root: &Path, job: &Job, states: &[State]) {
     let t = tracker_of(root);
     t.add_job(job, 80.0, &BTreeMap::new(), open_now()).unwrap();
-    t.create_application(&job.key(), open_now()).unwrap();
+    t.start_cold_for_tests(&job.key(), open_now()).unwrap();
     for state in states {
         t.transition(&job.key(), *state, Some("falta email"), open_now())
             .unwrap();

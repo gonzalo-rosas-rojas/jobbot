@@ -85,7 +85,7 @@ impl ApplicationRepo for Tracker {
         origin: Origin,
         now: DateTime<Utc>,
     ) -> StoreResult<()> {
-        Tracker::create_application_as(self, job_key, origin, now).map_err(StoreError::from)
+        Tracker::start_application(self, job_key, origin, now).map_err(StoreError::from)
     }
     fn get_application(&self, job_key: &str) -> StoreResult<Option<ApplicationRow>> {
         Tracker::get_application(self, job_key).map_err(StoreError::from)
@@ -432,7 +432,7 @@ mod tests {
         let tracker = Tracker::in_memory().unwrap();
         let job = make_job();
         tracker.add_job(&job, 0.9, &BTreeMap::new(), now()).unwrap();
-        tracker.create_application(&job.key(), now()).unwrap();
+        tracker.start_cold_for_tests(&job.key(), now()).unwrap();
         let store: &dyn Store = &tracker;
 
         let refused = store.transition(&job.key(), State::Offer, None, now());

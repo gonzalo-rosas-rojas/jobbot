@@ -95,7 +95,7 @@ mod tests {
         let t = tracker_of(root.path());
         let sent = open_now() - TimeDelta::days(3);
         t.add_job(&job, 80.0, &BTreeMap::new(), sent).unwrap();
-        t.create_application(&job.key(), sent).unwrap();
+        t.start_cold_for_tests(&job.key(), sent).unwrap();
         for state in [State::Prepared, State::Submitted] {
             t.transition(&job.key(), state, None, sent).unwrap();
         }

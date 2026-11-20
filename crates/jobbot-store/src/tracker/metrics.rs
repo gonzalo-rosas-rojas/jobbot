@@ -461,7 +461,7 @@ mod tests {
         let other = make_job_with(|j| j.external_id = "2".into());
         for j in [&job, &other] {
             t.add_job(j, 70.0, &BTreeMap::new(), *NOW).unwrap();
-            t.create_application(&j.key(), *NOW).unwrap();
+            t.start_cold_for_tests(&j.key(), *NOW).unwrap();
         }
         t.transition(&job.key(), State::Prepared, None, *NOW)
             .unwrap();
@@ -489,7 +489,7 @@ mod tests {
         let walk = |id: &str, states: &[State]| {
             let job = make_job_with(|j| j.external_id = id.into());
             t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-            t.create_application(&job.key(), *NOW).unwrap();
+            t.start_cold_for_tests(&job.key(), *NOW).unwrap();
             for state in states {
                 t.transition(&job.key(), *state, None, *NOW).unwrap();
             }
@@ -584,7 +584,7 @@ mod tests {
         // Before the span: not a move of it.
         let early = stored_at(&t, "early", 50.0, from - minute, &[State::Prepared]);
         let a = stored_at(&t, "a", 50.0, from, &[]);
-        t.create_application(&a, from).unwrap();
+        t.start_cold_for_tests(&a, from).unwrap();
         t.transition(&a, State::Prepared, None, from + minute * 10)
             .unwrap();
         let b = stored_at(&t, "b", 50.0, from + minute, &[State::Prepared]);
@@ -647,7 +647,7 @@ mod tests {
         // Before the span: not counted.
         let early = stored_at(&t, "early", 50.0, from - minute, &[State::Prepared]);
         let a = stored_at(&t, "a", 50.0, from, &[]);
-        t.create_application(&a, from).unwrap();
+        t.start_cold_for_tests(&a, from).unwrap();
         t.transition(&a, State::Prepared, None, from + minute * 10)
             .unwrap();
         let b = stored_at(&t, "b", 50.0, from + minute, &[State::Prepared]);
@@ -687,7 +687,7 @@ mod tests {
                 j.external_id = id.into();
             });
             t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-            t.create_application(&job.key(), *NOW).unwrap();
+            t.start_cold_for_tests(&job.key(), *NOW).unwrap();
             for (n, state) in states.iter().enumerate() {
                 t.transition(
                     &job.key(),
@@ -768,7 +768,7 @@ mod tests {
             j.remote = true;
         });
         t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-        t.create_application(&job.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         t.set_origin(&job.key(), origin).unwrap();
         for (n, state) in states.iter().enumerate() {
             t.transition(
@@ -965,7 +965,7 @@ mod tests {
                 j.external_id = format!("answered-{n}");
             });
             t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-            t.create_application(&job.key(), *NOW).unwrap();
+            t.start_cold_for_tests(&job.key(), *NOW).unwrap();
             // An offer can only follow an interview.
             let mut path = vec![State::Prepared, State::Submitted];
             if *state == State::Offer {

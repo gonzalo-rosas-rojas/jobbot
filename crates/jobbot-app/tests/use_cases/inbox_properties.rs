@@ -46,7 +46,7 @@ fn tracker_with_sent_applications() -> Tracker {
         tracker
             .add_job(&job, 80.0, &BTreeMap::new(), sent_at)
             .unwrap();
-        tracker.create_application(&job.key(), sent_at).unwrap();
+        tracker.start_cold_for_tests(&job.key(), sent_at).unwrap();
         for state in [State::Prepared, State::Submitted] {
             tracker
                 .transition(&job.key(), state, None, sent_at)

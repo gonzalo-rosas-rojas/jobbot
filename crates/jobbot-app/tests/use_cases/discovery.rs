@@ -1156,7 +1156,7 @@ fn left_in_the_queue(tracker: &Tracker, job: &Job) {
     tracker
         .add_job(job, 70.0, &Default::default(), *NOW)
         .unwrap();
-    tracker.create_application(&job.key(), *NOW).unwrap();
+    tracker.start_cold_for_tests(&job.key(), *NOW).unwrap();
 }
 #[tokio::test]
 async fn a_posting_the_source_no_longer_returns_is_pruned_when_stale_but_not_for_its_region() {
@@ -1183,7 +1183,7 @@ fn first_seen_days_ago(tracker: &Tracker, job: &Job, days: i64) {
     tracker
         .add_job(job, 70.0, &Default::default(), then)
         .unwrap();
-    tracker.create_application(&job.key(), then).unwrap();
+    tracker.start_cold_for_tests(&job.key(), then).unwrap();
 }
 #[tokio::test]
 async fn an_undated_posting_is_pruned_once_it_has_been_known_for_over_45_days() {

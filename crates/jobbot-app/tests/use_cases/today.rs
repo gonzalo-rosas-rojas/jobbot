@@ -127,7 +127,7 @@ fn what_waits_for_his_decision_is_the_needs_gonza_list_with_its_reason() {
     let t = Tracker::in_memory().unwrap();
     let job = make_job();
     t.add_job(&job, 80.0, &BTreeMap::new(), *NOW).unwrap();
-    t.create_application(&job.key(), *NOW).unwrap();
+    t.start_cold_for_tests(&job.key(), *NOW).unwrap();
     t.transition(
         &job.key(),
         State::NeedsGonza,
@@ -138,7 +138,7 @@ fn what_waits_for_his_decision_is_the_needs_gonza_list_with_its_reason() {
     // Not waiting for him: a sent application.
     let other = make_job_with(|j| j.external_id = "2".into());
     t.add_job(&other, 80.0, &BTreeMap::new(), *NOW).unwrap();
-    t.create_application(&other.key(), *NOW).unwrap();
+    t.start_cold_for_tests(&other.key(), *NOW).unwrap();
 
     let text = build_today(&t, *NOW).unwrap();
 
@@ -252,7 +252,7 @@ fn the_decision_list_is_cut_too_but_the_tasks_never_are() {
     for n in 0..(LIST_CAP + 2) {
         let job = make_job_with(|j| j.external_id = n.to_string());
         t.add_job(&job, 80.0, &BTreeMap::new(), *NOW).unwrap();
-        t.create_application(&job.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         t.transition(&job.key(), State::NeedsGonza, Some("falta email"), *NOW)
             .unwrap();
         task(&t, &format!("tarea {n}"), None, None);

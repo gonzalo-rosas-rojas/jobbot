@@ -87,7 +87,9 @@ fn the_folder_of_the_user_and_his_own_addresses_never_leave_the_panel_in_any_tex
         .add_job(&job, 80.0, &std::collections::BTreeMap::new(), now)
         .unwrap();
     let key = job.key();
-    p.tracker.create_application(&key, now).unwrap();
+    p.tracker
+        .start_application(&key, jobbot_domain::origin::Origin::Cold, now)
+        .unwrap();
     p.tracker
         .transition(&key, State::Prepared, None, now)
         .unwrap();

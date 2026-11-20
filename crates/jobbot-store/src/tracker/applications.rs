@@ -70,15 +70,11 @@ fn query_applications(
 }
 
 impl Tracker {
-    /// Starts an application at `Scored`. Does nothing if one already exists.
-    pub fn create_application(&self, job_key: &str, now: DateTime<Utc>) -> Result<()> {
-        self.create_application_as(job_key, Origin::Cold, now)
-    }
-
-    /// `create_application` with the origin the new application starts with. Discovery passes `Cold`; `record`
-    /// passes what it decided. An application that already exists keeps the origin it has. The column's default
-    /// stays `'cold'` so a running older process, whose INSERT names no origin, still inserts.
-    pub fn create_application_as(
+    /// Starts an application at `Scored` with the origin it begins with. Discovery passes `Cold`; `record` passes
+    /// what it decided. An application that already exists keeps the origin it has. The column's default stays
+    /// `'cold'` so a running older process, whose INSERT names no origin, still inserts. The one way the code that
+    /// opens real applications does it.
+    pub fn start_application(
         &self,
         job_key: &str,
         origin: Origin,
@@ -234,6 +230,12 @@ impl Tracker {
         self.update_application("approved = 1", &[], job_key)
     }
 
+    /// `start_application` as `Cold`, for fixtures and tests that do not care how the application came about. Not
+    /// for the code that opens real applications: that names the origin with `start_application`.
+    pub fn start_cold_for_tests(&self, job_key: &str, now: DateTime<Utc>) -> Result<()> {
+        self.start_application(job_key, Origin::Cold, now)
+    }
+
     // ---- queries
 
     /// Applications in `state`, best score first.
@@ -349,7 +351,7 @@ mod tests {
         let b = make_job_with(|j| j.external_id = "b".into());
         for job in [&a, &b] {
             t.add_job(job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-            t.create_application(&job.key(), *NOW).unwrap();
+            t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         }
         let events_before = t.events_for(&a.key()).unwrap().len();
         let updated_before = t.get_application(&a.key()).unwrap().unwrap().updated_at;
@@ -380,7 +382,7 @@ mod tests {
         let detail = BTreeMap::from([("fit".to_string(), 30.0)]);
         t.add_job(&job, 77.0, &detail, now).unwrap();
         assert!(t.has_posting(&job).unwrap());
-        t.create_application(&job.key(), now).unwrap();
+        t.start_cold_for_tests(&job.key(), now).unwrap();
         assert_eq!(state_of(&t, &job.key()), State::Scored);
         t.transition(&job.key(), State::Prepared, None, now)
             .unwrap();
@@ -404,7 +406,7 @@ mod tests {
         let add = |id: &str| {
             let job = make_job_with(|j| j.external_id = id.into());
             t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-            t.create_application(&job.key(), *NOW).unwrap();
+            t.start_cold_for_tests(&job.key(), *NOW).unwrap();
             job.key()
         };
         add("scored");
@@ -449,14 +451,14 @@ mod tests {
     }
 
     #[test]
-    fn create_application_is_idempotent() {
+    fn start_cold_for_tests_is_idempotent() {
         let t = Tracker::in_memory().unwrap();
         let job = make_job();
         t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-        t.create_application(&job.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         t.transition(&job.key(), State::Prepared, None, *NOW)
             .unwrap();
-        t.create_application(&job.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         assert_eq!(state_of(&t, &job.key()), State::Prepared);
         assert_eq!(
             t.count_events(&[State::Scored], *NOW - TimeDelta::days(1))
@@ -514,7 +516,7 @@ mod tests {
         let add = |id: &str, score: f64, walk: &[State]| {
             let job = make_job_with(|j| j.external_id = id.into());
             t.add_job(&job, score, &BTreeMap::new(), *NOW).unwrap();
-            t.create_application(&job.key(), *NOW).unwrap();
+            t.start_cold_for_tests(&job.key(), *NOW).unwrap();
             for state in walk {
                 t.transition(&job.key(), *state, None, *NOW).unwrap();
             }
@@ -546,7 +548,7 @@ mod tests {
         let t = Tracker::in_memory().unwrap();
         let job = make_job();
         t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-        t.create_application(&job.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         t.set_cv_path(&job.key(), Path::new("out/cv.pdf")).unwrap();
         t.set_screenshot(&job.key(), Path::new("shots/a.png"))
             .unwrap();
@@ -558,7 +560,7 @@ mod tests {
     /// An application whose click the page did not confirm: `needs_gonza` with an attempt stamp.
     fn click_without_confirmation(t: &Tracker, job: &Job) {
         t.add_job(job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-        t.create_application(&job.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         t.transition(&job.key(), State::Prepared, None, *NOW)
             .unwrap();
         t.record_attempt(&job.key(), *NOW).unwrap();
@@ -633,7 +635,7 @@ mod tests {
         let t = Tracker::in_memory().unwrap();
         let job = make_job();
         t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-        t.create_application(&job.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         t.transition(&job.key(), State::NeedsGonza, Some("falta email"), *NOW)
             .unwrap();
         let row = t.get_application(&job.key()).unwrap().unwrap();
@@ -692,7 +694,7 @@ mod tests {
         let t = Tracker::in_memory().unwrap();
         let job = make_job();
         t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-        t.create_application(&job.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         let row = t.get_application(&job.key()).unwrap().unwrap();
         assert_eq!(row.snoozed_until, None);
 
@@ -726,7 +728,7 @@ mod tests {
         });
         let seen = *NOW - TimeDelta::days(2);
         t.add_job(&job, 70.0, &BTreeMap::new(), seen).unwrap();
-        t.create_application(&job.key(), seen).unwrap();
+        t.start_cold_for_tests(&job.key(), seen).unwrap();
         let row = t.get_application(&job.key()).unwrap().unwrap();
         assert_eq!(row.posted_at, job.posted_at);
         assert_eq!(row.first_seen, seen);
@@ -765,7 +767,7 @@ mod tests {
         for (id, score) in [("1", 50.0), ("2", 90.0), ("3", 70.0), ("4", 70.0)] {
             let job = make_job_with(|j| j.external_id = id.into());
             t.add_job(&job, score, &BTreeMap::new(), *NOW).unwrap();
-            t.create_application(&job.key(), *NOW).unwrap();
+            t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         }
         let keys = |rows: Vec<ApplicationRow>| -> Vec<String> {
             rows.into_iter().map(|r| r.job_key).collect()
@@ -786,7 +788,7 @@ mod tests {
         for id in ["1", "2", "3"] {
             let job = make_job_with(|j| j.external_id = id.into());
             t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-            t.create_application(&job.key(), *NOW).unwrap();
+            t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         }
         t.transition("test:2", State::NeedsGonza, Some("captcha"), *NOW)
             .unwrap();

@@ -476,7 +476,7 @@ mod tests {
             .add_job(&ashby, 80.0, &BTreeMap::new(), open_now())
             .unwrap();
         tracker
-            .create_application(&ashby.key(), open_now())
+            .start_cold_for_tests(&ashby.key(), open_now())
             .unwrap();
         tracker
             .transition(&ashby.key(), State::Prepared, None, open_now())
@@ -493,7 +493,7 @@ mod tests {
             .add_job(&other, 70.0, &BTreeMap::new(), open_now())
             .unwrap();
         tracker
-            .create_application(&other.key(), open_now())
+            .start_cold_for_tests(&other.key(), open_now())
             .unwrap();
         tracker
             .transition(&other.key(), State::Prepared, None, open_now())

@@ -420,7 +420,7 @@ mod tests {
         let job = make_job();
         t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
         t.add_job(&job, 99.0, &BTreeMap::new(), *NOW).unwrap();
-        t.create_application(&job.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         assert_eq!(t.get_application(&job.key()).unwrap().unwrap().score, 70.0);
     }
 
@@ -442,7 +442,7 @@ mod tests {
         let t = Tracker::open(&path).unwrap();
         let job = stored_posting();
         t.add_job(&job, 77.0, &BTreeMap::new(), *NOW).unwrap();
-        t.create_application(&job.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         t.transition(&job.key(), State::Prepared, None, *NOW)
             .unwrap();
         t.set_screenshot(&job.key(), std::path::Path::new("shots/a.png"))
@@ -474,7 +474,7 @@ mod tests {
         let job = stored_posting();
         let detail = BTreeMap::from([("fit".to_string(), 30.0)]);
         t.add_job(&job, 77.0, &detail, *NOW).unwrap();
-        t.create_application(&job.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         let fresh = Job {
             url: "https://example.com/changed".into(),
             apply_url: "https://job-boards.greenhouse.io/acme/jobs/1".into(),
@@ -529,7 +529,7 @@ mod tests {
         for state in [State::Prepared, State::NeedsGonza] {
             let t = Tracker::in_memory().unwrap();
             t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-            t.create_application(&job.key(), *NOW).unwrap();
+            t.start_cold_for_tests(&job.key(), *NOW).unwrap();
             t.transition(&job.key(), State::Prepared, None, *NOW)
                 .unwrap();
             if state == State::NeedsGonza {
@@ -569,7 +569,7 @@ mod tests {
         let t = Tracker::in_memory().unwrap();
         let job = stored_posting();
         t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-        t.create_application(&job.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         t.transition(&job.key(), State::Prepared, None, *NOW)
             .unwrap();
         t.approve(&job.key()).unwrap();
@@ -845,10 +845,10 @@ mod tests {
             j.title = "Other Role".into();
         });
         t.add_job(&queued, 70.0, &BTreeMap::new(), *NOW).unwrap();
-        t.create_application(&queued.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&queued.key(), *NOW).unwrap();
         t.add_job(&stored, 40.0, &BTreeMap::new(), *NOW).unwrap();
         assert_eq!(t.jobs_without_application().unwrap(), vec![stored.clone()]);
-        t.create_application(&stored.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&stored.key(), *NOW).unwrap();
         assert!(t.jobs_without_application().unwrap().is_empty());
     }
 
@@ -867,7 +867,7 @@ mod tests {
             &BTreeMap::from([("fit".to_string(), 20.0)]),
         )
         .unwrap();
-        t.create_application(&stored.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&stored.key(), *NOW).unwrap();
         assert_eq!(
             t.get_application(&stored.key()).unwrap().unwrap().score,
             65.0
@@ -885,7 +885,7 @@ mod tests {
             (&draft, vec![State::Prepared]),
         ] {
             t.add_job(job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-            t.create_application(&job.key(), *NOW).unwrap();
+            t.start_cold_for_tests(&job.key(), *NOW).unwrap();
             for state in states {
                 t.transition(&job.key(), state, None, *NOW).unwrap();
             }

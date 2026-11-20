@@ -52,7 +52,7 @@ proptest! {
         let job = make_job();
         let key = job.key();
         tracker.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-        tracker.create_application(&key, *NOW).unwrap();
+        tracker.start_cold_for_tests(&key, *NOW).unwrap();
 
         let mut state = State::Scored;
         let mut history = vec![(None, State::Scored)];

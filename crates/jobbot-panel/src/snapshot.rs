@@ -576,7 +576,10 @@ mod tests {
             .tracker
             .add_job(&job, 80.0, &BTreeMap::new(), *NOW)
             .unwrap();
-        panel.tracker.create_application(&job.key(), *NOW).unwrap();
+        panel
+            .tracker
+            .start_application(&job.key(), jobbot_domain::origin::Origin::Cold, *NOW)
+            .unwrap();
         let detail = build_job_detail(&panel, &job.key()).unwrap().unwrap();
         assert_eq!(
             detail.description.chars().count(),
@@ -605,7 +608,10 @@ mod tests {
                 .tracker
                 .add_job(job, 80.0, &BTreeMap::new(), seen)
                 .unwrap();
-            panel.tracker.create_application(&job.key(), seen).unwrap();
+            panel
+                .tracker
+                .start_application(&job.key(), jobbot_domain::origin::Origin::Cold, seen)
+                .unwrap();
         }
 
         let dated_detail = build_job_detail(&panel, &dated.key()).unwrap().unwrap();

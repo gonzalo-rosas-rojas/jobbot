@@ -534,7 +534,7 @@ mod tests {
         let t = Tracker::open(&path).unwrap();
         let job = make_job();
         t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-        t.create_application(&job.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         t.record_attempt(&job.key(), *NOW).unwrap();
         assert_eq!(t.clicked_since(*NOW - TimeDelta::hours(1)).unwrap(), 1);
         // Opening it again does not try to add the column twice.
@@ -726,7 +726,7 @@ mod tests {
         let t = Tracker::open(&path).unwrap();
         let job = make_job();
         t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-        t.create_application(&job.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         let until = *NOW + TimeDelta::days(3);
         t.set_snoozed_until(&job.key(), Some(until)).unwrap();
         assert_eq!(
@@ -959,7 +959,7 @@ mod tests {
         let t = Tracker::in_memory().unwrap();
         let job = make_job();
         t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-        t.create_application(&job.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         assert_eq!(t.origin_of(&job.key()).unwrap(), Some(Origin::Cold));
     }
 
@@ -968,7 +968,7 @@ mod tests {
         let t = Tracker::in_memory().unwrap();
         let job = make_job();
         t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-        t.create_application(&job.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         t.lock()
             .execute("UPDATE applications SET origin = 'friend'", [])
             .unwrap();
@@ -997,7 +997,7 @@ mod tests {
         let t = Tracker::open(&path).unwrap();
         let job = make_job();
         t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-        t.create_application(&job.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         t.transition(&job.key(), State::Prepared, None, *NOW)
             .unwrap();
         t.transition(&job.key(), State::Submitted, None, *NOW)

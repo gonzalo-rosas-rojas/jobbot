@@ -19,7 +19,7 @@ fn tracker_with(states: &[State]) -> (Tracker, String) {
     let t = Tracker::in_memory().unwrap();
     let job = make_job();
     t.add_job(&job, 80.0, &BTreeMap::new(), *NOW).unwrap();
-    t.create_application(&job.key(), *NOW).unwrap();
+    t.start_cold_for_tests(&job.key(), *NOW).unwrap();
     for state in states {
         t.transition(&job.key(), *state, Some("nota"), *NOW)
             .unwrap();
@@ -369,7 +369,7 @@ fn confirming_a_form_the_bot_never_filled_does_not_count_as_a_review() {
         let t = Tracker::in_memory().unwrap();
         let job = make_job();
         t.add_job(&job, 80.0, &BTreeMap::new(), *NOW).unwrap();
-        t.create_application(&job.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         t.transition(&job.key(), State::Prepared, None, *NOW)
             .unwrap();
         t.transition(&job.key(), State::NeedsGonza, Some(reason), *NOW)
@@ -396,7 +396,10 @@ fn confirming_a_card_parked_for_its_region_counts_as_sent_by_hand_not_as_a_revie
     assert!(outcome.ok, "{outcome:?}");
     let app = t.get_application(&key).unwrap().unwrap();
     assert_eq!(app.state, State::Submitted);
-    assert!(!app.approved, "not approved: the review counter is unchanged");
+    assert!(
+        !app.approved,
+        "not approved: the review counter is unchanged"
+    );
     assert_eq!(t.approved_submitted_total().unwrap(), 0);
 }
 #[test]
@@ -404,7 +407,7 @@ fn confirming_a_bot_click_gonza_checked_still_counts_as_reviewed() {
     let t = Tracker::in_memory().unwrap();
     let job = make_job();
     t.add_job(&job, 80.0, &BTreeMap::new(), *NOW).unwrap();
-    t.create_application(&job.key(), *NOW).unwrap();
+    t.start_cold_for_tests(&job.key(), *NOW).unwrap();
     t.transition(&job.key(), State::Prepared, None, *NOW)
         .unwrap();
     t.transition(

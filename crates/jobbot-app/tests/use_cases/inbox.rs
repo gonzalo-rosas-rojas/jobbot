@@ -27,7 +27,7 @@ fn app(t: &Tracker, id: &str, company: &str, states: &[State]) -> String {
         j.company = company.into();
     });
     t.add_job(&job, 80.0, &BTreeMap::new(), sent_at()).unwrap();
-    t.create_application(&job.key(), sent_at()).unwrap();
+    t.start_cold_for_tests(&job.key(), sent_at()).unwrap();
     for state in states {
         t.transition(&job.key(), *state, None, sent_at()).unwrap();
     }
@@ -846,7 +846,7 @@ fn dated_app(t: &Tracker, id: &str, scored_days_ago: i64, steps: &[(State, i64)]
     let ago = |days: i64| *NOW - TimeDelta::days(days);
     t.add_job(&job, 80.0, &BTreeMap::new(), ago(scored_days_ago))
         .unwrap();
-    t.create_application(&job.key(), ago(scored_days_ago))
+    t.start_cold_for_tests(&job.key(), ago(scored_days_ago))
         .unwrap();
     for (state, days) in steps {
         // A form that waits for Gonza is one he sends by hand: that note says it may have gone.
@@ -926,7 +926,7 @@ fn a_below_the_floor_flag_is_not_a_send_so_an_older_email_from_the_company_moves
     let key = job.key();
     let ago = |days: i64| *NOW - TimeDelta::days(days);
     t.add_job(&job, 80.0, &BTreeMap::new(), ago(12)).unwrap();
-    t.create_application(&key, ago(12)).unwrap();
+    t.start_cold_for_tests(&key, ago(12)).unwrap();
     t.transition(
         &key,
         State::NeedsGonza,
@@ -955,7 +955,7 @@ fn a_company_name_that_normalizes_to_nothing_matches_no_waiting_application() {
     });
     t.add_job(&nameless, 80.0, &BTreeMap::new(), sent_at())
         .unwrap();
-    t.create_application(&nameless.key(), sent_at()).unwrap();
+    t.start_cold_for_tests(&nameless.key(), sent_at()).unwrap();
     t.transition(&nameless.key(), State::Prepared, None, sent_at())
         .unwrap();
     t.transition(
