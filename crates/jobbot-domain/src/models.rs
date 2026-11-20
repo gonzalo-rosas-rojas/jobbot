@@ -3,6 +3,9 @@
 
 use chrono::{DateTime, Utc};
 
+/// The `source` of a posting Gonza recorded by hand (`jobbot record`): no job board read it.
+pub const MANUAL_SOURCE: &str = "manual";
+
 /// One job posting, normalized across sources.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Job {

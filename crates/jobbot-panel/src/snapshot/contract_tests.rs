@@ -229,6 +229,8 @@ fn the_new_fields_are_named_the_way_the_page_reads_them() {
         keys(&json["funnel"]),
         [
             "answered",
+            "by_origin",
+            "by_region",
             "by_source",
             "interviews",
             "offers",

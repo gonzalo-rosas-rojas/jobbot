@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 
 use super::{Reply, Request};
 use crate::Panel;
-use jobbot_app::actions::{self, Outcome};
+use jobbot_app::actions::{self, Outcome, ResolveIntent};
 use jobbot_app::inbox;
 
 /// How far ahead of the panel's clock a send time may be (the browser's clock drifts a little).
@@ -61,6 +61,8 @@ struct RecordBody {
     location: Option<String>,
     salary_min: Option<f64>,
     salary_max: Option<f64>,
+    /// As `jobbot record --origin`.
+    origin: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -158,6 +160,19 @@ fn keyed(req: &Request, act: impl Fn(&str) -> Result<Outcome>) -> Result<Reply> 
     };
     match keys_of(body.key, body.keys) {
         Ok(keys) => apply(keys, act),
+        Err(reply) => Ok(reply),
+    }
+}
+
+/// `keyed` for an act that is one decision per application: the `key` of the body, and a batch is a 400.
+fn keyed_one(req: &Request, act: impl Fn(&str) -> Result<Outcome>) -> Result<Reply> {
+    let body: KeysBody = match parse(req) {
+        Ok(body) => body,
+        Err(reply) => return Ok(reply),
+    };
+    match keys_of(body.key, body.keys) {
+        Ok(Keys::One(key)) => Ok(outcome_reply(act(&key)?)),
+        Ok(Keys::Batch(_)) => Ok(Reply::message(400, "Falta key: se envía una por una")),
         Err(reply) => Ok(reply),
     }
 }
@@ -295,6 +310,7 @@ fn record(panel: &Panel, req: &Request) -> Result<Reply> {
         salary_min_monthly_usd: body.salary_min,
         salary_max_monthly_usd: body.salary_max,
         note: body.note,
+        origin: body.origin,
     };
     Ok(outcome_reply(actions::record(&*panel.tracker, &spec, at)?))
 }
@@ -333,7 +349,17 @@ pub(super) fn post(panel: &Panel, api: &str, req: &Request) -> Result<Reply> {
     match api {
         "approve" => keyed(req, |key| actions::approve(&*panel.tracker, key)),
         "resolve" => keyed(req, |key| {
-            actions::resolve(&*panel.tracker, key, panel.now())
+            actions::resolve(&*panel.tracker, key, panel.now(), ResolveIntent::Plain)
+        }),
+        // The one act that clears the region check of a card (`ResolveIntent::SendOutsideRegion`): a single key,
+        // never a batch, and no other route sends the intent.
+        "send_anyway" => keyed_one(req, |key| {
+            actions::resolve(
+                &*panel.tracker,
+                key,
+                panel.now(),
+                ResolveIntent::SendOutsideRegion,
+            )
         }),
         "confirm" => keyed(req, |key| {
             actions::confirm(&*panel.tracker, key, panel.now())

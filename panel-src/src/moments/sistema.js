@@ -13,7 +13,7 @@
 // (the batch threshold; null when the page has no such setting, and the stop then says "sin dato").
 
 import { t, lang } from "../i18n/index.js";
-import { sistemaView, SOURCES_SHOWN, ERRORS_SHOWN } from "./sistema/view.js";
+import { sistemaView, FUNNEL_SHOWN, ERRORS_SHOWN, FUNNEL_BYS } from "./sistema/view.js";
 import { createActions } from "./sistema/actions.js";
 import { createSistema } from "./sistema/render.js";
 
@@ -21,17 +21,18 @@ let S = null;
 
 const batchOf = (ctx) => (ctx.settings && typeof ctx.settings.get === "function" ? ctx.settings.get("batchMin") : null);
 
-// The sheet holds the page without scrolling (the wheel belongs to the camera, spec §3.5). What has no fixed size is the two lists, boards and
-// errors; when the page does not fit, they give way, one row at a time, and the rest is said as "y N más". Boards first, down to three, then
+// The sheet holds the page without scrolling (the wheel belongs to the camera, spec §3.5). What has no fixed size is the two lists, the funnel (its
+// rows are boards, origins or regions, whichever view is pressed) and the errors; when the page does not fit, they give way, one row at a time, and
+// the rest is said as "y N más". The funnel first, down to three, then
 // errors down to two, then the keys of the foot (they are also in the palette), then both lists to the floor. The count in the title of the
 // errors stays the whole one.
-const FLOOR = { sources: 2, errors: 1 };
-const STEP_TO = { sources: 3, errors: 2 };       // the first cuts go down to these; only then does the foot go, and then the lists to FLOOR
+const FLOOR = { funnel: 2, errors: 1 };
+const STEP_TO = { funnel: 3, errors: 2 };       // the first cuts go down to these; only then does the foot go, and then the lists to FLOOR
 function shrunk(shown) {
-  if (shown.sources > STEP_TO.sources) return { ...shown, sources: shown.sources - 1 };
+  if (shown.funnel > STEP_TO.funnel) return { ...shown, funnel: shown.funnel - 1 };
   if (shown.errors > STEP_TO.errors) return { ...shown, errors: shown.errors - 1 };
   if (shown.foot) return { ...shown, foot: false };
-  if (shown.sources > FLOOR.sources) return { ...shown, sources: shown.sources - 1 };
+  if (shown.funnel > FLOOR.funnel) return { ...shown, funnel: shown.funnel - 1 };
   if (shown.errors > FLOOR.errors) return { ...shown, errors: shown.errors - 1 };
   return null;
 }
@@ -44,8 +45,9 @@ const overflows = (host) => host.scrollHeight > host.clientHeight + 1;
  */
 const fitKey = (me, full) => [
   lang(),
-  full.sources.rows.length,
-  full.sources.moreLabel,
+  me.by,                                                   // each split of the funnel lists a different number of rows
+  full.funnel.rows.length,
+  full.funnel.moreLabel,
   full.errors.total,
   full.account.anchor ? full.account.anchor.state : "",    // the warning of an account nothing pins down is taller
   full.account.state,
@@ -58,8 +60,8 @@ const fitKey = (me, full) => [
 function paint(me) {
   if (!me.model) return;
   const state = me.actions.state();
-  const base = { nowMs: me.ctx.now(), intent: state.intent, batchMin: batchOf(me.ctx) };
-  const max = { sources: SOURCES_SHOWN, errors: ERRORS_SHOWN, foot: true };
+  const base = { nowMs: me.ctx.now(), intent: state.intent, batchMin: batchOf(me.ctx), by: me.by };
+  const max = { funnel: FUNNEL_SHOWN, errors: ERRORS_SHOWN, foot: true };
   const full = sistemaView(me.model, { ...base, show: max });
   const key = fitKey(me, full);
   let show = me.fit && me.fit.key === key ? me.fit.show : max;
@@ -67,7 +69,7 @@ function paint(me) {
     me.view = show === max ? full : sistemaView(me.model, { ...base, show });
     me.ui.patch(me.view, { ...state, foot: show.foot });
     // the next step starts from what was really listed: a smaller number than the list has changes nothing and would only measure again
-    const next = overflows(me.host) ? shrunk({ sources: me.view.sources.rows.length, errors: me.view.errors.rows.length, foot: show.foot }) : null;
+    const next = overflows(me.host) ? shrunk({ funnel: me.view.funnel.rows.length, errors: me.view.errors.rows.length, foot: show.foot }) : null;
     if (!next) break;
     show = next;
   }
@@ -88,6 +90,7 @@ function wire(me) {
   me.ui = createSistema({
     run: (action) => { if (action === "engine") me.actions.run(me.view && me.view.stop); },
     open: (key, rowId) => ctx.open(key, rowId),
+    funnelBy: (id) => { if (FUNNEL_BYS.includes(id) && id !== me.by) { me.by = id; paint(me); } },
   });
 }
 
@@ -110,7 +113,7 @@ function watchLayout(me) {
 
 function mount(host, ctx) {
   if (S) unmount();
-  const me = { ctx, host, model: null, view: null, fit: null, epoch: 0 };
+  const me = { ctx, host, model: null, view: null, fit: null, epoch: 0, by: "source" };
   wire(me);
   host.append(me.ui.el);
   watchLayout(me);

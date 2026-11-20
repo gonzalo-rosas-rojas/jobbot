@@ -12,7 +12,8 @@ use jobbot_app::ports::{FillMode, FormFiller};
 use jobbot_app::ports::{OpenChecker, OpenStatus};
 use jobbot_domain::answers::AnswerBank;
 use jobbot_domain::form::SubmitStatus;
-use jobbot_domain::models::Job;
+use jobbot_domain::gate::OUT_OF_REGION_NOTE;
+use jobbot_domain::models::{Job, MANUAL_SOURCE};
 use jobbot_domain::rules::{Criteria, Exclusions};
 use jobbot_domain::state::State;
 use jobbot_domain::text::safe_key;
@@ -71,7 +72,7 @@ impl Env {
         self.tracker
             .add_job(job, score, &BTreeMap::new(), *NOW)
             .unwrap();
-        self.tracker.create_application(&job.key(), *NOW).unwrap();
+        self.tracker.start_cold_for_tests(&job.key(), *NOW).unwrap();
     }
 
     fn state(&self, key: &str) -> State {
@@ -176,6 +177,150 @@ async fn a_job_in_the_relocation_place_gets_the_relocated_cv_and_others_the_mast
     );
 }
 #[tokio::test]
+async fn refresh_also_replaces_the_readable_copy_a_handoff_sheet_names() {
+    let env = Env::new();
+    let master = env.cv_master(MASTER);
+    let job = make_job_with(|j| j.external_id = "attached".into());
+    let sent = make_job_with(|j| {
+        j.external_id = "already_sent".into();
+        j.company = "Sent Co".into();
+    });
+    env.scored(&job, 80.0);
+    env.scored(&sent, 70.0);
+    prepare_all(
+        &env.tracker,
+        &master,
+        &env.out_dir(),
+        &FakeRenderer::default(),
+        *NOW,
+    )
+    .await
+    .unwrap();
+    // A sent application is the record of what went out: its copy must stay as it was.
+    env.tracker
+        .transition(&sent.key(), State::Submitted, None, *NOW)
+        .unwrap();
+    // The copy `attachment_for` made next to the CVs, and the one of the sent application.
+    let copies = env.out_dir().join("adjuntos");
+    let mine = copies.join(safe_key(&job.key()));
+    let other = copies.join(safe_key(&sent.key()));
+    for dir in [&mine, &other] {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(dir.join("cv_name_Title.pdf"), b"%PDF-before").unwrap();
+    }
+
+    refresh_cvs(
+        &env.tracker,
+        &master,
+        &env.out_dir(),
+        &FakeRenderer::default(),
+        Relocation {
+            places: &[],
+            to: None,
+        },
+        *NOW,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        std::fs::read(mine.join("cv_name_Title.pdf")).unwrap(),
+        b"%PDF-fake",
+        "the file the handoff sheet names carries the new CV"
+    );
+    assert_eq!(
+        std::fs::read(other.join("cv_name_Title.pdf")).unwrap(),
+        b"%PDF-before"
+    );
+    // The copy that was replaced is kept under replaced/, as the main PDF is, and carries its
+    // job key so two jobs with the same title cannot overwrite each other's.
+    let kept: Vec<_> = std::fs::read_dir(env.out_dir().join(REPLACED_CV_DIR))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name.contains("cv_name_Title"))
+        .collect();
+    assert_eq!(kept.len(), 1, "{kept:?}");
+    assert!(kept[0].starts_with(&safe_key(&job.key())), "{kept:?}");
+    let kept_path = env.out_dir().join(REPLACED_CV_DIR).join(&kept[0]);
+    assert_eq!(std::fs::read(kept_path).unwrap(), b"%PDF-before");
+}
+#[tokio::test]
+async fn refresh_reports_each_readable_copy_it_could_not_refresh_and_not_a_missing_folder() {
+    let env = Env::new();
+    let master = env.cv_master(MASTER);
+    let jobs: Vec<Job> = ["unreadable", "folder_as_copy", "none"]
+        .iter()
+        .map(|id| {
+            make_job_with(|j| {
+                j.external_id = (*id).into();
+                j.company = format!("Company {id}");
+            })
+        })
+        .collect();
+    for (job, score) in jobs.iter().zip([80.0, 70.0, 60.0]) {
+        env.scored(job, score);
+    }
+    prepare_all(
+        &env.tracker,
+        &master,
+        &env.out_dir(),
+        &FakeRenderer::default(),
+        *NOW,
+    )
+    .await
+    .unwrap();
+    let copies = env.out_dir().join("adjuntos");
+    std::fs::create_dir_all(&copies).unwrap();
+    // A file where the folder should be: it cannot be read as a folder.
+    std::fs::write(copies.join(safe_key(&jobs[0].key())), b"in the way").unwrap();
+    // A "copy" that is a folder named like a PDF: it cannot be kept or overwritten as a file, on
+    // any platform.
+    let stuck = copies
+        .join(safe_key(&jobs[1].key()))
+        .join("cv_name_Title.pdf");
+    std::fs::create_dir_all(&stuck).unwrap();
+    std::fs::write(stuck.join("old.txt"), b"old content").unwrap();
+    // jobs[2] never had a copy: no folder at all.
+
+    let report = refresh_cvs(
+        &env.tracker,
+        &master,
+        &env.out_dir(),
+        &FakeRenderer::default(),
+        Relocation {
+            places: &[],
+            to: None,
+        },
+        *NOW,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(report.refreshed.len(), 3);
+    let mut failed: Vec<&str> = report
+        .copy_failures
+        .iter()
+        .map(|failure| failure.job_key.as_str())
+        .collect();
+    failed.sort_unstable();
+    assert_eq!(failed, ["test:folder_as_copy", "test:unreadable"]);
+    assert!(
+        report
+            .copy_failures
+            .iter()
+            .all(|failure| !failure.reason.is_empty())
+    );
+    // Nothing was replaced: what is in the way is still what it was.
+    assert_eq!(
+        std::fs::read(stuck.join("old.txt")).unwrap(),
+        b"old content"
+    );
+    assert_eq!(
+        std::fs::read(copies.join(safe_key(&jobs[0].key()))).unwrap(),
+        b"in the way"
+    );
+}
+#[tokio::test]
 async fn refresh_renders_waiting_cvs_again_keeps_the_old_ones_and_never_touches_sent_ones() {
     let env = Env::new();
     let master = env.cv_master(MASTER);
@@ -213,6 +358,7 @@ async fn refresh_renders_waiting_cvs_again_keeps_the_old_ones_and_never_touches_
     let refreshed = refresh_cvs(
         &env.tracker,
         &master,
+        &env.out_dir(),
         &renderer,
         Relocation {
             places: &places,
@@ -222,7 +368,8 @@ async fn refresh_renders_waiting_cvs_again_keeps_the_old_ones_and_never_touches_
         *NOW + TimeDelta::nanoseconds(999_999_999),
     )
     .await
-    .unwrap();
+    .unwrap()
+    .refreshed;
 
     assert!(refreshed.contains(&sydney.key()), "{refreshed:?}");
     assert!(refreshed.contains(&latam.key()), "{refreshed:?}");
@@ -257,6 +404,82 @@ async fn refresh_renders_waiting_cvs_again_keeps_the_old_ones_and_never_touches_
     // No state moved.
     assert_eq!(env.state(&sydney.key()), State::Prepared);
     assert_eq!(env.state(&latam.key()), State::NeedsGonza);
+}
+/// Renders the first CV it is given and refuses every later one.
+struct RendersOnlyOnce {
+    calls: Mutex<usize>,
+}
+#[async_trait::async_trait]
+impl Renderer for RendersOnlyOnce {
+    async fn render(&self, _md_text: &str, out_path: &Path) -> anyhow::Result<PathBuf> {
+        let mut calls = self.calls.lock().unwrap();
+        *calls += 1;
+        if *calls > 1 {
+            anyhow::bail!("the renderer stopped");
+        }
+        std::fs::write(out_path, b"%PDF-fake")?;
+        Ok(out_path.to_path_buf())
+    }
+}
+#[tokio::test]
+async fn a_refresh_that_fails_later_still_names_the_copies_it_could_not_refresh_before() {
+    let env = Env::new();
+    let master = env.cv_master(MASTER);
+    let first = make_job_with(|j| {
+        j.external_id = "first".into();
+        j.company = "First Co".into();
+    });
+    let second = make_job_with(|j| {
+        j.external_id = "second".into();
+        j.company = "Second Co".into();
+    });
+    env.scored(&first, 80.0);
+    env.scored(&second, 70.0);
+    prepare_all(
+        &env.tracker,
+        &master,
+        &env.out_dir(),
+        &FakeRenderer::default(),
+        *NOW,
+    )
+    .await
+    .unwrap();
+    // The first application has a file where its copies' folder should be: it cannot be read.
+    let copies = env.out_dir().join("adjuntos");
+    std::fs::create_dir_all(&copies).unwrap();
+    std::fs::write(copies.join(safe_key(&first.key())), b"in the way").unwrap();
+
+    let err = refresh_cvs(
+        &env.tracker,
+        &master,
+        &env.out_dir(),
+        &RendersOnlyOnce {
+            calls: Mutex::new(0),
+        },
+        Relocation {
+            places: &[],
+            to: None,
+        },
+        *NOW,
+    )
+    .await
+    .unwrap_err();
+
+    let text = format!("{err:#}");
+    assert!(text.contains("the renderer stopped"), "{text}");
+    assert!(
+        text.contains(&first.key()),
+        "the earlier copy is named: {text}"
+    );
+    // The whole sentence, so a line break inside the literal cannot leave a run of spaces in it.
+    assert!(
+        text.contains("fallara y todavía tienen el CV anterior, no las adjuntes"),
+        "{text}"
+    );
+    assert!(
+        !text.contains(&env.out_dir().display().to_string()),
+        "only keys, no paths: {text}"
+    );
 }
 #[tokio::test]
 async fn placeholder_cv_leaves_state_untouched() {
@@ -883,7 +1106,7 @@ async fn an_assisted_form_confirmed_from_elsewhere_stays_submitted_when_its_tab_
     };
     let job = numbered(1);
     tracker.add_job(&job, 90.0, &BTreeMap::new(), *NOW).unwrap();
-    tracker.create_application(&job.key(), *NOW).unwrap();
+    tracker.start_cold_for_tests(&job.key(), *NOW).unwrap();
     tracker
         .set_cv_path(&job.key(), Path::new("cv.pdf"))
         .unwrap();
@@ -953,7 +1176,7 @@ async fn a_live_click_is_preceded_by_a_durable_intent_and_closes_it() {
     };
     let job = numbered(1);
     tracker.add_job(&job, 90.0, &BTreeMap::new(), *NOW).unwrap();
-    tracker.create_application(&job.key(), *NOW).unwrap();
+    tracker.start_cold_for_tests(&job.key(), *NOW).unwrap();
     tracker
         .set_cv_path(&job.key(), Path::new("cv.pdf"))
         .unwrap();
@@ -1139,6 +1362,175 @@ async fn stale_posting_is_withdrawn() {
     assert_eq!(outcomes[0].status, "blocked");
     assert_eq!(outcomes[0].reason.as_deref(), Some("stale_posting"));
     assert_eq!(env.state("test:1"), State::Withdrawn);
+}
+/// A prepared posting outside the region by today's rules, approved or not.
+async fn parked_for_region(approved: bool) {
+    let env = Env::new();
+    let job = make_job_with(|j| {
+        j.location = "San Francisco, CA".into();
+        j.remote = true;
+    });
+    env.prepared(&job, 90.0);
+    if approved {
+        env.tracker.approve("test:1").unwrap();
+    }
+    let filler = FakeFiller::new();
+    let crit = Criteria {
+        first_n_reviewed: 0,
+        ..criteria()
+    };
+    let outcomes = env.run(&filler, &crit, SubmitMode::Live).await;
+    assert!(filler.calls().is_empty(), "nothing is sent");
+    assert_eq!(outcomes[0].status, "blocked");
+    assert_eq!(outcomes[0].reason.as_deref(), Some("fuera_de_region"));
+    assert_eq!(
+        env.state("test:1"),
+        State::NeedsGonza,
+        "parked with Gonza, not withdrawn: a withdrawal cannot be undone"
+    );
+    let row = env.tracker.get_application("test:1").unwrap().unwrap();
+    assert_eq!(row.needs_reason.as_deref(), Some(OUT_OF_REGION_NOTE));
+    assert_eq!(row.approved, approved);
+}
+#[tokio::test]
+async fn a_prepared_posting_outside_the_region_is_parked_with_gonza_and_not_sent() {
+    parked_for_region(false).await;
+}
+#[tokio::test]
+async fn an_approved_posting_outside_the_region_is_parked_too_not_withdrawn() {
+    parked_for_region(true).await;
+}
+/// A prepared posting outside the region that the run parked, which Gonza then resolved.
+async fn parked_then_resolved(env: &Env, crit: &Criteria) -> Job {
+    let job = make_job_with(|j| {
+        j.location = "San Francisco, CA".into();
+        j.remote = true;
+    });
+    env.prepared(&job, 90.0);
+    env.tracker.approve("test:1").unwrap();
+    env.run(&FakeFiller::new(), crit, SubmitMode::Live).await;
+    assert_eq!(env.state("test:1"), State::NeedsGonza, "parked first");
+    let outcome = jobbot_app::actions::resolve(
+        &env.tracker,
+        "test:1",
+        *NOW,
+        jobbot_app::actions::ResolveIntent::SendOutsideRegion,
+    )
+    .unwrap();
+    assert!(outcome.ok, "{outcome:?}");
+    assert_eq!(env.state("test:1"), State::Prepared);
+    job
+}
+#[tokio::test]
+async fn a_resolved_out_of_region_posting_is_sent_by_the_next_run_and_not_parked_again() {
+    let env = Env::new();
+    let crit = Criteria {
+        first_n_reviewed: 0,
+        ..criteria()
+    };
+    parked_then_resolved(&env, &crit).await;
+    let filler = FakeFiller::new();
+
+    let outcomes = env.run(&filler, &crit, SubmitMode::Live).await;
+
+    assert_eq!(
+        filler.calls(),
+        vec![("test:1".to_string(), SubmitMode::Live)]
+    );
+    assert_eq!(outcomes[0].status, "submitted");
+    assert_eq!(env.state("test:1"), State::Submitted);
+}
+#[tokio::test]
+async fn a_resolved_out_of_region_posting_is_parked_again_when_its_location_changes() {
+    let env = Env::new();
+    let crit = Criteria {
+        first_n_reviewed: 0,
+        ..criteria()
+    };
+    let job = parked_then_resolved(&env, &crit).await;
+    // A later refresh: the posting now names another place, one he has not looked at.
+    let moved = Job {
+        location: "Austin, TX".into(),
+        ..job
+    };
+    assert!(env.tracker.refresh_posting(&moved).unwrap());
+    let filler = FakeFiller::new();
+
+    let outcomes = env.run(&filler, &crit, SubmitMode::Live).await;
+
+    assert!(filler.calls().is_empty(), "nothing is sent");
+    assert_eq!(outcomes[0].reason.as_deref(), Some("fuera_de_region"));
+    assert_eq!(env.state("test:1"), State::NeedsGonza);
+}
+#[tokio::test]
+async fn a_resolved_out_of_region_posting_is_still_stopped_by_an_exclusion() {
+    let env = Env::new();
+    let crit = Criteria {
+        first_n_reviewed: 0,
+        ..criteria()
+    };
+    let job = parked_then_resolved(&env, &crit).await;
+    let exclusions = Exclusions {
+        names: vec![job.company.clone()],
+        ..exclusions()
+    };
+    let filler = FakeFiller::new();
+
+    submit_all_while(
+        &env.tracker,
+        &crit,
+        &exclusions,
+        &AnswerBank::default(),
+        &filler,
+        None,
+        None,
+        SubmitMode::Live,
+        env.dir.path(),
+        &env.stop_file(),
+        *NOW,
+        &|| true,
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        filler.calls().is_empty(),
+        "the region was cleared, nothing else"
+    );
+    assert_eq!(env.state("test:1"), State::Withdrawn);
+}
+#[tokio::test]
+async fn a_hand_recorded_posting_with_no_location_passes_the_region_check() {
+    // Why this exists: `record` stores its posting remote with the location as typed (maybe none). Such a row
+    // reaches the gate only if `record` was cut between its two moves and Gonza resolved it back to the queue, but
+    // then a location that names no place must not be read as a closed region, while a closed one is parked.
+    let env = Env::new();
+    let silent = make_job_with(|j| {
+        j.source = MANUAL_SOURCE.into();
+        j.external_id = "silent".into();
+        j.location = String::new();
+        j.remote = true;
+    });
+    let closed = make_job_with(|j| {
+        j.source = MANUAL_SOURCE.into();
+        j.external_id = "closed".into();
+        j.company = "Other Co".into();
+        j.location = "Remote - US".into();
+        j.remote = true;
+    });
+    env.prepared(&silent, 0.0);
+    env.prepared(&closed, 0.0);
+    let filler = FakeFiller::new();
+    let crit = Criteria {
+        first_n_reviewed: 0,
+        ..criteria()
+    };
+
+    env.run(&filler, &crit, SubmitMode::Live).await;
+
+    let called: Vec<String> = filler.calls().into_iter().map(|(key, _)| key).collect();
+    assert_eq!(called, vec![silent.key()]);
+    assert_eq!(env.state(&closed.key()), State::NeedsGonza);
 }
 /// Answers each posting with what the test says (open when it says nothing) and remembers who
 /// it was asked about.
@@ -1492,6 +1884,96 @@ async fn a_handoff_application_goes_to_needs_gonza_with_the_sheet_path_in_the_re
     let outcome = actions::confirm(&env.tracker, "test:1", *NOW).unwrap();
     assert!(outcome.ok, "{}", outcome.message);
     assert_eq!(env.state("test:1"), State::Submitted);
+}
+#[tokio::test]
+async fn a_results_log_that_cannot_be_written_does_not_abort_a_run_of_handoffs() {
+    let env = Env::new();
+    for n in [1, 2] {
+        env.prepared(&ashby_job(n), 90.0 - f64::from(n));
+    }
+    // A folder where the log file should be: every append to it fails.
+    std::fs::create_dir(results_path(env.dir.path())).unwrap();
+    let outcomes = env
+        .run_with(&FakeFiller::new(), None, &open_gate(), SubmitMode::Live)
+        .await
+        .expect("the run goes on");
+    let statuses: Vec<(&str, &str)> = outcomes
+        .iter()
+        .map(|o| (o.job_key.as_str(), o.status.as_str()))
+        .collect();
+    assert_eq!(
+        statuses,
+        [("test:1", "needs_gonza"), ("test:2", "needs_gonza")]
+    );
+    let row = env.tracker.get_application("test:1").unwrap().unwrap();
+    assert!(
+        row.needs_reason.unwrap().starts_with("handoff:"),
+        "the handoff reason is kept, not replaced by a page error"
+    );
+}
+#[tokio::test]
+async fn a_screenshot_that_cannot_be_stored_does_not_abort_a_run_of_handoffs() {
+    // A database file whose screenshot column refuses writes, as a locked or full disk would.
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("jobbot.db");
+    let env = Env {
+        tracker: Tracker::open(&db).unwrap(),
+        dir,
+    };
+    for n in [1, 2] {
+        env.prepared(&ashby_job(n), 90.0 - f64::from(n));
+    }
+    jobbot_testkit::refuse_screenshot_writes(&db);
+
+    let outcomes = env
+        .run_with(&FakeFiller::new(), None, &open_gate(), SubmitMode::Live)
+        .await
+        .expect("the run goes on");
+
+    let statuses: Vec<(&str, &str)> = outcomes
+        .iter()
+        .map(|o| (o.job_key.as_str(), o.status.as_str()))
+        .collect();
+    assert_eq!(
+        statuses,
+        [("test:1", "needs_gonza"), ("test:2", "needs_gonza")]
+    );
+    let row = env.tracker.get_application("test:1").unwrap().unwrap();
+    let reason = row.needs_reason.unwrap();
+    assert!(reason.starts_with("handoff:"), "{reason}");
+    // The owner sees in the reason that the screenshot is missing.
+    assert!(
+        reason.ends_with(" · no se guardó la captura de pantalla"),
+        "{reason}"
+    );
+}
+#[tokio::test]
+async fn a_screenshot_that_cannot_be_stored_does_not_abort_a_run_of_ordinary_applications() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("jobbot.db");
+    let env = Env {
+        tracker: Tracker::open(&db).unwrap(),
+        dir,
+    };
+    for n in [1, 2] {
+        let job = make_job_with(|j| {
+            j.external_id = n.to_string();
+            j.company = format!("Co{n}");
+        });
+        env.prepared(&job, 90.0 - f64::from(n));
+    }
+    jobbot_testkit::refuse_screenshot_writes(&db);
+
+    let outcomes = env
+        .run_with(&FakeFiller::new(), None, &open_gate(), SubmitMode::DryRun)
+        .await
+        .expect("the run goes on");
+
+    let statuses: Vec<(&str, &str)> = outcomes
+        .iter()
+        .map(|o| (o.job_key.as_str(), o.status.as_str()))
+        .collect();
+    assert_eq!(statuses, [("test:1", "dry_run"), ("test:2", "dry_run")]);
 }
 #[tokio::test]
 async fn the_sheet_names_the_job_the_link_the_cv_and_what_the_bank_could_not_answer() {
@@ -1976,17 +2458,78 @@ async fn an_application_waiting_for_gonza_holds_a_place_by_its_score() {
     assert_eq!(env.state("test:1"), State::NeedsGonza);
 }
 #[tokio::test]
-async fn the_company_is_its_name_lowercased_and_trimmed() {
+async fn the_company_is_its_normalized_name_as_for_the_cooldown() {
     let env = Env::new();
     env.prepared(&at("Acme AI", 1), 90.0);
     env.prepared(&at("  acme ai ", 2), 80.0);
-    env.prepared(&at("ACME AI", 3), 70.0);
+    env.prepared(&at("ACME AI, Inc.", 3), 70.0);
     // A name that only looks alike is another company.
     env.prepared(&at("Acme AI Labs", 4), 60.0);
     let filler = FakeFiller::new();
     env.run(&filler, &criteria(), SubmitMode::DryRun).await;
     let calls: Vec<String> = filler.calls().into_iter().map(|(key, _)| key).collect();
     assert_eq!(calls, vec!["test:1", "test:2", "test:4"]);
+}
+async fn calls_for(companies: &[&str]) -> Vec<String> {
+    let env = Env::new();
+    for (n, company) in companies.iter().enumerate() {
+        let n = n as u32 + 1;
+        env.prepared(&at(company, n), 100.0 - f64::from(n));
+    }
+    let filler = FakeFiller::new();
+    let crit = Criteria {
+        review_dry_runs_per_run: 10,
+        ..criteria()
+    };
+    env.run(&filler, &crit, SubmitMode::DryRun).await;
+    filler.calls().into_iter().map(|(key, _)| key).collect()
+}
+#[tokio::test]
+async fn a_company_in_a_script_normalize_cannot_read_is_still_one_company_for_the_cap() {
+    let same = ["株式会社メルカリ"; 3];
+    assert_eq!(
+        calls_for(&same).await,
+        vec!["test:1", "test:2"],
+        "the third hits the cap"
+    );
+}
+#[tokio::test]
+async fn two_different_non_latin_companies_do_not_share_a_cap() {
+    let calls = calls_for(&[
+        "株式会社メルカリ",
+        "株式会社メルカリ",
+        "株式会社サイバー",
+        "株式会社サイバー",
+    ])
+    .await;
+    assert_eq!(calls, vec!["test:1", "test:2", "test:3", "test:4"]);
+}
+#[tokio::test]
+async fn a_name_that_is_only_a_legal_suffix_behaves_as_its_own_company() {
+    assert_eq!(
+        calls_for(&["LLC", "LLC", "LLC"]).await,
+        vec!["test:1", "test:2"]
+    );
+    assert_eq!(
+        calls_for(&["LLC", "LLC", "Acme", "Acme"]).await.len(),
+        4,
+        "and it does not share a place with another company"
+    );
+}
+#[tokio::test]
+async fn prepare_counts_suffix_variants_of_a_company_as_one() {
+    let env = Env::new();
+    let master = env.cv_master(MASTER);
+    env.prepared(&at("Acme", 1), 90.0);
+    env.prepared(&at("Acme", 2), 80.0);
+    env.scored(&at("Acme, Inc.", 3), 70.0);
+    let renderer = FakeRenderer::default();
+    let report = prepare_report(&env.tracker, &master, &env.out_dir(), &renderer, *NOW)
+        .await
+        .unwrap();
+    assert!(report.prepared.is_empty());
+    assert_eq!(report.skipped.len(), 1);
+    assert_eq!(report.skipped[0].job_key, "test:3");
 }
 #[tokio::test]
 async fn a_blank_company_name_is_never_capped() {
@@ -2090,6 +2633,29 @@ async fn a_posting_set_aside_below_the_floor_holds_no_place_at_its_company() {
 async fn submit_does_not_let_a_posting_set_aside_below_the_floor_take_a_place() {
     let env = Env::new();
     flag_below_floor(&env, &at("Acme", 1), 95.0);
+    env.prepared(&at("Acme", 2), 80.0);
+    env.prepared(&at("Acme", 3), 70.0);
+    let filler = FakeFiller::new();
+
+    let outcomes = env.run(&filler, &criteria(), SubmitMode::DryRun).await;
+
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|o| o.status == "dry_run")
+            .map(|o| o.job_key.as_str())
+            .collect::<Vec<_>>(),
+        vec!["test:2", "test:3"],
+        "{outcomes:?}"
+    );
+}
+#[tokio::test]
+async fn submit_does_not_let_a_posting_parked_for_its_region_take_a_place() {
+    let env = Env::new();
+    env.scored(&at("Acme", 1), 95.0);
+    env.tracker
+        .transition("test:1", State::NeedsGonza, Some(OUT_OF_REGION_NOTE), *NOW)
+        .unwrap();
     env.prepared(&at("Acme", 2), 80.0);
     env.prepared(&at("Acme", 3), 70.0);
     let filler = FakeFiller::new();

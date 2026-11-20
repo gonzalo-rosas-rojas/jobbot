@@ -17,6 +17,89 @@ static RANGE: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
+/// The period a pay range names right after it. Between the range and the word only separators
+/// that are not letters, digits, `/`, `+`, `.` or `;` may stand (spaces, commas, brackets, a line
+/// break), and a currency word, itself followed by such separators: `, per year`, `(USD) per
+/// year`. The word is `per year`, `a month`, `/yr`, `annually`, `p.a.`, or a bare `annual`,
+/// `yearly`, `monthly` (see `period_after` for the last one). Anything else in between (`+ annual
+/// bonus`, `. Annual leave`) means the word is not about the pay. `annually` and `p.a.` count
+/// whatever follows them: `annually reviewed` reads as yearly, which holds a low posting for the
+/// owner rather than passing it as a monthly pay.
+static PERIOD_AFTER: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?i)^[^\p{L}\p{N}/+.;]*(?:(?:usd|us\$|dollars?|gross|net)[^\p{L}\p{N}/+.;]*)*(?:(?:per|a|each|/)\s?(?P<fixed>year|yr|annum|month|mo)\b|(?P<adverb>annually\b|p\.a\.?)|(?P<bare>annual|yearly|monthly)\b)",
+    )
+    .unwrap()
+});
+
+/// The period a pay range is introduced with, right before it: `Annual salary: $15,000 - $19,000`,
+/// `Yearly base pay range (USD) is US$15,000 - $19,000`.
+static PERIOD_BEFORE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?i)\b(annual|yearly|monthly)\s+(?:base\s+)?(?:salary|pay|compensation)(?:\s+range)?(?:\s*\([^)]{0,20}\))?(?:\s+(?:is|of|between))?[\s:]*(?:(?:usd|us)\s*)?$",
+    )
+    .unwrap()
+});
+
+/// How many characters before a range are read for the word that introduces it.
+const PERIOD_BEFORE_CHARS: usize = 60;
+
+/// A pay period the text states.
+#[derive(Clone, Copy, PartialEq)]
+enum Period {
+    Yearly,
+    Monthly,
+}
+
+fn period_named(word: &str) -> Option<Period> {
+    match word.to_lowercase().as_str() {
+        "year" | "yr" | "annum" | "annual" | "annually" | "yearly" | "p.a" | "p.a." => {
+            Some(Period::Yearly)
+        }
+        "month" | "mo" | "monthly" => Some(Period::Monthly),
+        _ => None,
+    }
+}
+
+/// The period the word right after a range (`tail` is the text after it) names, or `None` when
+/// there is none or it is not about the pay: a period word followed by a hyphen (`/ year-end
+/// bonus`), or a bare `annual`/`yearly`/`monthly` that starts another phrase on the same line
+/// (`Yearly learning budget`; one at the end of its line, `yearly` then `Requirements`, is the
+/// period).
+fn period_after(tail: &str) -> Option<Period> {
+    let caps = PERIOD_AFTER.captures(tail)?;
+    let end = caps.get(0).map_or(0, |whole| whole.end());
+    let rest = &tail[end..];
+    if rest.starts_with(['-', '\u{2010}', '\u{2013}', '\u{2014}']) {
+        return None;
+    }
+    let bare = caps.name("bare");
+    let same_line = rest.split(['\n', '\r']).next().unwrap_or_default();
+    if bare.is_some() && same_line.trim_start().starts_with(char::is_alphanumeric) {
+        return None;
+    }
+    let word = caps
+        .name("fixed")
+        .or(caps.name("adverb"))
+        .or(bare)
+        .map(|found| found.as_str());
+    word.and_then(period_named)
+}
+
+/// The period the text says for the range that starts at `start`: the word right after it, else
+/// the one that introduces it. `None` when it says none, or the word after is not about the pay
+/// and nothing introduces the range (the size of the numbers decides then, as before).
+fn stated_period(text: &str, start: usize, tail: &str) -> Option<Period> {
+    if let Some(period) = period_after(tail) {
+        return Some(period);
+    }
+    let before = chars_before(text, start, PERIOD_BEFORE_CHARS);
+    PERIOD_BEFORE
+        .captures(&before)
+        .and_then(|caps| caps.get(1))
+        .and_then(|word| period_named(word.as_str()))
+}
+
 static HOURLY: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)/\s?h(?:ou)?r|per hour|hourly|/h\b").unwrap());
 
@@ -92,6 +175,43 @@ const MONTHLY_FLOOR: f64 = 1000.0;
 /// How many characters after a range are read for "per hour" and the like.
 const RATE_TAIL_CHARS: usize = 24;
 
+/// Pay per piece of work: "per task", "per completed task", "per tasks completed", "per
+/// submission", "for each task", "each completed task", "by the task", "piece rate"... and
+/// "task-based" only when it qualifies the pay ("task-based rate"), not a duty ("task-based
+/// scheduling"). "Per project" and "per assignment" are left out on purpose: hourly rates are
+/// said to vary by them ("Rates vary per project: $20-$40/hr"). A separator is a space (a
+/// non-breaking one included, `\s` covers it), a hyphen or a non-breaking hyphen.
+static PER_PIECE: LazyLock<Regex> = LazyLock::new(|| {
+    let sep = r"[\s\x{2010}\x{2011}-]+";
+    Regex::new(&format!(
+        r"(?i)\bper{sep}(?:(?:completed|approved|accepted){sep})?(?:tasks?|submissions?|items?|units?)\b|\bfor{sep}each{sep}(?:completed{sep})?task\b|\beach{sep}completed{sep}task\b|\bby{sep}the{sep}task\b|\bpiece{sep}?rate\b|\btask{sep}based{sep}(?:pay|rate|compensation|payment)\b"
+    ))
+    .expect("PER_PIECE is a valid regex")
+});
+
+/// "$10-$20 a task": the amount is followed directly by "a task".
+static AMOUNT_A_TASK: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)^\s*(?:a|an)\s+task\b").expect("AMOUNT_A_TASK is valid"));
+
+/// How many characters on each side of a range are read for "per task" and the like.
+const TASK_WINDOW_CHARS: usize = 60;
+
+/// The `count` characters of `text` that end at byte `offset`.
+fn chars_before(text: &str, offset: usize, count: usize) -> String {
+    let mut chars: Vec<char> = text[..offset].chars().rev().take(count).collect();
+    chars.reverse();
+    chars.into_iter().collect()
+}
+
+/// Whether the text right around the range (`start..end`) says the pay is per piece of work. Only
+/// a window is read, so a duty elsewhere in a long description does not count.
+fn paid_per_task(text: &str, start: usize, end: usize) -> bool {
+    let before = chars_before(text, start, TASK_WINDOW_CHARS);
+    let after: String = text[end..].chars().take(TASK_WINDOW_CHARS).collect();
+    // A `|` between the two sides: "per" before the range and "task" after it are not "per task".
+    PER_PIECE.is_match(&format!("{before}|{after}")) || AMOUNT_A_TASK.is_match(&text[end..])
+}
+
 /// Reads the first pay range in `text` as `(min, max)` US dollars per month: hourly
 /// rates times `HOURS_PER_MONTH`, annual amounts divided by 12, monthly amounts as they are. A range
 /// that is not clearly pay (`$5 - $10 million`, or a number too long for any pay) is ignored,
@@ -135,9 +255,22 @@ pub fn parse_salary_monthly_usd(text: &str) -> (Option<f64>, Option<f64>) {
         let tail: String = text[whole.end()..].chars().take(RATE_TAIL_CHARS).collect();
         if high < HOURLY_CEILING {
             if HOURLY.is_match(&tail) {
+                // Task pay quoted at an hourly equivalent is not hours worked every month: 160
+                // hours would invent an income, so the range is not read at all.
+                if paid_per_task(text, whole.start(), whole.end()) {
+                    continue;
+                }
                 return (Some(low * HOURS_PER_MONTH), Some(high * HOURS_PER_MONTH));
             }
             continue;
+        }
+        // What the text says about the period beats the size of the numbers.
+        if high >= MONTHLY_FLOOR {
+            match stated_period(text, whole.start(), &tail) {
+                Some(Period::Yearly) => return (Some(low / 12.0), Some(high / 12.0)),
+                Some(Period::Monthly) => return (Some(low), Some(high)),
+                None => {}
+            }
         }
         if high >= ANNUAL_FLOOR {
             return (Some(low / 12.0), Some(high / 12.0));
@@ -371,6 +504,121 @@ mod tests {
     }
 
     #[test]
+    fn an_hourly_looking_range_paid_per_task_is_not_a_monthly_income() {
+        for text in [
+            "$20 - $30 per hour, paid per task",
+            "Paid per task: $20 - $30/hr equivalent",
+            "Task-based pay, $20 - $30 per hour",
+            "$20 - $30/hr (task based rate)",
+        ] {
+            assert_eq!(parse_salary_monthly_usd(text), (None, None), "{text:?}");
+        }
+    }
+
+    #[test]
+    fn every_way_of_saying_pay_per_piece_leaves_an_hourly_looking_range_unread() {
+        for phrase in [
+            "paid per completed task",
+            "per approved task",
+            "per tasks completed",
+            "per submission",
+            "per accepted task",
+            "per item",
+            "per unit",
+            "for each task",
+            "each completed task",
+            "by the task",
+            "piece rate",
+            "per\u{2010}task",
+            "piece-rate",
+            "per\u{a0}task",
+            "per\u{2011}task",
+            "task\u{2011}based pay",
+            "task-based rate",
+            "Task-based compensation",
+            "task based payment",
+        ] {
+            let text = format!("$20 - $30 per hour equivalent, {phrase}");
+            assert_eq!(parse_salary_monthly_usd(&text), (None, None), "{text:?}");
+        }
+    }
+
+    #[test]
+    fn per_project_or_per_assignment_is_how_hourly_rates_vary_not_per_piece_pay() {
+        for (text, low, high) in [
+            ("$20-$30/hour, per project needs", 3200.0, 4800.0),
+            ("Rates vary per project: $20-$40/hr", 3200.0, 6400.0),
+            ("$26-$36/hr per assignment; length varies", 4160.0, 5760.0),
+        ] {
+            assert_eq!(
+                parse_salary_monthly_usd(text),
+                (Some(low), Some(high)),
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_amount_followed_directly_by_a_task_is_per_piece_pay() {
+        for text in [
+            "$15-$25/hr for each task you complete",
+            "$15-$25 a task, about $20/hr",
+        ] {
+            assert_eq!(parse_salary_monthly_usd(text), (None, None), "{text:?}");
+        }
+    }
+
+    /// What the code does today with a text that gives the per-task pay first and an hourly
+    /// equivalent after it: both ranges sit next to "each completed task", so neither is read.
+    #[test]
+    fn a_per_task_amount_with_an_hourly_equivalent_in_brackets_is_not_read_at_all() {
+        assert_eq!(
+            parse_salary_monthly_usd("Each completed task pays $10-$20 (about $20-$30/hr)"),
+            (None, None)
+        );
+    }
+
+    #[test]
+    fn a_bare_task_based_word_that_is_not_about_pay_does_not_stop_the_reading() {
+        assert_eq!(
+            parse_salary_monthly_usd(
+                "$40 - $60/hr. Experience with task-based scheduling (Celery)."
+            ),
+            (Some(6400.0), Some(9600.0))
+        );
+    }
+
+    #[test]
+    fn a_per_task_phrase_beyond_the_window_does_not_count() {
+        let gap = "a ".repeat(40);
+        for text in [
+            format!("$20 - $30 per hour {gap}paid per task"),
+            format!("paid per task {gap}$20 - $30 per hour"),
+        ] {
+            assert_eq!(
+                parse_salary_monthly_usd(&text),
+                (Some(3200.0), Some(4800.0)),
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn contractor_or_flexible_hours_alone_still_read_an_hourly_range() {
+        for text in [
+            "Contractor role, $20 - $30 per hour",
+            "$20 - $30 per hour. Flexible hours, work when you like.",
+            "Flexible hours: $20 - $30/hr",
+        ] {
+            assert_eq!(
+                parse_salary_monthly_usd(text),
+                (Some(3200.0), Some(4800.0)),
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
     fn annual_range_with_commas() {
         let (low, high) = parse_salary_monthly_usd("Salary $120,000 - $160,000 per year");
         close(low, 10_000.0, 1e-6);
@@ -394,9 +642,168 @@ mod tests {
     #[test]
     fn monthly_range_is_kept() {
         assert_eq!(
-            parse_salary_monthly_usd("$4,000 - $6,000 per month"),
-            (Some(4000.0), Some(6000.0))
+            parse_salary_monthly_usd("$5,200 - $7,300 per month"),
+            (Some(5200.0), Some(7300.0))
         );
+    }
+
+    #[test]
+    fn the_period_the_text_names_beats_the_size_of_the_numbers() {
+        // 19,000 is under the size that reads as a yearly salary, but the text says per year.
+        for text in [
+            "$15,000 – $19,000 USD per year",
+            "$15,000 - $19,000 a year",
+            "$15,000 - $19,000/yr",
+            "$15,000 - $19,000 annually",
+            "Annual salary: $15,000 - $19,000",
+        ] {
+            let (low, high) = parse_salary_monthly_usd(text);
+            assert_eq!(low.unwrap().round(), 1250.0, "{text}");
+            assert_eq!(high.unwrap().round(), 1583.0, "{text}");
+        }
+        // And a monthly pay that is large stays monthly.
+        assert_eq!(
+            parse_salary_monthly_usd("$20,000 - $25,000 per month"),
+            (Some(20_000.0), Some(25_000.0))
+        );
+        // A word that is not about the pay does not set its period.
+        assert_eq!(
+            parse_salary_monthly_usd("$5,200 - $7,300 plus an annual bonus"),
+            (Some(5200.0), Some(7300.0))
+        );
+    }
+
+    #[test]
+    fn a_period_word_that_is_not_about_the_pay_does_not_set_its_period() {
+        // Monthly by size: the word is not right after the range, or it starts another phrase.
+        for text in [
+            "$5,200 - $7,300 + annual bonus",
+            "$5,200 – $7,300. Annual leave",
+            "$5,200-$7,300\nYearly learning budget",
+            "$5,200 - $7,300 yearly learning budget",
+            "Annual pay review included. Salary: $5,200 - $7,300",
+        ] {
+            assert_eq!(
+                parse_salary_monthly_usd(text),
+                (Some(5200.0), Some(7300.0)),
+                "{text:?}"
+            );
+        }
+        // Yearly by size, and a month word that is not about the pay does not change it.
+        assert_eq!(
+            parse_salary_monthly_usd("$40,000 - $60,000. Monthly internet stipend"),
+            (Some(40_000.0 / 12.0), Some(5000.0))
+        );
+        // The period words right after the range, or the introduction right before it, still count.
+        let (low, high) = parse_salary_monthly_usd("$15,000 - $19,000 (per year)");
+        assert_eq!(
+            (low.unwrap().round(), high.unwrap().round()),
+            (1250.0, 1583.0)
+        );
+        let (low, high) = parse_salary_monthly_usd("$15,000 - $19,000 annual");
+        assert_eq!(
+            (low.unwrap().round(), high.unwrap().round()),
+            (1250.0, 1583.0)
+        );
+        let (low, _) = parse_salary_monthly_usd("Yearly salary:  $15,000 - $19,000");
+        assert_eq!(low.unwrap().round(), 1250.0);
+    }
+
+    #[test]
+    fn a_period_written_with_commas_brackets_or_an_introduction_is_still_read() {
+        for text in [
+            "$15,000 - $19,000, per year",
+            "$15,000 - $19,000 (USD) per year",
+            "$15,000 - $19,000 USD, a year",
+            "$15,000 - $19,000 p.a.",
+            "Annual salary is $15,000 - $19,000",
+            "Annual salary range: $15,000 - $19,000",
+            "Annual base salary (gross) of $15,000 - $19,000",
+            "Annual salary: US$15,000 - $19,000",
+            "Annual salary: USD $15,000 - $19,000",
+            "$15,000 - $19,000 yearly\nRequirements",
+        ] {
+            let (low, high) = parse_salary_monthly_usd(text);
+            assert_eq!(
+                (low.map(f64::round), high.map(f64::round)),
+                (Some(1250.0), Some(1583.0)),
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_period_word_that_starts_another_phrase_falls_back_to_the_introduction_or_the_size() {
+        for text in [
+            "$5,200 - $7,300 / year-end bonus",
+            "Monthly salary: $5,200 - $7,300 yearly learning budget",
+            "$5,200 - $7,300\nYearly learning budget",
+        ] {
+            assert_eq!(
+                parse_salary_monthly_usd(text),
+                (Some(5200.0), Some(7300.0)),
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_adverb_after_the_range_is_the_period_whatever_follows_it() {
+        for text in [
+            "$15,000 - $19,000 annually",
+            "$15,000 - $19,000 annually.",
+            "$15,000 - $19,000 annually, plus equity",
+            "$15,000 - $19,000 annually\nRequirements",
+            "$15,000 - $19,000 p.a., plus equity",
+            "Compensation: $15,000 - $19,000 annually depending on experience",
+            "$12,000 - $18,000 annually plus performance bonus",
+            "$18,000 - $19,800 p.a. plus bonus",
+        ] {
+            let (low, high) = parse_salary_monthly_usd(text);
+            let (low, high) = (low.expect(text), high.expect(text));
+            assert!(
+                high < 2000.0,
+                "{text:?}: read as a monthly pay ({low}, {high})"
+            );
+        }
+        let (low, high) =
+            parse_salary_monthly_usd("$15,000 - $19,000 annually depending on experience");
+        assert_eq!(
+            (low.map(f64::round), high.map(f64::round)),
+            (Some(1250.0), Some(1583.0))
+        );
+    }
+
+    #[test]
+    fn a_range_followed_by_super_is_ignored_whatever_its_period_word() {
+        // "super" next to the range is the Australian pension: another currency, so no range.
+        assert_eq!(
+            parse_salary_monthly_usd("$18,000 - $19,800 p.a. plus super"),
+            (None, None)
+        );
+    }
+
+    #[test]
+    fn annually_reviewed_reads_as_yearly_which_is_the_safe_direction() {
+        // Known and accepted: the word after the range is about the review, but it still reads as
+        // the period. A low posting is then held for the owner instead of being passed as a
+        // monthly pay.
+        let (low, high) = parse_salary_monthly_usd("$5,200 - $7,300, annually reviewed");
+        assert_eq!(
+            (low.map(f64::round), high.map(f64::round)),
+            (Some(433.0), Some(608.0))
+        );
+    }
+
+    #[test]
+    fn a_period_word_inside_a_longer_word_does_not_introduce_the_range() {
+        // `semiannual` is not `annual`: 5,200 - 7,300 stays monthly by size.
+        assert_eq!(
+            parse_salary_monthly_usd("semiannual salary $5,200 - $7,300"),
+            (Some(5200.0), Some(7300.0))
+        );
+        let (low, _) = parse_salary_monthly_usd("Annual salary $15,000 - $19,000");
+        assert_eq!(low.unwrap().round(), 1250.0);
     }
 
     #[test]
@@ -407,8 +814,8 @@ mod tests {
             (None, None)
         );
         assert_eq!(
-            parse_salary_monthly_usd(&format!("${huge} - $1 and later $4,000 - $6,000 per month")),
-            (Some(4000.0), Some(6000.0))
+            parse_salary_monthly_usd(&format!("${huge} - $1 and later $5,200 - $7,300 per month")),
+            (Some(5200.0), Some(7300.0))
         );
     }
 

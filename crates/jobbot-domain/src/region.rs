@@ -447,16 +447,19 @@ static CITIZENSHIP_DENIED: LazyLock<Regex> = LazyLock::new(|| {
     .expect("CITIZENSHIP_DENIED is a valid regex")
 });
 
+/// The words that make a sentence about the candidate ("you must", "needs to", "should"), shared by
+/// every confining rule so that a sentence about the team or the clients never closes a job.
+const CANDIDATE: &str = r"(?:must|need to|needs to|have to|has to|required to|should|will need to)";
+
 /// Sentences that confine a job to one country, read after `fold`. Each one needs the words that
 /// make it about the candidate ("must", "only", "authorized to work"): a company that is "US-based"
 /// or a benefit "for US residents" says nothing about who may apply.
 static CONFINING: LazyLock<RegexSet> = LazyLock::new(|| {
-    let candidate = r"(?:must|need to|needs to|have to|has to|required to|should|will need to)";
     let negative = r"(?:cannot|can not|can't|unable to|do not|don't|will not|won't|not able to)";
     RegexSet::new([
         // "must be located in US East, Central, or West timezone", "must reside in the United States"
         format!(
-            r"\b{candidate}\s+(?:also\s+)?(?:be\s+)?(?:currently\s+|physically\s+|legally\s+)?(?:located|reside|residing|resident|living|live|based|work(?:ing)? from)\s+(?:in|within|from)\s+(?:the\s+)?{CONFINING_PLACES}\b"
+            r"\b{CANDIDATE}\s+(?:also\s+)?(?:be\s+)?(?:currently\s+|physically\s+|legally\s+)?(?:located|reside|residing|resident|living|live|based|work(?:ing)? from)\s+(?:in|within|from)\s+(?:the\s+)?{CONFINING_PLACES}\b"
         ),
         // "can be based remotely anywhere in the United States", "remote within the US"
         format!(r"\b(?:anywhere|everywhere|remotely|remote)\s+(?:in|within|across)\s+(?:the\s+)?{US_PLACES}\b"),
@@ -466,7 +469,7 @@ static CONFINING: LazyLock<RegexSet> = LazyLock::new(|| {
         format!(
             r"\b{US_PLACES}\s*-?\s*based\s+(?:(?:candidates?|applicants?|talent|residents?)\s+only|only|role|position|opportunity|remote)\b"
         ),
-        format!(r"\b(?:must|need to|have to|should)\s+be\s+(?:a\s+)?{US_PLACES}[- ]based\b"),
+        format!(r"\b{CANDIDATE}\s+be\s+(?:a\s+)?{US_PLACES}[- ]based\b"),
         // "authorized to work in the United States", "US work authorization"
         format!(
             r"\b(?:authori[sz]ed|eligible|permitted|entitled|right)\s+to\s+work\s+(?:in|within)\s+(?:the\s+)?{US_PLACES}\b"
@@ -491,6 +494,267 @@ static CONFINING: LazyLock<RegexSet> = LazyLock::new(|| {
     ])
     .expect("CONFINING is a valid set of regexes")
 });
+
+/// A location bound to North American time zones, read after `fold`: "required location in North
+/// American time zones", "must be located in North American time zones". Only the location forms:
+/// "able to work in" or "overlap with" those zones is a working-hours request, not a place, and
+/// "North or South American time zones" has another word between the two and does not match.
+///
+/// The six words before the verb are captured: a clause about someone else ("Our clients are
+/// located in...") is skipped by `time_zone_place_is_the_candidates`.
+static TIME_ZONE_PLACE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"\b((?:\S+\s+){0,6})(?:location|located|based|reside|residing)\s+(?:in|within),?\s+(?:the\s+)?(?:north\s+americ(?:a|an)|us)\s+time\s*zones?\b",
+    )
+    .expect("TIME_ZONE_PLACE is a valid regex")
+});
+
+/// Words that say a clause is about someone other than the candidate.
+const OTHER_PARTY_WORDS: &str = r"(?:our|we|team|teams|clients?|customers?|company|offices?|headquarters|hq|engineers|employees|colleagues|they|stakeholders|partners|people|folks|teammates|peers|managers?|users|org|organi[sz]ation|founders|staff|members|leadership)";
+
+static OTHER_PARTY: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(&format!(r"\b{OTHER_PARTY_WORDS}\b")).expect("OTHER_PARTY is a valid regex")
+});
+
+/// A clause that ends on a party the candidate works with: "...comfortable working with clients",
+/// "...to support customers who are", "...work for clients mostly". The place that follows is that
+/// party's, whatever the clause opened with. The party must END the clause (an adverb in "-ly" may
+/// follow it): in "must support users and be based in..." the candidate is still the one who must
+/// be there. A bare "for" is not here: "looking for engineers located in..." is about the candidate.
+static WORKS_WITH_OTHER_PARTY: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(&format!(
+        r"\b(?:with|alongside|support(?:s|ing)?|serv(?:e|es|ing)|help(?:s|ing)?|assist(?:s|ing)?|work(?:s|ing)?\s+for|report(?:s|ing)?\s+to|(?:available|responsive)\s+to)\s+(?:\S+\s+){{0,2}}?{OTHER_PARTY_WORDS}\W+(?:(?:who|that|which)\s+)?(?:(?:are|is)\s+)?(?:\w+ly\s+)?$"
+    ))
+    .expect("WORKS_WITH_OTHER_PARTY is a valid regex")
+});
+
+/// Words that put the candidate in a clause: a modal ("you must", "needs to"), hiring wording
+/// ("we only hire", "looking for", "requires candidates to") or an opening ("open to").
+static CANDIDATE_SIDE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(&format!(
+        r"\b(?:{CANDIDATE}|hire|hiring|looking\s+for|candidates?|applicants?|requires?\s+you|needs?\s+you|open\s+to|limited\s+to|restricted\s+to)\b"
+    ))
+    .expect("CANDIDATE_SIDE is a valid regex")
+});
+
+/// Whether a sentence puts the candidate in North American time zones. A match whose six words
+/// before the verb name another party (the team, the clients, the company) says where they are,
+/// not where the candidate must be, unless the same words also speak to the candidate. And when
+/// those words end on a party the candidate works with, the place is that party's even then
+/// ("You must be comfortable working with clients based in US time zones").
+fn time_zone_place_is_the_candidates(sentence: &str) -> bool {
+    TIME_ZONE_PLACE.captures_iter(sentence).any(|caps| {
+        let window = &caps[1];
+        !WORKS_WITH_OTHER_PARTY.is_match(window)
+            && (CANDIDATE_SIDE.is_match(window) || !OTHER_PARTY.is_match(window))
+    })
+}
+
+/// The words of a wish, shared by the time-zone hedge and the clearance rules: "preferred",
+/// "preferable", "nice to have", "helpful", "a plus". "plus", "bonus", "advantage" and "asset"
+/// count only with an article ("a plus", "a very big plus", "an added bonus", "an asset"), as
+/// "bonus points" or as "bonus:": "an active clearance plus 5 years of AWS" is not a wish. The
+/// adjectives between the article and the noun are a closed list, so "plus a strong AWS
+/// background" is not one either.
+const WISH_WORDS: &str = r"(?:(?:prefer(?:red|ably|able)?|ideally|nice\s+to\s+have|desirable|beneficial|advantageous|helpful|an?\s+(?:(?:very\s+)?(?:big|huge|great|strong|major|definite|real|added|additional|extra|key|important|significant|distinct|nice)\s+)?(?:plus|bonus|advantage|asset)|bonus\s+points?)\b|bonus\s*:)";
+
+/// A wish or an alternative in a time-zone sentence, not a requirement: "Preferably based in North
+/// American time zones", "...or willing to work those hours".
+static TIME_ZONE_HEDGE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(&format!(r"\b(?:{WISH_WORDS}|willing\b)")).expect("TIME_ZONE_HEDGE is a valid regex")
+});
+
+/// The names of a clearance level, written once for every pattern of `CLEARANCE` that needs them.
+const CLEARANCE_LEVEL_WORDS: &str = r"top\s+secret|secret|ts|sci|dod|public\s+trust";
+
+/// Sentences that ask for a US government clearance, read after `fold`. Only a citizen can hold
+/// one, so the job cannot be done from Chile. Each pattern names the clearance itself (a bare
+/// "public trust" or "secret" is ordinary English: "we earn the public's trust"). A denial counts
+/// only when attached to the clearance (`CLEARANCE_DENIED`).
+static CLEARANCE: LazyLock<RegexSet> = LazyLock::new(|| {
+    // "must have", "need to hold", "required to obtain"...; the verbs may be chained: "must have or
+    // be able to obtain and maintain".
+    let must = r"(?:must|need\s+to|needs\s+to|required\s+to|have\s+to)";
+    let verb = r"(?:eligible\s+(?:for|to\s+obtain)|obtain|hold|have|possess|maintain)";
+    let more = format!(r"(?:\s+(?:and|or)\s+(?:be\s+)?(?:able\s+to\s+)?{verb})*");
+    // The clearance must be named: "active", "security" or a level, never a bare "clearance"
+    // ("you must have clearance from your manager").
+    let named = format!(
+        r"(?:(?:active|current)\s+(?:(?:u\s?s\s+)?security\s+)?|(?:u\s?s\s+)?security\s+|(?:{CLEARANCE_LEVEL_WORDS})\s+)"
+    );
+    let levels = format!(r"(?:{CLEARANCE_LEVEL_WORDS}|security)");
+    RegexSet::new([
+        r"\bts\s*[/-]\s*sci\b".to_string(),
+        r"\bpolygraph\b".to_string(),
+        // "Secret clearance", "Top Secret/SCI clearance", "Secret-level clearance", "Top Secret
+        // (TS) clearance".
+        r"\b(?:top\s+)?secret(?:\s*[/-]\s*(?:level|sci))?(?:\s*\((?:ts|s)\))?\s+(?:security\s+)?clearance\b".to_string(),
+        // "Clearance Level: Top Secret".
+        r"\bclearance(?:\s+level)?\s*:\s*(?:top\s+secret|secret|ts|sci)\b".to_string(),
+        r"\bdod\s+(?:security\s+)?clearance\b".to_string(),
+        // "active clearance" stands alone; "current/valid/existing clearance" needs the level
+        // right before it ("current security clearance") or right after as a label ("current
+        // clearance level: secret"), so a level word elsewhere in the sentence is not enough.
+        r"\bactive\s+(?:security\s+)?clearance\b".to_string(),
+        format!(r"\b(?:active|current|valid|existing)\s+{levels}\s+clearance\b"),
+        format!(r"\b(?:current|valid|existing)\s+clearance\s+(?:level|status)\s*:?\s*{levels}\b"),
+        r"\bpublic\s+trust\s+(?:security\s+)?(?:clearance|investigation|background|position|designation|determination)\b".to_string(),
+        // "Must be clearable": only at the end of the sentence ("clearable through the CCP" is
+        // not a person).
+        r"\bbe\s+clearable\W*$".to_string(),
+        r"\bcleared\s+(?:candidates?|applicants?)\s+only\b".to_string(),
+        // "Security clearance required", "US Security Clearance: Required", "Requires a security
+        // clearance", "Active Secret required", "Interim Secret acceptable". "Requires Secret"
+        // alone is too ambiguous and is not here.
+        r"\bsecurity\s+clearance\s*:?\s*(?:is\s+)?(?:required|mandatory|needed|necessary)\b".to_string(),
+        r"\brequires?\s+(?:an?\s+)?(?:active\s+|current\s+)?(?:u\s?s\s+)?security\s+clearance\b".to_string(),
+        r"\bactive\s+(?:top\s+secret|secret|ts)\s+(?:required|needed)\b".to_string(),
+        r"\binterim\s+(?:top\s+secret|secret|ts)\b".to_string(),
+        // "must be eligible for / able to obtain a security clearance"; "ability to obtain one is
+        // a plus" has no "must" and stays open.
+        format!(r"\b{must}\s+(?:be\s+)?(?:able\s+to\s+)?{verb}{more}\s+(?:an?\s+|the\s+)?{named}clearance\b"),
+    ])
+    .expect("CLEARANCE is a valid set of regexes")
+});
+
+/// A negation before the clearance, with up to six words between ("not required to hold a
+/// security clearance", "don't need a TS/SCI clearance"). The captured words are the ones between.
+static DENIAL_BEFORE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?:\b(?:no|not|without|never)\b|n't)\s+((?:[^\s,;:()]+\s+){0,6}?)(?:clearance|ts\s*[/-]\s*sci|polygraph)\b",
+    )
+    .expect("DENIAL_BEFORE is a valid regex")
+});
+
+/// A negation that makes the words after it a condition, not a denial: "Don't apply UNLESS you
+/// hold an active TS/SCI clearance" asks for the clearance.
+static CONDITION: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b(?:unless|except|but|however|if|until)\b").expect("CONDITION is a valid regex")
+});
+
+/// "clearance (is) not required/needed", "clearance isn't...".
+static DENIAL_AFTER: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"\b(?:clearance|ts\s*[/-]\s*sci|polygraph)\s+(?:(?:is|are)\s+)?(?:not|never)\s+(?:be\s+)?(?:required|needed|necessary|mandatory)\b|\b(?:clearance|ts\s*[/-]\s*sci|polygraph)\s+(?:is|are)n't\b",
+    )
+    .expect("DENIAL_AFTER is a valid regex")
+});
+
+/// Whether a negation is attached to the clearance: "no ... clearance", "without ... clearance",
+/// "n't ... clearance" with at most six words between and no "unless" among them, or "clearance
+/// (is) not required". A "no" or "not" elsewhere ("which cannot be transferred", "(no interim)")
+/// says nothing about it.
+fn clearance_denied(sentence: &str) -> bool {
+    DENIAL_AFTER.is_match(sentence)
+        || DENIAL_BEFORE
+            .captures_iter(sentence)
+            .any(|caps| !CONDITION.is_match(&caps[1]))
+}
+
+/// The words of a clearance, for the preferences that attach to one.
+const CLEARANCE_WORDS: &str = r"(?:clearance|ts\s*[/-]\s*sci|polygraph)";
+
+/// Any wish word of `WISH_WORDS`.
+static WISH: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(&format!(r"\b{WISH_WORDS}")).expect("WISH is a valid regex"));
+
+/// A clearance followed, within 25 characters and without `.`, `;` or `,` in between, by a wish:
+/// "Security clearance is a bonus", "polygraph a plus", "TS/SCI preferred". Capture 1 is what lies
+/// between them.
+static CLEARANCE_THEN_WISH: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(&format!(
+        r"{CLEARANCE_WORDS}([^.;,]{{0,25}}?)\b{WISH_WORDS}"
+    ))
+    .expect("CLEARANCE_THEN_WISH is a valid regex")
+});
+
+/// A wish followed by a clearance within 25 characters: "Preferably TS/SCI", "nice to have: a
+/// security clearance". Capture 1 is what lies between them.
+static WISH_THEN_CLEARANCE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(&format!(
+        r"\b{WISH_WORDS}([^.;,]{{0,25}}?){CLEARANCE_WORDS}"
+    ))
+    .expect("WISH_THEN_CLEARANCE is a valid regex")
+});
+
+/// A requirement word between a clearance and its wish makes the wish about something else; in a
+/// sentence it tells a requirement from a wish.
+static REQUIREMENT_WORD: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b(?:required|requires?|requirements?|mandatory|must|need|needs)\b")
+        .expect("REQUIREMENT_WORD is a valid regex")
+});
+
+/// Another clearance or level word: a wish that follows one belongs to that one.
+static OTHER_LEVEL_WORD: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b(?:clearance|ts|sci|secret|polygraph)\b").expect("OTHER_LEVEL_WORD is valid")
+});
+
+/// The clearance words that open the text between a clearance and its wish and belong to the same
+/// phrase ("TS/SCI clearance is nice to have").
+static LEADING_CLEARANCE_WORDS: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(&format!(r"^(?:\s*{CLEARANCE_WORDS})+")).expect("LEADING_CLEARANCE_WORDS is valid")
+});
+
+/// Whether `between`, the text from a clearance to a wish, leaves the wish attached to it: no
+/// requirement word and no other clearance or level word (after the clearance's own words).
+fn wish_after_the_clearance_attaches(between: &str) -> bool {
+    let rest = LEADING_CLEARANCE_WORDS.replace(between, "");
+    !REQUIREMENT_WORD.is_match(&rest) && !OTHER_LEVEL_WORD.is_match(&rest)
+}
+
+/// Whether `between`, the text from a wish to the clearance that follows it, leaves the wish
+/// attached to it: no requirement word. A level word here is the clearance's own ("Preferably
+/// Secret clearance"), so it is not looked at.
+fn wish_before_the_clearance_attaches(between: &str) -> bool {
+    !REQUIREMENT_WORD.is_match(between)
+}
+
+/// `text` with every match of `pattern` whose capture 1 passes `attached` replaced by a space.
+fn without_attached_wishes(text: &str, pattern: &Regex, attached: fn(&str) -> bool) -> String {
+    pattern
+        .replace_all(text, |caps: &regex::Captures| {
+            if attached(&caps[1]) {
+                " ".to_string()
+            } else {
+                caps[0].to_string()
+            }
+        })
+        .into_owned()
+}
+
+/// The sentence without the clearances that are only wished for ("Active TS/SCI clearance
+/// required; polygraph a plus" keeps its requirement). A wish counts only when it is attached to
+/// the clearance itself: next to it, in the same clause, with no requirement word between and,
+/// for a wish that comes after the clearance, no other level between either.
+fn without_wished_clearances(sentence: &str) -> String {
+    let text = without_attached_wishes(
+        sentence,
+        &CLEARANCE_THEN_WISH,
+        wish_after_the_clearance_attaches,
+    );
+    without_attached_wishes(
+        &text,
+        &WISH_THEN_CLEARANCE,
+        wish_before_the_clearance_attaches,
+    )
+}
+
+/// Whether a sentence is only a wish: it opens with a wish word before any clearance word and has
+/// no requirement word ("Bonus points for an active clearance", "Preferred qualifications: active
+/// Secret clearance").
+fn is_only_a_wish(sentence: &str) -> bool {
+    let Some(wish) = WISH.find(sentence) else {
+        return false;
+    };
+    !REQUIREMENT_WORD.is_match(sentence) && !OTHER_LEVEL_WORD.is_match(&sentence[..wish.start()])
+}
+
+/// Whether a folded sentence asks for a US government clearance.
+fn needs_clearance(sentence: &str) -> bool {
+    CLEARANCE.is_match(&without_wished_clearances(sentence))
+        && !is_only_a_wish(sentence)
+        && !clearance_denied(sentence)
+}
 
 /// Sentences of a posting based in one of the extra places that say the candidate must already
 /// have the right to work there, read after `fold`. They close the job unless the posting also
@@ -641,6 +905,19 @@ fn description_confinement(description: &str, extra: Option<&Regex>) -> Confinem
     let mut found = Confinement::None;
     for sentence in fold(description).split(['.', '!', '?', '\n']) {
         let sentence = CITIZENSHIP_DENIED.replace_all(sentence, " ");
+        // A clearance is a US citizen's, whatever else the sentence says ("As a global leader in
+        // defense we require an active TS/SCI clearance"): an open word does not rescue it.
+        if needs_clearance(&sentence) {
+            return Confinement::Closed;
+        }
+        // A zone-bound place is a confinement unless denied or offered with an open place.
+        if time_zone_place_is_the_candidates(&sentence)
+            && !NEGATION.is_match(&sentence)
+            && !TIME_ZONE_HEDGE.is_match(&sentence)
+            && !has_open_term(&sentence)
+        {
+            return Confinement::Closed;
+        }
         if !CONFINING.is_match(&sentence) || has_open_term(&sentence) {
             continue;
         }
@@ -729,10 +1006,180 @@ pub fn region_ok_with(job: &Job, extra_places_open: &[String]) -> bool {
     !(in_extra_place && demands_work_rights(&job.description))
 }
 
+/// What the posting itself names about where it can be done, for the funnel by region. It measures and decides
+/// nothing: the filter is `region_ok_with`. It reads the title, the location and the remote flag only, never the
+/// description, and knows no extra places.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum RegionSignal {
+    /// It names a region open to Chile: a LATAM title, an open place in the location, or an on-site job in Chile.
+    NamesOpen,
+    /// A remote posting whose location names no place the lists know ("Remote", "", "Springfield").
+    Silent,
+    /// Anything else: a closed place, an on-site job outside Chile.
+    Other,
+}
+
+impl RegionSignal {
+    /// The name the funnel groups by.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RegionSignal::NamesOpen => "open",
+            RegionSignal::Silent => "silent",
+            RegionSignal::Other => "other",
+        }
+    }
+}
+
+/// The signal a posting gives about its region. Explicit arguments instead of `&Job` on purpose: the store calls
+/// this with three columns, and a `&Job` built from three fields would silently give wrong answers the day
+/// someone makes the function read the description. It reuses the lists and the place reading of
+/// `region_ok_with`, so the two cannot drift: every `NamesOpen` posting passes the filter.
+///
+/// Known limit: it knows no extra places (`criteria.extra_open_places`, which `region_ok_with` can take), because
+/// the store that calls it does not know the criteria. A posting in one of those places passes the filter but is
+/// `Other` here, so the funnel by region shows it as "otro lugar", next to the closed regions.
+pub fn region_signal(title: &str, location: &str, remote: bool) -> RegionSignal {
+    if !remote {
+        let location = location.to_lowercase();
+        return if CHILE_TERMS.iter().any(|term| location.contains(term)) {
+            RegionSignal::NamesOpen
+        } else {
+            RegionSignal::Other
+        };
+    }
+    if LATAM_TITLE.is_match(&fold(title)) {
+        return RegionSignal::NamesOpen;
+    }
+    let mut silent = true;
+    for place in location.split([';', '|', '/', '\n']) {
+        match classify(place, None) {
+            Place::Open => return RegionSignal::NamesOpen,
+            Place::Neutral => {}
+            Place::Extra | Place::Closed => silent = false,
+        }
+    }
+    if silent {
+        RegionSignal::Silent
+    } else {
+        RegionSignal::Other
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::region_ok_with;
+    use super::{RegionSignal, region_ok_with, region_signal};
     use crate::fixtures::make_job_with;
+
+    const NAMES_OPEN_CASES: [(&str, &str, bool); 5] = [
+        ("Backend Engineer (LATAM)", "Remote", true),
+        ("Engineer", "Remote - Latin America", true),
+        ("Engineer", "Worldwide", true),
+        ("Engineer", "USA; Mexico", true),
+        ("Engineer", "Santiago, Chile", false),
+    ];
+
+    #[test]
+    fn region_signal_names_open_for_a_latam_title_or_an_open_place() {
+        for (title, location, remote) in NAMES_OPEN_CASES {
+            assert_eq!(
+                region_signal(title, location, remote),
+                RegionSignal::NamesOpen,
+                "{title} / {location}"
+            );
+        }
+    }
+
+    #[test]
+    fn region_signal_is_silent_when_the_location_names_no_known_place() {
+        for location in ["Remote", "", "Springfield"] {
+            assert_eq!(
+                region_signal("Engineer", location, true),
+                RegionSignal::Silent,
+                "{location:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn region_signal_is_other_for_a_closed_place_or_an_on_site_job_outside_chile() {
+        for (location, remote) in [
+            ("Remote - US", true),
+            ("Toronto, Canada", true),
+            ("Sydney", false),
+            ("", false),
+        ] {
+            assert_eq!(
+                region_signal("Engineer", location, remote),
+                RegionSignal::Other,
+                "{location:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_posting_that_names_an_open_region_always_passes_the_filter() {
+        for (title, location, remote) in NAMES_OPEN_CASES {
+            let job = make_job_with(|job| {
+                job.title = title.into();
+                job.location = location.into();
+                job.remote = remote;
+            });
+            assert!(region_ok_with(&job, &[]), "{title} / {location}");
+        }
+    }
+
+    /// How many variants `RegionSignal` has, as `slot` numbers them. Raise it together with `ALL` and `slot`.
+    const VARIANTS: usize = 3;
+
+    /// Every signal, listed by hand.
+    const ALL: [RegionSignal; VARIANTS] = [
+        RegionSignal::NamesOpen,
+        RegionSignal::Silent,
+        RegionSignal::Other,
+    ];
+
+    /// The position of a signal among the variants. The match has no `_` arm, so a new variant does not compile
+    /// until it gets a slot here; a slot at or past `VARIANTS` is refused on the spot.
+    fn slot(signal: RegionSignal) -> usize {
+        let slot = match signal {
+            RegionSignal::NamesOpen => 0,
+            RegionSignal::Silent => 1,
+            RegionSignal::Other => 2,
+        };
+        assert!(slot < VARIANTS, "raise VARIANTS and list {signal:?} in ALL");
+        slot
+    }
+
+    /// What this checks: after a variant is added and given a slot, `VARIANTS`, `ALL` and the slots must agree (the
+    /// slots of `ALL` are exactly `0..VARIANTS`, each once, and match the declaration order), so raising one of them
+    /// and not the others fails here. What it cannot see is a variant nobody lists anywhere; `slot` refuses that one
+    /// as soon as it is called with it, and the match in `slot` stops the build before that.
+    #[test]
+    fn every_region_signal_is_listed_once() {
+        assert_eq!(ALL.len(), VARIANTS);
+        let mut slots: Vec<usize> = ALL.into_iter().map(slot).collect();
+        slots.sort_unstable();
+        assert_eq!(slots, (0..VARIANTS).collect::<Vec<_>>());
+        for signal in ALL {
+            assert_eq!(
+                signal as usize,
+                slot(signal),
+                "slot follows the declaration order"
+            );
+        }
+    }
+
+    #[test]
+    fn region_signal_names_are_open_silent_and_other() {
+        for signal in ALL {
+            let expected = match signal {
+                RegionSignal::NamesOpen => "open",
+                RegionSignal::Silent => "silent",
+                RegionSignal::Other => "other",
+            };
+            assert_eq!(signal.as_str(), expected);
+        }
+    }
 
     /// Whether a job with this title, location, remote flag and description passes the filter.
     fn passes(title: &str, location: &str, remote: bool, description: &str) -> bool {
@@ -949,6 +1396,253 @@ mod tests {
             "You must be based in Europe.",
         ] {
             assert!(!passes_saying(sentence), "{sentence:?} confines the job");
+        }
+    }
+
+    #[test]
+    fn a_requirement_to_sit_in_north_american_time_zones_closes_the_job() {
+        for sentence in [
+            "required location in North American time zones",
+            "Required location in North American time zones.",
+            "Must be located in North American time zones.",
+            "Candidates must be based in North American time zones.",
+            "You must be located in North American time zones",
+            "Candidates must be based in US time zones",
+            "Only candidates located in North American time zones will be considered",
+            "This role is open to people based in North American time zones",
+            "Must overlap with, and be based in, North American time zones",
+            "Applicants must currently be located in North American time zones",
+            "You are located in North American time zones",
+            "Applicant needs to be US-based.",
+            "You should be located in North American time zones.",
+            "You must reside in North American time zones.",
+            // A modal on the candidate wins over any other party in the window.
+            "To collaborate with our team, you must be located in North American time zones",
+            "As part of our team, you must reside within North American time zones",
+            "Engineers must be based in North American time zones",
+            "All engineers must be located in North American time zones",
+            "Team members must be located in North American time zones",
+            // Hiring wording puts the candidate in the place too.
+            "We only hire people located in North American time zones",
+            "We are looking for engineers located in North American time zones",
+            "Our company requires candidates to reside in US time zones",
+            "The team needs you located in North American time zones",
+            // Another party in the middle of the clause does not own the place: the candidate
+            // is still the one who must be there.
+            "Must support users and be based in North American time zones",
+            "Must work for clients and be based in North American time zones",
+        ] {
+            assert!(!passes_saying(sentence), "{sentence:?} confines the job");
+        }
+    }
+
+    /// Working hours that overlap are no place; a denial or an open place keeps the job; a zone
+    /// range that spans the Americas does not close it; neither does a place that belongs to the
+    /// team or the clients, nor one that is only wished for.
+    #[test]
+    fn a_time_zone_about_someone_else_or_only_wished_for_leaves_the_job_open() {
+        for sentence in [
+            "This role is open to LATAM. You must be able to work in North American time zones.",
+            "You don't need to be located in North American time zones.",
+            "overlap with North American time zones",
+            "Required location in North American time zones or LATAM.",
+            // About the team or the clients, not about who may apply.
+            "Our clients are located in North American time zones, so you'll overlap until 5pm ET",
+            "Our team is based in North American time zones",
+            "We are based in North American time zones and work async",
+            "Most of our customers are located in US time zones",
+            "You'll work with people based in North American time zones, so 4 hours of overlap is required",
+            "Your teammates are located in North American time zones",
+            "Your manager is based in North American time zones",
+            "You will support users based in US time zones",
+            // The clause speaks to the candidate, but the place is the party's they work with.
+            "You must be comfortable working with clients based in US time zones.",
+            "You'll need to collaborate with stakeholders located in US time zones.",
+            "You will need to work closely with teams based in North American time zones.",
+            "The role requires you to support clients located in US time zones.",
+            "We're hiring engineers to support customers located in US time zones.",
+            "Candidates will collaborate with clients based in US time zones.",
+            "You should be comfortable working with a team based in North American time zones",
+            "You must work with our clients, who are located in US time zones",
+            "You'll need to work for clients based in US time zones.",
+            "You will need to work for US clients located in North American time zones.",
+            "You'll need to collaborate with clients mostly located in US time zones.",
+            "You must work with clients currently located in US time zones.",
+            "You must be available to clients located in US time zones",
+            "You must be responsive to customers based in US time zones",
+            "You will need to report to a manager based in US time zones",
+            // A wish said with another noun or adjective.
+            "Being located in North American time zones is an asset.",
+            "Being located in US time zones is a key advantage.",
+            "Being located in US time zones is an additional plus.",
+            "Being located in US time zones is an extra bonus.",
+            "Being located in US time zones is a very big plus.",
+            "Location in US time zones is advantageous.",
+            "Being located in US time zones would be helpful.",
+            // A wish with an adjective, or "preferable".
+            "Being located in North American time zones is a big plus.",
+            "Based in US time zones is a strong plus.",
+            "Being located in US time zones is an added bonus.",
+            "Residing in North American time zones is a definite advantage.",
+            "Location within US time zones is preferable.",
+            "Located in North American time zones is a nice to have",
+            "Located in North American time zones is desirable",
+            "Being located in North American time zones is an advantage",
+            "Being located in North American time zones is beneficial",
+            "Preferably based in North American time zones",
+            "Ideally located in North American time zones",
+            "Must be located in North American time zones or willing to work those hours",
+            "North or South America timezones",
+            "North or South American time zones",
+            "required location in North or South American time zones",
+            "Required location in North or South America timezones.",
+        ] {
+            assert!(passes_saying(sentence), "{sentence:?} leaves the job open");
+        }
+    }
+
+    /// There is no rule that closes a job on a GMT/UTC offset range alone. These pin the safe
+    /// direction: a range that holds Chile's offsets (-3 in summer, -4 in winter), or one of them,
+    /// or neither, never closes by itself (a posting that holds none of them is not dropped
+    /// because of an offset; the person looks at it).
+    #[test]
+    fn a_gmt_or_utc_range_never_closes_a_job_by_itself() {
+        for sentence in [
+            "GMT+2 through GMT-8",
+            "UTC-8 to UTC+2",
+            "Working hours overlap: UTC-5 to UTC+1",
+            "Time zone: GMT-4 to GMT+4",
+            "GMT+0 to GMT+3",
+        ] {
+            assert!(passes_saying(sentence), "{sentence:?} leaves the job open");
+        }
+    }
+
+    #[test]
+    fn a_us_clearance_requirement_closes_the_job() {
+        for sentence in [
+            "Requires an active TS/SCI clearance.",
+            "TS/SCI",
+            "Active Secret clearance required.",
+            "Candidates need an active Secret clearance.",
+            "Must hold a Public Trust clearance.",
+            "Public Trust clearance required.",
+            "Applicants must pass a polygraph.",
+            "Polygraph required",
+            "Must have an active Top Secret/SCI clearance.",
+            "Top Secret (TS) clearance required",
+            "Secret-level clearance required",
+            "Clearance Level: Top Secret",
+            "DoD clearance required",
+            "Must be clearable",
+            "Cleared candidates only",
+            "Active TS clearance",
+            "Must be eligible for a security clearance",
+            "Must be able to obtain a security clearance",
+            "Active clearance required",
+            // A wish next to a requirement does not turn the requirement into a wish.
+            "Active TS/SCI clearance required; polygraph a plus",
+            "Active Secret clearance required, TS/SCI preferred",
+            "Clearance: Active TS/SCI with Full Scope Polygraph (preferred)",
+            "Must hold an active TS/SCI clearance plus polygraph",
+            "The ideal candidate must hold an active Secret clearance",
+            "You must hold an active TS/SCI clearance, plus AWS experience",
+            "Active Secret clearance required; AWS is a bonus",
+            "Must hold an active security clearance",
+            "A current security clearance is required.",
+            "Valid TS clearance needed.",
+            // "plus" and "bonus" are wishes only with an article.
+            "Must hold an active Secret clearance plus 5 years of AWS",
+            "Must hold an active Secret clearance plus a strong AWS background",
+            // A wish for ANOTHER level never swallows the requirement.
+            "Must hold an active Secret clearance (TS/SCI preferred)",
+            "Active Secret clearance with TS/SCI preferred",
+            "Secret clearance or higher (TS/SCI preferred)",
+            "US citizenship and an active Secret clearance (TS/SCI a plus)",
+            "Must possess an active Top Secret clearance with SCI eligibility preferred",
+            // A denial elsewhere in the sentence, not attached to the clearance, does not count.
+            "You must hold an active Secret clearance, which cannot be transferred.",
+            "An active Secret clearance is required; applicants without one will not be considered.",
+            "Don't apply unless you hold an active TS/SCI clearance.",
+            "Active TS/SCI clearance required (no interim).",
+            // An open place in the same sentence does not rescue a clearance requirement.
+            "As a global leader in defense we require an active TS/SCI clearance",
+            "U.S. Security Clearance: Required",
+            "Security clearance required",
+            "Requires a security clearance",
+            "Must be able to obtain and maintain a security clearance",
+            "Must be eligible to obtain a security clearance",
+            "Must have or be able to obtain a security clearance",
+            "Active Secret required",
+            "Interim Secret acceptable",
+        ] {
+            assert!(!passes_saying(sentence), "{sentence:?} needs a clearance");
+        }
+    }
+
+    #[test]
+    fn a_clearance_that_is_denied_or_only_a_plus_leaves_the_job_open() {
+        for sentence in [
+            "An active Secret clearance is not required.",
+            "Active TS/SCI clearance is not needed for this role.",
+            "No active Secret clearance necessary.",
+            "ability to obtain a security clearance is a plus",
+            "Knowledge of current clearance procedures for customs",
+            "Experience with valid clearance certificates for imports",
+            // A denial reaches up to six words before the clearance.
+            "Candidates are not required to hold a security clearance",
+            "No need to obtain a security clearance",
+            "You will not need to obtain a security clearance",
+            "You don't need to hold a clearance",
+            "You don't need a TS/SCI clearance",
+            "Don't have a TS/SCI clearance? No problem.",
+            // A preference is not a requirement.
+            "Experience with projects that require a security clearance is a plus",
+            "Security clearance preferred",
+            "An active Secret clearance is a bonus",
+            "Security clearance is a bonus",
+            "Security clearance is nice to have",
+            // A wish with an adjective.
+            "An active Secret clearance is a big plus.",
+            "Active TS/SCI clearance is a huge plus.",
+            "TS/SCI clearance would be a strong plus.",
+            "An active Secret clearance is an asset.",
+            // A sentence with a wish word and no requirement word is a wish.
+            "Bonus points for an active clearance",
+            "Bonus: active Secret clearance",
+            "A plus: active security clearance",
+            "It is a plus if you hold an active Secret clearance",
+            "Preferred qualifications: active Secret clearance",
+            "Ideally you hold an active Secret clearance",
+            "Preferably, a security clearance",
+            "Desirable: security clearance",
+            "Clearance not required but a plus",
+            "Active TS/SCI clearance is nice to have",
+            // Ordinary clearance words that are not a government clearance.
+            "You must have clearance from your manager before deploying",
+            "Trades must be clearable through the CCP",
+            "Improve the existing clearance workflow following security best practices",
+            "Experience with TS and React; customs clearance knowledge is a plus",
+            // "Requires Secret" alone is too ambiguous to close on.
+            "Requires Secret",
+        ] {
+            assert!(passes_saying(sentence), "{sentence:?} leaves the job open");
+        }
+    }
+
+    #[test]
+    fn no_clearance_requirement_or_a_word_alike_leaves_the_job_open() {
+        for sentence in [
+            "no clearance required",
+            "No security clearance needed.",
+            "Security clearance is not required for this role.",
+            "We earn the public's trust every day.",
+            "Public trust in AI matters to us.",
+            "We build tools that improve the public trust in elections.",
+            "Our secret sauce is a small team.",
+            "Clearance sale of old laptops.",
+        ] {
+            assert!(passes_saying(sentence), "{sentence:?} leaves the job open");
         }
     }
 

@@ -138,7 +138,10 @@ pub(crate) mod fixtures {
             .tracker
             .add_job(&job, score, &BTreeMap::new(), *NOW)
             .unwrap();
-        panel.tracker.create_application(&job.key(), *NOW).unwrap();
+        panel
+            .tracker
+            .start_application(&job.key(), jobbot_domain::origin::Origin::Cold, *NOW)
+            .unwrap();
         for state in states {
             panel
                 .tracker

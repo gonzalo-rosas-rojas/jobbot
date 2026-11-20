@@ -75,9 +75,10 @@ pub fn body_limit(target: &str) -> usize {
 /// Every route of the API by method (the names after `/api/`). The guards in `route` apply to
 /// exactly these, and a test walks the lists, so a new route is guarded and tested by being listed;
 /// a name that is only in the `match` below answers 404.
-const POST_ROUTES: [&str; 15] = [
+const POST_ROUTES: [&str; 16] = [
     "approve",
     "resolve",
+    "send_anyway",
     "confirm",
     "mark",
     "mark/undo",

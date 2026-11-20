@@ -37,7 +37,9 @@ use self::daily::cmd_run_daily;
 use self::dossier::cmd_dossier;
 use self::freelance::cmd_freelance;
 use self::inbox::{cmd_inbox_import, cmd_task_add, cmd_task_done};
-use self::marks::{cmd_approve, cmd_confirm, cmd_mark, cmd_record, cmd_resolve, cmd_unmark};
+use self::marks::{
+    cmd_approve, cmd_confirm, cmd_mark, cmd_origin, cmd_record, cmd_resolve, cmd_unmark,
+};
 use self::panel::cmd_panel;
 use self::pipeline::{
     cmd_auto_approve, cmd_discover, cmd_install_browsers, cmd_prepare, cmd_prepare_refresh,
@@ -164,6 +166,10 @@ struct RecordArgs {
     /// Sueldo máximo publicado, en USD al mes.
     #[arg(long)]
     salary_max: Option<f64>,
+    /// Cómo llegó la postulación: cold, referral, recruiter, agency, platform, direct o unknown. Sin esta opción, una
+    /// postulación nueva queda unknown y una que ya existía conserva el suyo.
+    #[arg(long)]
+    origin: Option<String>,
 }
 
 #[derive(Args, Debug, Clone, Copy)]
@@ -220,6 +226,9 @@ enum Command {
     Resolve {
         #[arg(required = true)]
         keys: Vec<String>,
+        /// Para una postulación parada por estar fuera de la región: la revisaste y quieres postular igual, sin la revisión de región. Sin esta opción esa postulación no se devuelve a la cola.
+        #[arg(long)]
+        send_outside_region: bool,
     },
     /// Marca como enviada una postulación en "necesita a Gonza" que enviaste tú o que sí llegó.
     Confirm {
@@ -275,6 +284,8 @@ enum Command {
     Unmark { key: String },
     /// Registra una postulación que se envió a mano (tú, o Claude con Playwright): queda como enviada con su hora real.
     Record(RecordArgs),
+    /// Corrige el origen de una postulación ya guardada: cold, referral, recruiter, agency, platform, direct o unknown.
+    Origin { key: String, origin: String },
     /// Bandeja de correo: importa los correos que Claude leyó de tu Gmail (jobbot nunca toca Gmail).
     Inbox {
         #[command(subcommand)]
@@ -515,6 +526,7 @@ async fn dispatch(
         }
         Command::Unmark { key } => cmd_unmark(paths, &key, now, out),
         Command::Record(args) => cmd_record(paths, args, now, out),
+        Command::Origin { key, origin } => cmd_origin(paths, &key, &origin, out),
         Command::Inbox { command } => match command {
             InboxCommand::Import { file } => cmd_inbox_import(paths, &file, now, out),
         },
@@ -535,7 +547,17 @@ async fn dispatch(
             cmd_freelance(paths, &deps, now, command, out).await
         }
         Command::Approve { keys } => cmd_approve(paths, &keys, out),
-        Command::Resolve { keys } => cmd_resolve(paths, &keys, now, out),
+        Command::Resolve {
+            keys,
+            send_outside_region,
+        } => {
+            let intent = if send_outside_region {
+                jobbot_app::actions::ResolveIntent::SendOutsideRegion
+            } else {
+                jobbot_app::actions::ResolveIntent::Plain
+            };
+            cmd_resolve(paths, &keys, now, intent, out)
+        }
         Command::Confirm { keys } => cmd_confirm(paths, &keys, now, out),
         Command::Digest => cmd_digest(paths, now, out),
         Command::Top { n } => cmd_top(paths, n, out),

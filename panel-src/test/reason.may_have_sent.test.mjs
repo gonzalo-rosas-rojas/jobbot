@@ -56,12 +56,20 @@ function serverKinds() {
 
 test("every kind the server can write is a kind of the page (or its cards would silently leave the queue), with the server's own sentence", () => {
   const kinds = serverKinds();
-  assert.deepEqual(kinds.map(([k]) => k).sort(), ["blocked", "error", "handoff", "manual_apply", "may_have_sent", "missing_answers", "other"], "the kinds snapshot/cards.rs knows");
+  assert.deepEqual(kinds.map(([k]) => k).sort(), ["blocked", "error", "handoff", "manual_apply", "may_have_sent", "missing_answers", "other", "out_of_region"], "the kinds snapshot/cards.rs knows");
   for (const [kind, sentence] of kinds) {
     assert.ok(REASON_KINDS.includes(kind), `${kind} is not in REASON_KINDS`);
     assert.ok(KIND_IDS.includes(kind), `${kind} is not in KIND_IDS`);
     assert.equal(esCommon["reason.short." + kind], sentence, `${kind}: the dictionary says something else than the server`);
   }
+});
+
+test("out_of_region has its words in both languages, exactly as decided, and is as cautious as may_have_sent", () => {
+  assert.equal(esCommon["reason.short.out_of_region"], "Fuera de la región con las reglas de hoy: revísala antes de enviar.");
+  assert.equal(enCommon["reason.short.out_of_region"], "Outside the region by today's rules: review it before sending.");
+  assert.equal(esCommon["reason.group.out_of_region"], "Fuera de región");
+  assert.equal(enCommon["reason.group.out_of_region"], "Outside the region");
+  assert.ok(REASON_KINDS.indexOf("out_of_region") > REASON_KINDS.indexOf("may_have_sent") && REASON_KINDS.indexOf("out_of_region") < REASON_KINDS.indexOf("other"));
 });
 
 test("may_have_sent has its words in both languages, and the English is not the Spanish", () => {

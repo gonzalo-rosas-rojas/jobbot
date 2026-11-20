@@ -258,7 +258,7 @@ mod tests {
         let t = Tracker::in_memory().unwrap();
         let job = make_job();
         t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-        t.create_application(&job.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         t.transition(&job.key(), State::Prepared, None, *NOW)
             .unwrap();
         t.transition(
@@ -283,7 +283,7 @@ mod tests {
         let t = Tracker::in_memory().unwrap();
         let job = make_job();
         t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-        t.create_application(&job.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         let err = t
             .transition(&job.key(), State::Submitted, None, *NOW)
             .unwrap_err();
@@ -307,7 +307,7 @@ mod tests {
             .transition("nope:1", State::Prepared, None, *NOW)
             .unwrap_err();
         assert!(matches!(err, TrackerError::UnknownKey(ref key) if key == "nope:1"));
-        let err = t.create_application("nope:1", *NOW).unwrap_err();
+        let err = t.start_cold_for_tests("nope:1", *NOW).unwrap_err();
         assert!(matches!(err, TrackerError::UnknownKey(_)));
         assert!(t.approve("nope:1").is_err());
         assert!(t.set_cv_path("nope:1", Path::new("cv.pdf")).is_err());
@@ -320,7 +320,7 @@ mod tests {
         let t = Tracker::in_memory().unwrap();
         let job = make_job();
         t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-        t.create_application(&job.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         t.transition(&job.key(), State::NeedsGonza, Some("falta email"), *NOW)
             .unwrap();
         let app = t.get_application(&job.key()).unwrap().unwrap();
@@ -404,7 +404,7 @@ mod tests {
         let t = Tracker::in_memory().unwrap();
         let job = make_job();
         t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-        t.create_application(&job.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         t.transition(&job.key(), State::Prepared, None, *NOW)
             .unwrap();
         t.transition(
@@ -437,7 +437,7 @@ mod tests {
         let t = Tracker::open(&path).unwrap();
         let job = make_job();
         t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-        t.create_application(&job.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         // Another process (for example `discover` of the hourly task) is in the middle of a write.
         let other = Connection::open(&path).unwrap();
         other.execute_batch("BEGIN IMMEDIATE").unwrap();
@@ -462,7 +462,7 @@ mod tests {
         let t = Tracker::in_memory().unwrap();
         let job = make_job();
         t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-        t.create_application(&job.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         let until = *NOW + TimeDelta::days(1);
         // What Gonza put off was the application as it stood: once it moves, the snooze is over.
         t.set_snoozed_until(&job.key(), Some(until)).unwrap();

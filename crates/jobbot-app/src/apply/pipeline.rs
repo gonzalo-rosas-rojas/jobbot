@@ -8,7 +8,10 @@ use anyhow::Context;
 use chrono::{DateTime, Utc};
 use jobbot_domain::answers::{AnswerBank, australian_salary_ask};
 use jobbot_domain::form::{SubmitMode, SubmitStatus};
-use jobbot_domain::gate::{REASON_LISTING_ONLY, REASON_MANUAL_ONLY, REASON_STALE, stale_note};
+use jobbot_domain::gate::{
+    OUT_OF_REGION_NOTE, REASON_LISTING_ONLY, REASON_MANUAL_ONLY, REASON_OUT_OF_REGION,
+    REASON_STALE, is_out_of_region_reason, stale_note,
+};
 use jobbot_domain::handoff::{
     FormInspection, FormTally, HANDOFF_REASON_PREFIX, is_handoff_job, missing_labels,
     report_from_result,
@@ -16,9 +19,11 @@ use jobbot_domain::handoff::{
 use jobbot_domain::models::Job;
 use jobbot_domain::rules::{Criteria, Exclusions};
 use jobbot_domain::state::State;
-use jobbot_domain::text::safe_key;
+use jobbot_domain::text::{company_identity, safe_key};
 
-use crate::apply::attachment::attachment_for;
+use crate::apply::attachment::{
+    CopyFailure, attachment_for, keep_before_replacing, refresh_attachment_copies,
+};
 use crate::apply::cv::{
     CvError, Renderer, assert_no_new_skills, ensure_ready, relocating_to, tailor,
 };
@@ -41,6 +46,10 @@ const CLOSED_NOTE: &str = "posting_closed: el aviso ya no está abierto en la fu
 /// The most applications one company may have in flight at once. Mass applying is weak: of the
 /// postings of one company only the best-scored ones go forward. `prepare` and `submit` leave the
 /// rest as they are (they are looked at again on every run, so a place that frees up is taken).
+/// A company is its `text::company_identity`, the one the 90-day cooldown and the stored `company_norm`
+/// use, so "Acme" and "Acme, Inc." are one company; a name `normalize` empties (non-Latin script, or only a
+/// legal suffix) is its trimmed lowercased raw name, so it is capped as its own company. A blank name is
+/// nobody's company and is never capped.
 pub const MAX_PER_COMPANY: usize = 2;
 
 /// The states that count against a company's cap: everything on its way to an answer.
@@ -63,11 +72,6 @@ const SENT: [State; 5] = [
     State::Interview,
     State::Offer,
 ];
-
-/// The identity of a company for the cap: its name, lowercased and trimmed.
-pub fn company_key(name: &str) -> String {
-    name.trim().to_lowercase()
-}
 
 /// An application the cap leaves out of a run.
 #[derive(Debug, Clone, PartialEq)]
@@ -101,13 +105,13 @@ enum CapStage {
 
 /// Whether a row is an application on its way to an answer. A posting below the pay floor that
 /// discovery set aside for Gonza to decide on (`needs_gonza`, `below_floor_exception`) is only a
-/// question: it holds no place at its company and does not compete for one.
+/// question: it holds no place at its company and does not compete for one. The same goes for a posting parked
+/// because it is outside the region by today's rules: until Gonza clears it, it is not going anywhere.
 fn is_application(row: &ApplicationRow) -> bool {
     !(row.state == State::NeedsGonza
-        && row
-            .needs_reason
-            .as_deref()
-            .is_some_and(|reason| reason.starts_with("below_floor_exception")))
+        && row.needs_reason.as_deref().is_some_and(|reason| {
+            reason.starts_with("below_floor_exception") || is_out_of_region_reason(reason)
+        }))
 }
 
 /// Which applications of the competing state a company's cap leaves out: the best-scored ones
@@ -126,14 +130,14 @@ fn cap_skips(tracker: &dyn Store, stage: CapStage) -> anyhow::Result<Vec<CapSkip
     for state in holding {
         for row in tracker.list_by_state(*state)? {
             if is_application(&row) {
-                *held.entry(company_key(&row.company)).or_default() += 1;
+                *held.entry(company_identity(&row.company)).or_default() += 1;
             }
         }
     }
     let mut pools: BTreeMap<String, Vec<ApplicationRow>> = BTreeMap::new();
     for state in competing {
         for row in tracker.list_by_state(*state)? {
-            let company = company_key(&row.company);
+            let company = company_identity(&row.company);
             if !company.is_empty() && is_application(&row) {
                 pools.entry(company).or_default().push(row);
             }
@@ -314,6 +318,15 @@ pub async fn prepare_report_relocating(
     Ok(PrepareReport { prepared, skipped })
 }
 
+/// What `refresh_cvs` did.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RefreshReport {
+    /// The keys whose CV was rendered again.
+    pub refreshed: Vec<String>,
+    /// Readable copies (`adjuntos/`) that still hold the replaced CV.
+    pub copy_failures: Vec<CopyFailure>,
+}
+
 /// Folder, next to the CVs, that keeps every CV `refresh_cvs` replaced.
 pub const REPLACED_CV_DIR: &str = "replaced";
 
@@ -321,50 +334,125 @@ pub const REPLACED_CV_DIR: &str = "replaced";
 /// and has one, from the master as it is now (after an edit of `cv/cv-master.md`), tailored as
 /// `prepare` would. No state changes. A sent application is never touched: its PDF is the record of
 /// what went out. Gonza may have sent a waiting one by hand without confirming it, so the PDF being
-/// replaced is first copied to `<its folder>/replaced/<name>.<UTC time>.pdf`. Returns the keys whose
-/// CV was rendered again, best score first within each state.
-#[tracing::instrument(skip_all, fields(refreshed = Empty))]
+/// replaced is first copied to `<cv_dir>/replaced/<name>.<UTC time>.pdf`. The readable copies
+/// in `adjuntos/<job key>/` (the files the handoff sheets name) are overwritten with the new PDF
+/// too (each one kept first in `replaced/`), and a copy that could not be replaced is returned in
+/// `copy_failures`. `cv_dir` is the folder of the tailored CVs, `<data_dir>/cv`. Returns the keys
+/// whose CV was rendered again, best score first within each state. When a later row fails, the
+/// copy failures found so far are logged before the error is returned.
+#[tracing::instrument(skip_all, fields(refreshed = Empty, copy_failures = Empty))]
 pub async fn refresh_cvs(
     tracker: &dyn Store,
     cv_master: &Path,
+    cv_dir: &Path,
     renderer: &dyn Renderer,
     relocation: Relocation<'_>,
     now: DateTime<Utc>,
-) -> Result<Vec<String>, CvError> {
+) -> Result<RefreshReport, CvError> {
     let master = read_master(cv_master).await?;
     let stamp = now.format("%Y%m%dT%H%M%SZ").to_string();
-    let mut refreshed = Vec::new();
+    let places = RefreshPlaces {
+        cv_dir,
+        replaced_dir: &cv_dir.join(REPLACED_CV_DIR),
+        stamp: &stamp,
+    };
+    let mut report = RefreshReport::default();
+    let result = refresh_rows(tracker, &master, renderer, relocation, places, &mut report).await;
+    if let Err(err) = result {
+        // Rendering stopped half way: the copies already found stale must not be forgotten.
+        for failure in &report.copy_failures {
+            tracing::warn!(
+                key = %failure.job_key,
+                file = %failure.file.display(),
+                reason = %failure.reason,
+                "a readable CV copy could not be refreshed; the refresh then failed"
+            );
+        }
+        return Err(with_copy_failures(err, &report.copy_failures));
+    }
+    crate::record_counts(&[
+        ("refreshed", report.refreshed.len()),
+        ("copy_failures", report.copy_failures.len()),
+    ]);
+    Ok(report)
+}
+
+/// Where a refresh reads and keeps files, and the time mark of the copies it keeps.
+#[derive(Clone, Copy)]
+struct RefreshPlaces<'a> {
+    /// The folder of the tailored CVs, `<data_dir>/cv`.
+    cv_dir: &'a Path,
+    /// The folder that keeps what the refresh replaced.
+    replaced_dir: &'a Path,
+    /// The UTC time mark in the names of the kept copies.
+    stamp: &'a str,
+}
+
+/// `err` with, when copies were found stale before it, a line naming their job keys (only keys,
+/// no paths) and telling Gonza not to attach them. The line is added as context, so the cause
+/// chain stays. Without such copies, or for a typed error (the warn already records the copies),
+/// `err` as it is.
+fn with_copy_failures(err: CvError, failures: &[CopyFailure]) -> CvError {
+    let CvError::Other(cause) = err else {
+        return err;
+    };
+    if failures.is_empty() {
+        return CvError::Other(cause);
+    }
+    let keys = failures
+        .iter()
+        .map(|failure| failure.job_key.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    CvError::Other(cause.context(format!(
+        "estas copias legibles de CV no se pudieron actualizar antes de que el refresco fallara \
+         y todavía tienen el CV anterior, no las adjuntes: {keys}"
+    )))
+}
+
+/// The rows of `refresh_cvs`, filling `report` as it goes so that a failure leaves what was done.
+async fn refresh_rows(
+    tracker: &dyn Store,
+    master: &str,
+    renderer: &dyn Renderer,
+    relocation: Relocation<'_>,
+    places: RefreshPlaces<'_>,
+    report: &mut RefreshReport,
+) -> Result<(), CvError> {
+    let RefreshPlaces {
+        cv_dir,
+        replaced_dir,
+        stamp,
+    } = places;
     for state in [State::Prepared, State::NeedsGonza] {
         for row in tracker.list_by_state(state)? {
             let Some(cv_path) = row.cv_path.as_deref() else {
                 continue;
             };
             let job = job_or_missing(tracker, &row.job_key)?;
-            let variant = tailored_variant(&master, &job, relocation)?;
+            let variant = tailored_variant(master, &job, relocation)?;
             let pdf_path = Path::new(cv_path);
             if pdf_path.exists() {
-                let folder = pdf_path
-                    .parent()
-                    .unwrap_or_else(|| Path::new("."))
-                    .join(REPLACED_CV_DIR);
-                tokio::fs::create_dir_all(&folder)
-                    .await
-                    .with_context(|| format!("creating {}", folder.display()))?;
                 let stem = pdf_path
                     .file_stem()
                     .map(|stem| stem.to_string_lossy().into_owned())
                     .unwrap_or_else(|| safe_key(&row.job_key));
-                let copy = folder.join(format!("{stem}.{stamp}.pdf"));
-                tokio::fs::copy(pdf_path, &copy)
+                keep_before_replacing(pdf_path, replaced_dir, &format!("{stem}.{stamp}.pdf"))
                     .await
                     .with_context(|| format!("keeping {}", pdf_path.display()))?;
             }
             renderer.render(&variant, pdf_path).await?;
-            refreshed.push(row.job_key);
+            // The copy a handoff sheet names is a file of its own: it carries the new CV too,
+            // and one that could not be replaced is reported, so nobody attaches it believing
+            // it was refreshed.
+            report.copy_failures.extend(
+                refresh_attachment_copies(cv_dir, pdf_path, &row.job_key, replaced_dir, stamp)
+                    .await,
+            );
+            report.refreshed.push(row.job_key);
         }
     }
-    crate::record_counts(&[("refreshed", refreshed.len())]);
-    Ok(refreshed)
+    Ok(())
 }
 
 /// What `submit_all` did with one application.
@@ -390,7 +478,10 @@ fn outcome(job_key: &str, status: &str, reason: Option<&str>) -> SubmitOutcome {
 ///
 /// * A STOP file returns immediately. `stop_file` and `daily_cap` from the gate end the run.
 /// * `manual_only_platform` and `listing_only` move the application to `needs_gonza`; an
-///   `excluded:*` company and a `stale_posting` move it to `withdrawn`; `company_cooldown` and
+///   `excluded:*` company and a `stale_posting` move it to `withdrawn`; a posting outside the region
+///   (`fuera_de_region`) moves it to `needs_gonza` with the region note, never to `withdrawn`: the rule
+///   reads the stored location with today's lists, a false positive must not destroy an approved
+///   application for good, and the gate runs before the approval check; `company_cooldown` and
 ///   `warmup_hold` leave it as it is. All of them are reported with status `blocked`.
 /// * The mode is decided per application: `Assist` stays `Assist` (Gonza's click is the review,
 ///   so a submission also approves the application); `DryRun` stays `DryRun`; `Live` becomes
@@ -517,6 +608,18 @@ pub async fn submit_all_while(
             }
             Some(why) if why.starts_with("excluded:") => {
                 tracker.transition(&row.job_key, State::Withdrawn, Some(why), now)?;
+                outcomes.push(outcome(&row.job_key, "blocked", gate_reason));
+                continue;
+            }
+            Some(REASON_OUT_OF_REGION) => {
+                // Not withdrawn: the rule reads stored text and is being tuned, and a withdrawal is terminal
+                // with no undo. Gonza looks at it (the note is the card's reason) and decides.
+                tracker.transition(
+                    &row.job_key,
+                    State::NeedsGonza,
+                    Some(OUT_OF_REGION_NOTE),
+                    now,
+                )?;
                 outcomes.push(outcome(&row.job_key, "blocked", gate_reason));
                 continue;
             }
@@ -663,8 +766,16 @@ pub async fn submit_all_while(
             }
         };
         close_intent(tracker, intent, status, now)?;
-        if let Some(screenshot) = &result.screenshot {
-            tracker.set_screenshot(&row.job_key, screenshot)?;
+        // The state is already saved; a screenshot that cannot be stored is a warning, not a
+        // reason to end the run with the rest of the applications unprocessed.
+        if let Some(screenshot) = &result.screenshot
+            && let Err(err) = tracker.set_screenshot(&row.job_key, screenshot)
+        {
+            tracing::warn!(
+                key = %row.job_key,
+                error = %format!("{err:#}"),
+                "could not store the screenshot of the submit; the run goes on"
+            );
         }
         // The filler does not count the questions it answered, only name the ones it lacked.
         let tally = FormTally {
@@ -836,11 +947,24 @@ async fn hand_off(
     if let Some(seen) = seen {
         note.push_str(&format!(" · el bot vio: {seen}"));
     }
-    tracker.transition(&key, State::NeedsGonza, Some(&note), now)?;
-    if let Some(screenshot) = &result.screenshot {
-        tracker.set_screenshot(&key, screenshot)?;
+    // The screenshot is stored before the move: a failure then is only a warning and a line in
+    // the note the owner reads, never a page error after the application is already with him
+    // (needs_gonza -> needs_gonza is illegal and would end the run).
+    if let Some(screenshot) = &result.screenshot
+        && let Err(err) = tracker.set_screenshot(&key, screenshot)
+    {
+        tracing::warn!(
+            key = %key,
+            error = %format!("{err:#}"),
+            "could not store the handoff screenshot; the run goes on"
+        );
+        note.push_str(" · no se guardó la captura de pantalla");
     }
-    log_attempt(
+    tracker.transition(&key, State::NeedsGonza, Some(&note), now)?;
+    // The application is already with Gonza and the sheet is written. A log line that cannot be
+    // written must not turn into a page error: that would try needs_gonza -> needs_gonza and
+    // abort the whole run, as in the main path (which only warns).
+    if let Err(err) = log_attempt(
         tracker,
         data_dir,
         job,
@@ -849,7 +973,13 @@ async fn hand_off(
         result.screenshot.as_deref(),
         Some(&sheet),
         now,
-    )?;
+    ) {
+        tracing::warn!(
+            key = %key,
+            error = %format!("{err:#}"),
+            "could not append the handoff to results.jsonl; the run goes on"
+        );
+    }
     Ok(outcome(&key, "needs_gonza", Some(&note)))
 }
 
@@ -880,9 +1010,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_cap_is_one_constant_and_the_company_key_ignores_case_and_edges() {
+    fn the_cap_is_one_constant() {
         assert_eq!(MAX_PER_COMPANY, 2);
-        assert_eq!(company_key("  Acme AI "), "acme ai");
-        assert_eq!(company_key("ACME AI"), company_key("acme ai"));
     }
 }

@@ -9,6 +9,7 @@ use serde::Serialize;
 
 use super::cards::{file_on_disk, has_screenshot_on_disk};
 use crate::Panel;
+use jobbot_app::ports::store::FunnelRow;
 use jobbot_domain::rules::Criteria;
 use jobbot_domain::state::{ANSWERED_STATES, State};
 
@@ -44,15 +45,22 @@ pub struct Funnel {
     pub offers: i64,
     /// The same stages per source the posting came from, with the base `n` of each. Counts only:
     /// with a handful of sends per source a rate would be noise, so the page shows "2 of 11".
-    pub by_source: BTreeMap<String, SourceFunnel>,
+    pub by_source: BTreeMap<String, FunnelGroup>,
+    /// Per origin (`cold`, `referral`, ...): only the origins that have applications.
+    pub by_origin: BTreeMap<String, FunnelGroup>,
+    /// Per region signal (`open`, `silent`, `other`), read from each posting now.
+    pub by_region: BTreeMap<String, FunnelGroup>,
 }
 
+/// One group's line of a funnel. Counts only, never rates.
 #[derive(Debug, Serialize, PartialEq)]
-pub struct SourceFunnel {
-    /// Applications of the source, sent or not.
+pub struct FunnelGroup {
+    /// Applications of the group, sent or not.
     pub n: i64,
     pub sent: i64,
     pub answered: i64,
+    /// Of `answered`, the ones that were rejections.
+    pub rejected: i64,
     pub tests: i64,
     pub interviews: i64,
     pub offers: i64,
@@ -130,30 +138,53 @@ pub(super) fn metrics(panel: &Panel, now: DateTime<Utc>) -> Result<Metrics> {
 pub(super) fn funnel(panel: &Panel) -> Result<Funnel> {
     let t = &panel.tracker;
     let ever = all_time_from();
+    // One read of the applications for the three splits.
+    let splits = t.funnels()?;
     Ok(Funnel {
         sent: t.submitted_since(ever)?,
         answered: t.jobs_reaching(&ANSWERED_STATES, ever)?,
         tests: t.jobs_reaching(&[State::TechnicalTest], ever)?,
         interviews: t.jobs_reaching(&[State::Interview], ever)?,
         offers: t.jobs_reaching(&[State::Offer], ever)?,
-        by_source: t
-            .funnel_by_source()?
-            .into_iter()
-            .map(|row| {
-                (
-                    row.source,
-                    SourceFunnel {
-                        n: row.n,
-                        sent: row.sent,
-                        answered: row.answered,
-                        tests: row.tests,
-                        interviews: row.interviews,
-                        offers: row.offers,
-                    },
-                )
-            })
-            .collect(),
+        by_source: groups(splits.by_source),
+        by_origin: groups(splits.by_origin),
+        by_region: groups(splits.by_region),
     })
+}
+
+/// The rows of one funnel as the snapshot's map, keyed by group name.
+fn groups(rows: Vec<FunnelRow>) -> BTreeMap<String, FunnelGroup> {
+    rows.into_iter()
+        .map(|row| {
+            let group = row.group.clone();
+            (group, FunnelGroup::from(row))
+        })
+        .collect()
+}
+
+impl From<FunnelRow> for FunnelGroup {
+    /// Every counter named, no `..`: a new counter of the store's row does not compile until the page's line has it.
+    fn from(row: FunnelRow) -> FunnelGroup {
+        let FunnelRow {
+            group: _,
+            n,
+            sent,
+            answered,
+            rejected,
+            tests,
+            interviews,
+            offers,
+        } = row;
+        FunnelGroup {
+            n,
+            sent,
+            answered,
+            rejected,
+            tests,
+            interviews,
+            offers,
+        }
+    }
 }
 
 /// The weekly pipeline. The layers nest by construction: only an application can have a CV, a
@@ -233,6 +264,7 @@ mod tests {
     use crate::snapshot::support_tests::{
         SAMPLE_CRITERIA, profile_with, sample_criteria, seen_at, use_sample_criteria,
     };
+    use jobbot_domain::origin::Origin;
     use jobbot_testkit::profile::with_line;
     use jobbot_testkit::{NOW, make_job_with};
 
@@ -300,10 +332,11 @@ mod tests {
         // unsent one in its base.
         assert_eq!(
             funnel.by_source.get("test"),
-            Some(&SourceFunnel {
+            Some(&FunnelGroup {
                 n: 7,
                 sent: 6,
                 answered: 4,
+                rejected: 1,
                 tests: 1,
                 interviews: 2,
                 offers: 1,
@@ -323,7 +356,10 @@ mod tests {
                 .tracker
                 .add_job(&job, 80.0, &BTreeMap::new(), *NOW)
                 .unwrap();
-            panel.tracker.create_application(&job.key(), *NOW).unwrap();
+            panel
+                .tracker
+                .start_application(&job.key(), jobbot_domain::origin::Origin::Cold, *NOW)
+                .unwrap();
             for state in states {
                 panel
                     .tracker
@@ -353,13 +389,45 @@ mod tests {
         assert_eq!(json["sent"], 2);
         assert_eq!(
             json["by_source"]["ashby"],
-            serde_json::json!({ "n": 2, "sent": 1, "answered": 1, "tests": 0, "interviews": 0, "offers": 0 })
+            serde_json::json!({ "n": 2, "sent": 1, "answered": 1, "rejected": 1, "tests": 0, "interviews": 0, "offers": 0 })
         );
         assert_eq!(
             json["by_source"]["lever"],
-            serde_json::json!({ "n": 1, "sent": 1, "answered": 1, "tests": 0, "interviews": 1, "offers": 0 })
+            serde_json::json!({ "n": 1, "sent": 1, "answered": 1, "rejected": 0, "tests": 0, "interviews": 1, "offers": 0 })
         );
         assert_eq!(json["by_source"].as_object().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn the_funnel_is_split_by_origin_and_by_region_too() {
+        let (panel, _dir) = panel();
+        let walk = |id: &str, location: &str, origin: Origin| {
+            let job = make_job_with(|j| {
+                j.external_id = id.into();
+                j.location = location.into();
+                j.remote = true;
+            });
+            panel
+                .tracker
+                .add_job(&job, 80.0, &BTreeMap::new(), *NOW)
+                .unwrap();
+            panel
+                .tracker
+                .start_application(&job.key(), jobbot_domain::origin::Origin::Cold, *NOW)
+                .unwrap();
+            panel.tracker.set_origin(&job.key(), origin).unwrap();
+        };
+        walk("1", "Remote - LATAM", Origin::Cold);
+        walk("2", "Remote", Origin::Referral);
+
+        let json = serde_json::to_value(build_snapshot(&panel).unwrap().funnel.unwrap()).unwrap();
+
+        assert_eq!(json["by_origin"]["cold"]["n"], 1);
+        assert_eq!(json["by_origin"]["referral"]["n"], 1);
+        assert_eq!(json["by_origin"].as_object().unwrap().len(), 2);
+        assert_eq!(json["by_region"]["open"]["n"], 1);
+        assert_eq!(json["by_region"]["silent"]["n"], 1);
+        assert_eq!(json["by_region"].as_object().unwrap().len(), 2);
     }
 
     #[test]

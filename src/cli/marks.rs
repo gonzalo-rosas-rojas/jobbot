@@ -41,10 +41,35 @@ pub(super) fn cmd_resolve(
     paths: &Paths,
     keys: &[String],
     now: DateTime<Utc>,
+    intent: actions::ResolveIntent,
     out: &mut dyn Write,
 ) -> Result<i32> {
+    // The panel never sends this intent for a batch: it is one decision per application, here too.
+    if intent == actions::ResolveIntent::SendOutsideRegion && keys.len() != 1 {
+        writeln!(
+            out,
+            "--send-outside-region va con una sola clave: es una decisión por postulación."
+        )?;
+        return Ok(EXIT_ERROR);
+    }
     let tracker = open_tracker(paths)?;
-    act_on_each(keys, out, |key| actions::resolve(&tracker, key, now))
+    let mut code = EXIT_OK;
+    for key in keys {
+        let outcome = actions::resolve(&tracker, key, now, intent)?;
+        // Every line names its key, so the lines of several keys can be told apart.
+        writeln!(out, "{key}: {}", outcome.message)?;
+        if outcome.message == actions::SEND_ANYWAY_REFUSAL {
+            // The refusal text is the panel's (it must not carry a command line); the terminal gets its way out here.
+            writeln!(
+                out,
+                "Desde la terminal: jobbot resolve {key} --send-outside-region"
+            )?;
+        }
+        if !outcome.ok {
+            code = EXIT_ERROR;
+        }
+    }
+    Ok(code)
 }
 
 /// For `unconfirmed_submit` and assisted forms Gonza finished himself.
@@ -86,6 +111,20 @@ pub(super) fn cmd_unmark(
     Ok(if outcome.ok { EXIT_OK } else { EXIT_ERROR })
 }
 
+/// Changes how a stored application came about. It writes only the tracker, so like `mark` it ignores STOP and the
+/// window.
+pub(super) fn cmd_origin(
+    paths: &Paths,
+    key: &str,
+    origin: &str,
+    out: &mut dyn Write,
+) -> Result<i32> {
+    let tracker = open_tracker(paths)?;
+    let outcome = actions::set_origin(&tracker, key, origin)?;
+    writeln!(out, "{}", outcome.message)?;
+    Ok(if outcome.ok { EXIT_OK } else { EXIT_ERROR })
+}
+
 /// Records an application that went out outside jobbot. Like `mark` and `confirm` it writes only
 /// the tracker, so it ignores STOP and the execution window: refusing to write down a form that
 /// was already sent would only leave the tracker wrong.
@@ -120,6 +159,7 @@ pub(super) fn cmd_record(
         salary_min_monthly_usd: args.salary_min,
         salary_max_monthly_usd: args.salary_max,
         note: args.note,
+        origin: args.origin,
     };
     let tracker = open_tracker(paths)?;
     let outcome = actions::record(&tracker, &spec, at)?;
@@ -132,6 +172,7 @@ mod tests {
     use std::path::Path;
 
     use chrono::{TimeZone, Utc};
+    use jobbot_domain::origin::Origin;
 
     use crate::cli::test_support::{
         busy_now, cli, fake_deps, open_now, plain, seed, seed_prepared, temp_root, tracker_of,
@@ -209,6 +250,87 @@ mod tests {
                 .state,
             State::Prepared
         );
+    }
+
+    #[tokio::test]
+    async fn resolve_of_a_region_card_needs_the_flag_to_send_it_anyway() {
+        let root = temp_root();
+        seed(root.path(), &make_job(), &[]);
+        tracker_of(root.path())
+            .transition(
+                "test:1",
+                State::NeedsGonza,
+                Some(jobbot_domain::gate::OUT_OF_REGION_NOTE),
+                open_now(),
+            )
+            .unwrap();
+        let state = || {
+            tracker_of(root.path())
+                .get_application("test:1")
+                .unwrap()
+                .unwrap()
+                .state
+        };
+
+        let (code, out) = plain(root.path(), open_now(), &["resolve", "test:1"]).await;
+        assert_eq!(code, 1, "{out}");
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines.len(), 2, "{out}");
+        assert!(lines[0].starts_with("test:1: "), "{out}");
+        assert!(lines[0].contains("«Enviar igual»"), "{out}");
+        assert_eq!(
+            lines[1],
+            "Desde la terminal: jobbot resolve test:1 --send-outside-region"
+        );
+        assert_eq!(state(), State::NeedsGonza);
+
+        let (code, out) = plain(
+            root.path(),
+            open_now(),
+            &["resolve", "test:1", "--send-outside-region"],
+        )
+        .await;
+        assert_eq!(code, 0, "{out}");
+        assert!(out.starts_with("test:1: "), "{out}");
+        assert!(
+            out.contains("se enviará sin la revisión de región"),
+            "{out}"
+        );
+        assert_eq!(state(), State::Scored);
+        assert!(tracker_of(root.path()).region_override("test:1").unwrap());
+    }
+
+    #[tokio::test]
+    async fn send_outside_region_with_several_keys_is_refused_before_touching_anything() {
+        let root = temp_root();
+        seed(root.path(), &make_job(), &[]);
+        tracker_of(root.path())
+            .transition(
+                "test:1",
+                State::NeedsGonza,
+                Some(jobbot_domain::gate::OUT_OF_REGION_NOTE),
+                open_now(),
+            )
+            .unwrap();
+
+        let (code, out) = plain(
+            root.path(),
+            open_now(),
+            &["resolve", "test:1", "test:2", "--send-outside-region"],
+        )
+        .await;
+
+        assert_eq!(code, 1, "{out}");
+        assert_eq!(
+            out.trim(),
+            "--send-outside-region va con una sola clave: es una decisión por postulación."
+        );
+        let tracker = tracker_of(root.path());
+        assert_eq!(
+            tracker.get_application("test:1").unwrap().unwrap().state,
+            State::NeedsGonza
+        );
+        assert!(!tracker.region_override("test:1").unwrap());
     }
 
     #[tokio::test]
@@ -413,6 +535,62 @@ mod tests {
                 .await
                 .1
                 .contains("submitted")
+        );
+    }
+
+    #[tokio::test]
+    async fn record_takes_an_origin_and_refuses_one_it_does_not_know() {
+        let root = temp_root();
+        let record = |origin: &'static str| {
+            [
+                "record",
+                "--company",
+                "Toku",
+                "--title",
+                "Senior Software Engineer",
+                "--url",
+                "https://jobs.ashbyhq.com/toku/abc",
+                "--origin",
+                origin,
+            ]
+        };
+        let (code, out) = plain(root.path(), open_now(), &record("amigo")).await;
+        assert_eq!(code, 1, "{out}");
+        assert!(out.contains("Origen no válido: amigo"), "{out}");
+        assert!(tracker_of(root.path()).counts().unwrap().is_empty());
+
+        let (code, out) = plain(root.path(), open_now(), &record("referral")).await;
+        assert_eq!(code, 0, "{out}");
+        assert_eq!(
+            tracker_of(root.path())
+                .origin_of("manual:jobs.ashbyhq.com_toku_abc")
+                .unwrap(),
+            Some(Origin::Referral)
+        );
+    }
+
+    #[tokio::test]
+    async fn origin_corrects_a_stored_application_and_exits_1_when_refused() {
+        let root = temp_root();
+        seed(root.path(), &make_job(), &[]);
+        let (code, out) = plain(root.path(), open_now(), &["origin", "test:1", "recruiter"]).await;
+        assert_eq!(code, 0, "{out}");
+        assert!(out.contains("Origen de test:1: cold → recruiter"), "{out}");
+        let (code, out) = plain(root.path(), open_now(), &["origin", "nope:1", "cold"]).await;
+        assert_eq!(code, 1, "{out}");
+        assert!(out.contains("No existe la postulación nope:1"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn origin_ignores_stop() {
+        let root = temp_root();
+        seed(root.path(), &make_job(), &[]);
+        assert_eq!(plain(root.path(), open_now(), &["stop"]).await.0, 0);
+        let (code, out) = plain(root.path(), open_now(), &["origin", "test:1", "agency"]).await;
+        assert_eq!(code, 0, "correcting a fact is not blocked by STOP: {out}");
+        assert_eq!(
+            tracker_of(root.path()).origin_of("test:1").unwrap(),
+            Some(Origin::Agency)
         );
     }
 

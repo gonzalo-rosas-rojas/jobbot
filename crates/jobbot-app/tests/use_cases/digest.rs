@@ -15,7 +15,7 @@ use jobbot_testkit::{NOW, make_job, make_job_with};
 /// Adds a job, creates its application and walks it through `states`.
 fn seed(t: &Tracker, job: &Job, states: &[State]) {
     t.add_job(job, 80.0, &BTreeMap::new(), *NOW).unwrap();
-    t.create_application(&job.key(), *NOW).unwrap();
+    t.start_cold_for_tests(&job.key(), *NOW).unwrap();
     for state in states {
         t.transition(&job.key(), *state, None, *NOW).unwrap();
     }
@@ -114,7 +114,7 @@ fn a_reply_to_an_old_application_counts_as_a_response_but_not_in_the_weekly_rate
     let long_ago = *NOW - TimeDelta::days(30);
     // Sent a month ago, answered this week.
     t.add_job(&old, 80.0, &BTreeMap::new(), long_ago).unwrap();
-    t.create_application(&old.key(), long_ago).unwrap();
+    t.start_cold_for_tests(&old.key(), long_ago).unwrap();
     t.transition(&old.key(), State::Prepared, None, long_ago)
         .unwrap();
     t.transition(&old.key(), State::Submitted, None, long_ago)

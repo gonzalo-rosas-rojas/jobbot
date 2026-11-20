@@ -224,9 +224,10 @@ mod tests {
         .await;
         assert_eq!(code, 1);
         assert!(
-            out.contains("El aviso cae en la lista de exclusión"),
+            out.contains("El aviso cae en la lista de exclusión (regla por category)"),
             "{out}"
         );
+        assert!(!out.contains("freight forwarding"), "no rule text: {out}");
         assert!(
             fake.requests().is_empty(),
             "an excluded posting never reaches Claude"

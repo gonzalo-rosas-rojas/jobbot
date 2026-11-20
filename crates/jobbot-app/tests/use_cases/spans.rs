@@ -70,7 +70,7 @@ fn an_action_runs_in_its_span_with_its_outcome() {
     let tracker = Tracker::in_memory().unwrap();
     let job = make_job();
     tracker.add_job(&job, 80.0, &BTreeMap::new(), *NOW).unwrap();
-    tracker.create_application(&job.key(), *NOW).unwrap();
+    tracker.start_cold_for_tests(&job.key(), *NOW).unwrap();
 
     let spans = Spans::record();
     assert!(approve(&tracker, &job.key()).unwrap().ok);

@@ -112,7 +112,7 @@ function nowView(answer, inline) {
     inline ? taskLine(inline, answer.nowMs) : null);
 }
 
-const ACTION_CUE = { resolve: "undo", approve: "approve", confirm: "sent" };
+const ACTION_CUE = { resolve: "undo", send_anyway: "undo", approve: "approve", confirm: "sent" };
 const ACTION_STAGED = { approve: "act.approved", confirm: "act.noted" };
 
 function actionButton(ctx, card, action, primary) {

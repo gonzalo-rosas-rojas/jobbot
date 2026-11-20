@@ -8,6 +8,8 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use jobbot_app::reporting::status::describe_auto_approve;
 
+use jobbot_app::apply::attachment::{CV_DIR_NAME, CopyFailure};
+
 use super::{Deps, EXIT_CV_NOT_READY, EXIT_ERROR, EXIT_OK, open_tracker};
 use crate::actions;
 use crate::cv::CvError;
@@ -40,6 +42,19 @@ fn format_report(r: &DiscoveryReport) -> String {
         r.pruned_stale,
         r.pruned_region
     );
+    if r.pruned_excluded > 0 {
+        text.push_str(&format!(
+            "\n  {} postulaciones retiradas: su empresa o dominio quedó excluido después de encolarlas",
+            r.pruned_excluded
+        ));
+    }
+    if !r.excluded_waiting.is_empty() {
+        text.push_str(&format!(
+            "\n  ATENCIÓN: {} postulaciones que te esperan son de una empresa o dominio excluido y no deben enviarse: {}",
+            r.excluded_waiting.len(),
+            r.excluded_waiting.join(", ")
+        ));
+    }
     if r.rate_limited > 0 {
         text.push_str(&format!(
             "\n  {} consultas en pausa: el sitio pidió esperar y se retoman en otra corrida",
@@ -65,7 +80,7 @@ pub(super) async fn cmd_discover(
     let tracker = Arc::new(open_tracker(paths)?);
     if rescore_first {
         // After a change to criteria.toml: stored jobs without an application get today's score.
-        let r = rescore(&criteria, &*tracker, now)?;
+        let r = rescore(&criteria, &exclusions, &*tracker, now)?;
         writeln!(
             out,
             "Repuntuación: {} avisos revisados · {} nuevos en cola · {} bajo el piso (excepción)",
@@ -127,7 +142,7 @@ pub(super) async fn cmd_prepare(
 ) -> Result<i32> {
     let criteria = load_criteria(&paths.profile_dir.join("criteria.toml"))?;
     let tracker = open_tracker(paths)?;
-    let cv_dir = paths.data_dir.join("cv");
+    let cv_dir = paths.data_dir.join(CV_DIR_NAME);
     let result = prepare_report_relocating(
         &tracker,
         &paths.cv_master,
@@ -157,23 +172,49 @@ pub(super) async fn cmd_prepare_refresh(
 ) -> Result<i32> {
     let criteria = load_criteria(&paths.profile_dir.join("criteria.toml"))?;
     let tracker = open_tracker(paths)?;
+    let cv_dir = paths.data_dir.join(CV_DIR_NAME);
     let result = refresh_cvs(
         &tracker,
         &paths.cv_master,
+        &cv_dir,
         deps.renderer.as_ref(),
         Relocation::from_criteria(&criteria),
         now,
     )
     .await;
-    let Some(keys) = cv_ready(result)? else {
+    let Some(report) = cv_ready(result)? else {
         return cv_not_ready(out);
     };
     writeln!(
         out,
         "{} CV generados de nuevo desde el CV maestro (los anteriores quedan en data/cv/{REPLACED_CV_DIR})",
-        keys.len()
+        report.refreshed.len()
     )?;
+    for failure in &report.copy_failures {
+        writeln!(out, "{}", copy_failure_line(failure, &paths.data_dir))?;
+    }
     Ok(EXIT_OK)
+}
+
+/// One line for a readable CV copy that could not be refreshed: it still holds the old CV. The
+/// path is shown relative to the data folder, with `/`, never as an absolute path.
+fn copy_failure_line(failure: &CopyFailure, data_dir: &std::path::Path) -> String {
+    let shown = failure
+        .file
+        .strip_prefix(data_dir)
+        .ok()
+        .or_else(|| failure.file.file_name().map(std::path::Path::new))
+        .map(|path| {
+            path.components()
+                .map(|part| part.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/")
+        })
+        .unwrap_or_default();
+    format!(
+        "No se pudo actualizar la copia {shown} de {}: {}; todavía tiene el CV anterior, no la adjuntes",
+        failure.job_key, failure.reason
+    )
 }
 
 /// The auto-approval threshold (see `actions::set_auto_approve_min`): shown with no argument, set
@@ -259,6 +300,8 @@ mod tests {
             stale: 6,
             already_seen: 7,
             refreshed: 8,
+            pruned_excluded: 0,
+            excluded_waiting: vec![],
             pruned_stale: 9,
             pruned_region: 11,
             rate_limited: 0,
@@ -269,6 +312,69 @@ mod tests {
             "Descubrimiento: 10 avisos · 2 en cola · 1 bajo el piso (excepción) · 3 bajo el umbral · \
              4 excluidos · 5 fuera de región · 6 vencidos · 7 ya vistos · 8 actualizados · \
              podados: 9 vencidos, 11 fuera de región\n  ERROR ashby:acme: boom"
+        );
+    }
+
+    #[test]
+    fn format_report_says_how_many_applications_an_exclusion_withdrew() {
+        let report = DiscoveryReport {
+            pruned_excluded: 2,
+            ..DiscoveryReport::default()
+        };
+        assert!(
+            format_report(&report).contains("2 postulaciones retiradas: su empresa o dominio"),
+            "{}",
+            format_report(&report)
+        );
+    }
+
+    #[test]
+    fn format_report_ends_with_a_warning_listing_the_keys_of_excluded_applications_waiting() {
+        let quiet = format_report(&DiscoveryReport::default());
+        assert!(!quiet.contains("ATENCIÓN"));
+        let report = DiscoveryReport {
+            excluded_waiting: vec!["a:1".into(), "b:2".into()],
+            ..DiscoveryReport::default()
+        };
+        let text = format_report(&report);
+        // The report holds job keys only, so no exclusion rule text can reach the line.
+        assert!(
+            text.ends_with(
+                "\n  ATENCIÓN: 2 postulaciones que te esperan son de una empresa o dominio \
+                 excluido y no deben enviarse: a:1, b:2"
+            ),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_copy_that_could_not_be_refreshed_gets_a_line_that_says_not_to_attach_it() {
+        let data = std::path::Path::new("home").join("someone").join("data");
+        let failure = CopyFailure {
+            job_key: "ashby:7".into(),
+            file: data
+                .join(CV_DIR_NAME)
+                .join(jobbot_app::apply::attachment::ATTACHMENTS_DIR_NAME)
+                .join("ashby_7")
+                .join("cv_ana_gomez_Engineer.pdf"),
+            reason: "access denied".into(),
+        };
+        let line = copy_failure_line(&failure, &data);
+        assert_eq!(
+            line,
+            "No se pudo actualizar la copia cv/adjuntos/ashby_7/cv_ana_gomez_Engineer.pdf de \
+             ashby:7: access denied; todavía tiene el CV anterior, no la adjuntes"
+        );
+        assert!(!line.contains("someone"), "{line}");
+        // A copy outside the data folder shows its file name only.
+        let outside = CopyFailure {
+            file: std::path::Path::new("elsewhere").join("x.pdf"),
+            ..failure
+        };
+        assert!(
+            copy_failure_line(&outside, &data).contains("copia x.pdf de"),
+            "{}",
+            copy_failure_line(&outside, &data)
         );
     }
 

@@ -5,6 +5,7 @@
 use chrono::{DateTime, TimeDelta, Utc};
 
 use crate::models::Job;
+use crate::outbound::plain_line;
 use crate::rules::Criteria;
 use crate::text::host_of;
 
@@ -51,11 +52,57 @@ pub const REASON_LISTING_ONLY: &str = "listing_only";
 /// The gate's reason for a posting older than the age limit.
 pub const REASON_STALE: &str = "stale_posting";
 
+/// The gate's reason for a posting outside the region (`region::region_ok_with`).
+pub const REASON_OUT_OF_REGION: &str = "fuera_de_region";
+
+/// The note of an application withdrawn for a region the job cannot be done from, by the prune or the gate. The
+/// text before the colon is the rule.
+pub const OUT_OF_REGION_NOTE: &str = "fuera_de_region: no se puede hacer desde Chile";
+
+/// Whether a `needs_reason` is the one the region check parks an application with (`OUT_OF_REGION_NOTE`).
+pub fn is_out_of_region_reason(reason: &str) -> bool {
+    reason.starts_with(REASON_OUT_OF_REGION)
+}
+
+/// What an event note starts with when it is a region override (`region_override_note`).
+pub const REGION_OVERRIDE_PREFIX: &str = "region_override:";
+
+/// The note of the move that sends a parked out-of-region application back to the queue: Gonza looked at it and
+/// chose to send it anyway. After the prefix it carries the `location` and `remote` values of the posting as he saw
+/// them, as JSON (so any character in a location survives). The event keeps it for good, but
+/// `Store::region_override` is true only while the stored posting still has those two values: a refresh that moves
+/// the location means he has not seen the new one, and the gate parks it again. Only the region check is cleared:
+/// every other rule still applies.
+///
+/// The location is written as the region rule reads it, not as the source spells it: runs of whitespace collapsed,
+/// trimmed and lowercased (`region_ok_with` ignores case too), so a re-save that only changes the case or the spacing
+/// does not break the override. The read side builds its expected note with this same function, so write and read stay
+/// in step.
+pub fn region_override_note(location: &str, remote: bool) -> String {
+    let location = plain_line(location).to_lowercase();
+    let seen = serde_json::json!({ "location": location, "remote": remote });
+    format!("{REGION_OVERRIDE_PREFIX} {seen}")
+}
+
+/// What a person reads where the note of an application that was sent on past the region check would be shown: the
+/// note itself is machine-readable (`region_override_note`) and never goes on a card.
+pub const SENT_ANYWAY_SENTENCE: &str = "Decidiste enviarla aunque queda fuera de la región.";
+
+/// `note` as a person should read it: the sentence in place of a region override note, any other note unchanged.
+pub fn readable_note(note: &str) -> &str {
+    if note.starts_with(REGION_OVERRIDE_PREFIX) {
+        SENT_ANYWAY_SENTENCE
+    } else {
+        note
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct GateDecision {
     pub allowed: bool,
     /// Set when `allowed` is false: `stop_file`, `manual_only_platform`, `listing_only`,
-    /// `excluded:<why>`, `stale_posting`, `daily_cap`, `company_cooldown`, `warmup_hold` or
+    /// `excluded:<kind>` (the kind of rule, never its text: `domain`, `name` or `category`),
+    /// `fuera_de_region`, `stale_posting`, `daily_cap`, `company_cooldown`, `warmup_hold` or
     /// `review_required`.
     pub reason: Option<String>,
 }
@@ -87,6 +134,12 @@ pub(crate) fn host_matches(url: &str, hosts: &[&str]) -> bool {
 /// True when the URL's host is a manual-only platform or one of its subdomains.
 pub fn is_manual_only(url: &str) -> bool {
     host_matches(url, MANUAL_ONLY_HOSTS)
+}
+
+/// True when the posting is on a manual-only platform by its own link or by its apply link: the
+/// one rule the gate and discovery share for "Gonza applies to this one himself".
+pub fn is_manual_only_posting(job: &Job) -> bool {
+    is_manual_only(&job.apply_url) || is_manual_only(&job.url)
 }
 
 /// True when the URL points at a listing site whose apply button leads elsewhere.
@@ -126,4 +179,42 @@ pub fn is_stale_since(
     job.posted_at
         .or(first_seen)
         .is_some_and(|since| now - since > TimeDelta::days(criteria.max_posting_age_days))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_out_of_region_note_starts_with_its_reason() {
+        assert!(OUT_OF_REGION_NOTE.starts_with(&format!("{REASON_OUT_OF_REGION}:")));
+    }
+
+    #[test]
+    fn the_region_override_note_starts_with_its_prefix_whatever_the_location_holds() {
+        for location in ["Remote - USA", "", "Zürich \"Nord\"\n\t{}", "株式会社 東京"] {
+            let note = region_override_note(location, true);
+            assert!(note.starts_with(REGION_OVERRIDE_PREFIX), "{note}");
+            assert!(!note.contains('\n'), "one line: {note:?}");
+        }
+        assert_ne!(
+            region_override_note("Remote", true),
+            region_override_note("Remote", false)
+        );
+    }
+
+    #[test]
+    fn a_harmless_respelling_of_the_location_gives_the_same_note() {
+        let same = region_override_note("Remote - USA", true);
+        for respelled in [
+            "remote - usa",
+            " Remote  -  USA ",
+            "Remote\t-\tUSA",
+            "REMOTE - USA",
+        ] {
+            assert_eq!(region_override_note(respelled, true), same, "{respelled:?}");
+        }
+        assert_ne!(region_override_note("Remote, USA", true), same);
+        assert_ne!(region_override_note("Remote - USA", false), same);
+    }
 }

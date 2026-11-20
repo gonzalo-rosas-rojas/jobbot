@@ -6,6 +6,8 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, TimeDelta, TimeZone, Utc};
 
 use jobbot_app::actions::*;
+use jobbot_domain::gate::OUT_OF_REGION_NOTE;
+use jobbot_domain::origin::Origin;
 use jobbot_domain::prep::Question;
 use jobbot_domain::state::State;
 use jobbot_testkit::PrepStore;
@@ -17,7 +19,7 @@ fn tracker_with(states: &[State]) -> (Tracker, String) {
     let t = Tracker::in_memory().unwrap();
     let job = make_job();
     t.add_job(&job, 80.0, &BTreeMap::new(), *NOW).unwrap();
-    t.create_application(&job.key(), *NOW).unwrap();
+    t.start_cold_for_tests(&job.key(), *NOW).unwrap();
     for state in states {
         t.transition(&job.key(), *state, Some("nota"), *NOW)
             .unwrap();
@@ -276,7 +278,7 @@ fn resolve_returns_a_prepared_application_to_the_queue_and_forgets_the_attempt()
     let (t, key) = tracker_with(&[State::Prepared, State::NeedsGonza]);
     t.set_cv_path(&key, std::path::Path::new("cv.pdf")).unwrap();
     t.record_attempt(&key, *NOW).unwrap();
-    let outcome = resolve(&t, &key, *NOW).unwrap();
+    let outcome = resolve(&t, &key, *NOW, ResolveIntent::Plain).unwrap();
     assert!(outcome.ok, "{outcome:?}");
     assert_eq!(outcome.message, format!("De vuelta a la cola: {key}"));
     let app = t.get_application(&key).unwrap().unwrap();
@@ -286,10 +288,162 @@ fn resolve_returns_a_prepared_application_to_the_queue_and_forgets_the_attempt()
         "the unconfirmed click no longer holds the company"
     );
 }
+/// An application parked for its region, as the gate leaves it.
+fn parked_for_region() -> (Tracker, String) {
+    let (t, key) = tracker_with(&[]);
+    t.transition(&key, State::NeedsGonza, Some(OUT_OF_REGION_NOTE), *NOW)
+        .unwrap();
+    (t, key)
+}
+#[test]
+fn a_plain_resolve_of_a_region_card_is_refused_and_writes_nothing() {
+    let (t, key) = parked_for_region();
+    let before = t.get_application(&key).unwrap().unwrap();
+    let events_before = t.events_for(&key).unwrap().len();
+
+    let outcome = resolve(&t, &key, *NOW, ResolveIntent::Plain).unwrap();
+
+    assert!(!outcome.ok, "{outcome:?}");
+    assert_eq!(
+        outcome.message,
+        "Esta postulación está fuera de la región con las reglas de hoy: usa «Enviar igual» en su tarjeta, o retírala."
+    );
+    let after = t.get_application(&key).unwrap().unwrap();
+    assert_eq!(after.state, State::NeedsGonza);
+    assert_eq!(after.needs_reason, before.needs_reason);
+    assert_eq!(after.updated_at, before.updated_at);
+    assert_eq!(t.events_for(&key).unwrap().len(), events_before);
+    assert!(!t.region_override(&key).unwrap());
+}
+#[test]
+fn send_outside_region_clears_the_region_check_and_says_so() {
+    let (t, key) = parked_for_region();
+    assert!(!t.region_override(&key).unwrap(), "nothing yet");
+
+    let outcome = resolve(&t, &key, *NOW, ResolveIntent::SendOutsideRegion).unwrap();
+
+    assert!(outcome.ok, "{outcome:?}");
+    assert_eq!(
+        outcome.message,
+        "Vuelve a preparación: prepare le hará el PDF y se enviará sin la revisión de región."
+    );
+    assert_eq!(
+        t.get_application(&key).unwrap().unwrap().state,
+        State::Scored
+    );
+    assert!(t.region_override(&key).unwrap());
+    // It sticks through the moves the application makes afterwards.
+    t.transition(&key, State::NeedsGonza, Some("captcha"), *NOW)
+        .unwrap();
+    assert!(t.region_override(&key).unwrap());
+}
+#[test]
+fn send_outside_region_with_a_cv_goes_back_to_the_queue_and_says_so() {
+    let (t, key) = parked_for_region();
+    t.set_cv_path(&key, std::path::Path::new("cv.pdf")).unwrap();
+
+    let outcome = resolve(&t, &key, *NOW, ResolveIntent::SendOutsideRegion).unwrap();
+
+    assert!(outcome.ok, "{outcome:?}");
+    assert_eq!(
+        outcome.message,
+        "Vuelve a la cola: se enviará sin la revisión de región."
+    );
+    assert_eq!(
+        t.get_application(&key).unwrap().unwrap().state,
+        State::Prepared
+    );
+}
+#[test]
+fn the_override_applies_only_while_the_posting_says_what_gonza_saw() {
+    let (t, key) = parked_for_region();
+    resolve(&t, &key, *NOW, ResolveIntent::SendOutsideRegion).unwrap();
+    let mut job = t.get_job(&key).unwrap().unwrap();
+    // A refresh that says the same thing changes nothing.
+    assert!(!t.refresh_posting(&job).unwrap());
+    assert!(t.region_override(&key).unwrap(), "same location");
+
+    job.location = "Austin, TX".into();
+    assert!(t.refresh_posting(&job).unwrap());
+
+    assert!(
+        !t.region_override(&key).unwrap(),
+        "he has not seen the new location"
+    );
+}
+#[test]
+fn a_harmless_re_save_keeps_the_override_and_a_remote_flip_breaks_it() {
+    let (t, key) = parked_for_region();
+    resolve(&t, &key, *NOW, ResolveIntent::SendOutsideRegion).unwrap();
+    let mut job = t.get_job(&key).unwrap().unwrap();
+    let seen = job.location.clone();
+
+    // Another case and other spacing: the same place.
+    job.location = format!("  {}  ", seen.to_uppercase().replace(' ', "   "));
+    t.refresh_posting(&job).unwrap();
+    assert!(t.region_override(&key).unwrap(), "{:?}", job.location);
+
+    job.remote = !job.remote;
+    assert!(t.refresh_posting(&job).unwrap());
+    assert!(!t.region_override(&key).unwrap(), "remote flipped");
+}
+#[test]
+fn only_the_move_out_of_needs_gonza_can_carry_an_override() {
+    let (t, key) = tracker_with(&[]);
+    let job = t.get_job(&key).unwrap().unwrap();
+    let note = jobbot_domain::gate::region_override_note(&job.location, job.remote);
+    // A typed note on any other move is not an override, even with the exact text.
+    t.transition(&key, State::Prepared, Some(&note), *NOW)
+        .unwrap();
+    assert!(!t.region_override(&key).unwrap());
+    assert!(!t.had_region_override(&key).unwrap());
+    t.transition(&key, State::NeedsGonza, Some(&note), *NOW)
+        .unwrap();
+    t.transition(&key, State::Submitted, Some(&note), *NOW)
+        .unwrap();
+    assert!(!t.region_override(&key).unwrap());
+    assert!(!t.had_region_override(&key).unwrap());
+}
+#[test]
+fn an_override_of_an_older_build_counts_as_had_an_override_but_does_not_hold() {
+    let (t, key) = tracker_with(&[]);
+    t.transition(&key, State::NeedsGonza, Some(OUT_OF_REGION_NOTE), *NOW)
+        .unwrap();
+    // The text the first build wrote: the prefix and any words after it.
+    t.transition(
+        &key,
+        State::Scored,
+        Some("region_override: revisada por Gonza, se envía igual"),
+        *NOW,
+    )
+    .unwrap();
+
+    assert!(t.had_region_override(&key).unwrap());
+    assert!(!t.region_override(&key).unwrap());
+}
+#[test]
+fn send_outside_region_on_any_other_reason_is_a_plain_resolve() {
+    let (t, key) = tracker_with(&[]);
+    t.transition(&key, State::NeedsGonza, Some("captcha"), *NOW)
+        .unwrap();
+
+    let outcome = resolve(&t, &key, *NOW, ResolveIntent::SendOutsideRegion).unwrap();
+
+    assert!(outcome.ok, "{outcome:?}");
+    assert!(outcome.message.starts_with("De vuelta a puntuadas"));
+    assert!(!t.region_override(&key).unwrap());
+    assert!(t.events_for(&key).unwrap().iter().all(|event| {
+        !event
+            .note
+            .as_deref()
+            .unwrap_or("")
+            .starts_with("region_override")
+    }));
+}
 #[test]
 fn resolve_without_a_cv_goes_back_to_scored_and_a_replay_is_refused_in_spanish() {
     let (t, key) = tracker_with(&[State::NeedsGonza]);
-    let first = resolve(&t, &key, *NOW).unwrap();
+    let first = resolve(&t, &key, *NOW, ResolveIntent::Plain).unwrap();
     assert!(
         first.message.starts_with("De vuelta a puntuadas"),
         "{first:?}"
@@ -298,7 +452,7 @@ fn resolve_without_a_cv_goes_back_to_scored_and_a_replay_is_refused_in_spanish()
         t.get_application(&key).unwrap().unwrap().state,
         State::Scored
     );
-    let again = resolve(&t, &key, *NOW).unwrap();
+    let again = resolve(&t, &key, *NOW, ResolveIntent::Plain).unwrap();
     assert!(!again.ok);
     assert!(
         again
@@ -337,11 +491,12 @@ fn confirming_a_form_the_bot_never_filled_does_not_count_as_a_review() {
         "handoff: envía tú este formulario. Hoja de respuestas: data/handoff/x.md",
         "listing_only: postular a mano desde el enlace del aviso",
         "manual_only_platform: postular a mano desde el enlace del aviso",
+        OUT_OF_REGION_NOTE,
     ] {
         let t = Tracker::in_memory().unwrap();
         let job = make_job();
         t.add_job(&job, 80.0, &BTreeMap::new(), *NOW).unwrap();
-        t.create_application(&job.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         t.transition(&job.key(), State::Prepared, None, *NOW)
             .unwrap();
         t.transition(&job.key(), State::NeedsGonza, Some(reason), *NOW)
@@ -361,7 +516,7 @@ fn confirming_a_bot_click_gonza_checked_still_counts_as_reviewed() {
     let t = Tracker::in_memory().unwrap();
     let job = make_job();
     t.add_job(&job, 80.0, &BTreeMap::new(), *NOW).unwrap();
-    t.create_application(&job.key(), *NOW).unwrap();
+    t.start_cold_for_tests(&job.key(), *NOW).unwrap();
     t.transition(&job.key(), State::Prepared, None, *NOW)
         .unwrap();
     t.transition(
@@ -550,13 +705,7 @@ fn record_stores_the_text_it_is_given_as_one_clean_line_and_cut() {
     let outcome = record(&t, &spec, *NOW).unwrap();
 
     assert!(outcome.ok, "{outcome:?}");
-    let key = outcome
-        .message
-        .rsplit('(')
-        .next()
-        .unwrap()
-        .trim_end_matches(')');
-    let job = t.get_job(key).unwrap().unwrap();
+    let job = t.get_job(&submitted_key(&t)).unwrap().unwrap();
     assert_eq!(job.company, "Acme Labs");
     assert!(job.title.starts_with("Backend Engineer y") && job.title.chars().count() <= 301);
     assert!(job.location.starts_with("Remoto x") && job.location.chars().count() <= 201);
@@ -587,7 +736,9 @@ fn record_of_a_new_posting_creates_it_and_stamps_the_given_time() {
     let key = "manual:jobs.ashbyhq.com_toku_abc";
     assert_eq!(
         outcome.message,
-        format!("Registrada como enviada: Toku — Senior Software Engineer ({key})")
+        format!(
+            "Registrada como enviada: Toku — Senior Software Engineer ({key}); origen: unknown"
+        )
     );
     let app = t.get_application(key).unwrap().unwrap();
     assert_eq!(app.state, State::Submitted);
@@ -762,6 +913,157 @@ fn record_without_a_key_needs_company_title_and_link() {
         );
     }
     assert!(t.counts().unwrap().is_empty(), "nothing was stored");
+}
+/// The key of the one application a record made.
+fn submitted_key(t: &Tracker) -> String {
+    t.list_by_state(State::Submitted).unwrap()[0]
+        .job_key
+        .clone()
+}
+#[test]
+fn record_with_an_origin_stores_it() {
+    let t = Tracker::in_memory().unwrap();
+    let spec = RecordSpec {
+        origin: Some("Referral ".into()),
+        ..record_spec("Acme", "Cargo", "https://x.example/1")
+    };
+
+    let outcome = record(&t, &spec, *NOW).unwrap();
+
+    assert!(outcome.ok, "{outcome:?}");
+    assert!(
+        outcome.message.ends_with("; origen: referral"),
+        "{outcome:?}"
+    );
+    let key = submitted_key(&t);
+    assert_eq!(t.origin_of(&key).unwrap(), Some(Origin::Referral));
+}
+#[test]
+fn record_without_an_origin_stores_unknown_on_a_new_application() {
+    let t = Tracker::in_memory().unwrap();
+
+    let outcome = record(
+        &t,
+        &record_spec("Acme", "Cargo", "https://x.example/1"),
+        *NOW,
+    )
+    .unwrap();
+
+    assert!(outcome.ok, "{outcome:?}");
+    let key = submitted_key(&t);
+    assert_eq!(t.origin_of(&key).unwrap(), Some(Origin::Unknown));
+}
+#[test]
+fn record_of_a_scored_posting_without_an_origin_is_unknown_and_of_a_prepared_one_keeps_cold() {
+    // Scored: jobbot had not prepared it, so nobody knows the channel. Prepared: jobbot's own, it stays cold.
+    for (states, expected) in [
+        (vec![], Origin::Unknown),
+        (vec![State::Prepared], Origin::Cold),
+    ] {
+        let (t, key) = tracker_with(&states);
+        let spec = RecordSpec {
+            key: Some(key.clone()),
+            ..RecordSpec::default()
+        };
+
+        assert!(record(&t, &spec, *NOW).unwrap().ok);
+
+        assert_eq!(t.origin_of(&key).unwrap(), Some(expected), "{states:?}");
+    }
+}
+#[test]
+fn record_of_a_queued_posting_with_an_origin_replaces_cold() {
+    let (t, key) = tracker_with(&[]);
+    let spec = RecordSpec {
+        key: Some(key.clone()),
+        origin: Some("recruiter".into()),
+        ..RecordSpec::default()
+    };
+
+    assert!(record(&t, &spec, *NOW).unwrap().ok);
+
+    assert_eq!(t.origin_of(&key).unwrap(), Some(Origin::Recruiter));
+}
+#[test]
+fn record_with_an_invalid_origin_is_refused_and_writes_nothing() {
+    let t = Tracker::in_memory().unwrap();
+    let spec = RecordSpec {
+        origin: Some("amigo".into()),
+        ..record_spec("Acme", "Cargo", "https://x.example/1")
+    };
+
+    let outcome = record(&t, &spec, *NOW).unwrap();
+
+    assert!(!outcome.ok);
+    assert_eq!(
+        outcome.message,
+        "Origen no válido: amigo. Usa uno de: cold, referral, recruiter, agency, platform, direct, unknown"
+    );
+    assert!(t.counts().unwrap().is_empty(), "no application");
+    let epoch = *NOW - TimeDelta::days(3650);
+    assert!(t.cohort_since(epoch).unwrap().is_empty(), "no posting");
+}
+#[test]
+fn a_refused_record_does_not_change_the_origin() {
+    let (t, key) = tracker_with(&[State::Prepared, State::Submitted]);
+    let spec = RecordSpec {
+        key: Some(key.clone()),
+        origin: Some("referral".into()),
+        ..RecordSpec::default()
+    };
+
+    let outcome = record(&t, &spec, *NOW).unwrap();
+
+    assert!(!outcome.ok);
+    assert!(
+        outcome.message.contains("ya está registrada"),
+        "{outcome:?}"
+    );
+    assert_eq!(t.origin_of(&key).unwrap(), Some(Origin::Cold));
+}
+#[test]
+fn set_origin_changes_the_origin_and_says_from_what() {
+    let (t, key) = tracker_with(&[]);
+
+    let outcome = set_origin(&t, &key, "recruiter").unwrap();
+
+    assert!(outcome.ok, "{outcome:?}");
+    assert_eq!(outcome.message, "Origen de test:1: cold → recruiter");
+    assert_eq!(t.origin_of(&key).unwrap(), Some(Origin::Recruiter));
+}
+#[test]
+fn set_origin_refuses_an_unknown_key_and_an_invalid_origin() {
+    let (t, key) = tracker_with(&[]);
+
+    let missing = set_origin(&t, "nope:1", "cold").unwrap();
+    let invalid = set_origin(&t, &key, "amigo").unwrap();
+
+    assert!(!missing.ok);
+    assert_eq!(missing.message, "No existe la postulación nope:1");
+    assert!(!invalid.ok);
+    assert!(
+        invalid.message.starts_with("Origen no válido: amigo."),
+        "{invalid:?}"
+    );
+    assert_eq!(t.origin_of(&key).unwrap(), Some(Origin::Cold));
+}
+#[test]
+fn set_origin_to_the_same_origin_changes_nothing() {
+    let (t, key) = tracker_with(&[]);
+
+    let outcome = set_origin(&t, &key, " COLD ").unwrap();
+
+    assert!(outcome.ok, "{outcome:?}");
+    assert_eq!(outcome.message, "Sin cambios: test:1 ya tenía origen cold");
+}
+#[test]
+fn set_origin_works_on_a_withdrawn_application() {
+    let (t, key) = tracker_with(&[State::Withdrawn]);
+
+    let outcome = set_origin(&t, &key, "agency").unwrap();
+
+    assert!(outcome.ok, "{outcome:?}");
+    assert_eq!(t.origin_of(&key).unwrap(), Some(Origin::Agency));
 }
 #[test]
 fn grade_card_records_the_review() {

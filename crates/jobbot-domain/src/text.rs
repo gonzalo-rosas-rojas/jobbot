@@ -81,6 +81,19 @@ pub fn normalize(name: &str) -> String {
         .join(" ")
 }
 
+/// The identity of a company everywhere jobbot compares companies (the stored `company_norm`, the cooldown, the
+/// in-flight cap, the warm-up hold, the e-mail match): its `normalize`d name, and when that is empty (a name in a
+/// script `as_read` cannot fold to ASCII letters, or only a legal suffix such as "LLC") its trimmed, lowercased
+/// raw name, so such a company is its own company instead of nobody's or everybody's. Only a blank name is empty.
+pub fn company_identity(name: &str) -> String {
+    let normalized = normalize(name);
+    if normalized.is_empty() {
+        name.trim().to_lowercase()
+    } else {
+        normalized
+    }
+}
+
 /// Visible text of an HTML fragment, one line per block element, entities decoded.
 pub fn html_to_text(html: &str) -> String {
     enum Work<'a> {
@@ -247,6 +260,18 @@ mod tests {
     fn normalize_of_empty_text_is_empty() {
         assert_eq!(normalize(""), "");
         assert_eq!(normalize("  ,. "), "");
+    }
+
+    #[test]
+    fn company_identity_is_the_normalized_name_or_the_raw_one_when_that_is_empty() {
+        assert_eq!(company_identity("ACME AI, Inc."), "acme ai");
+        assert_eq!(company_identity(" 株式会社メルカリ "), "株式会社メルカリ");
+        assert_eq!(company_identity("LLC"), "llc");
+        assert_ne!(
+            company_identity("株式会社メルカリ"),
+            company_identity("株式会社サイバー")
+        );
+        assert_eq!(company_identity("  "), "");
     }
 
     #[test]

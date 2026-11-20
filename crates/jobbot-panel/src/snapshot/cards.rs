@@ -14,7 +14,7 @@ use jobbot_app::actions::{UNDO_WINDOW, marks_from};
 use jobbot_app::discovery::MAY_HAVE_BEEN_SENT;
 use jobbot_app::learn::dossier::dossier_path;
 use jobbot_app::ports::store::{ApplicationRow, UndoableMark};
-use jobbot_domain::gate::REASON_LISTING_ONLY;
+use jobbot_domain::gate::{REASON_LISTING_ONLY, REASON_OUT_OF_REGION};
 use jobbot_domain::handoff::sheet_path;
 use jobbot_domain::rules::Criteria;
 use jobbot_domain::state::State;
@@ -35,7 +35,7 @@ pub struct Card {
     /// Why it needs Gonza (only while it is in `needs_gonza`).
     pub reason: Option<String>,
     /// The kind of help behind `reason`, so the page can group the queue: "manual_apply",
-    /// "missing_answers", "handoff", "blocked", "may_have_sent", "error" or "other".
+    /// "missing_answers", "handoff", "blocked", "may_have_sent", "out_of_region", "error" or "other".
     pub reason_kind: Option<&'static str>,
     /// One plain sentence for `reason_kind`; the long `reason` stays behind a fold.
     pub reason_short: Option<&'static str>,
@@ -155,6 +155,13 @@ fn reason_kind(reason: &str) -> (&'static str, &'static str) {
         )
     } else if reason.starts_with("page_error") {
         ("error", "La página falló al llenarla: hay que mirarla")
+    // The submission gate parked it: outside the region by the rules of today. Not a form to send by hand
+    // without this warning; the page treats the kind as cautiously as `may_have_sent`.
+    } else if reason.starts_with(REASON_OUT_OF_REGION) {
+        (
+            "out_of_region",
+            "Fuera de la región con las reglas de hoy: revísala antes de enviar.",
+        )
     } else {
         ("other", "Necesita una mirada tuya")
     }
@@ -223,6 +230,15 @@ pub(crate) fn card(row: &ApplicationRow, ctx: &CardContext) -> Card {
     if kind.is_some_and(|(kind, _)| kind == "may_have_sent") {
         actions.sort_by_key(|action| *action != "confirm");
     }
+    // A card parked for its region cannot be sent back with a plain "resolve" (the server refuses it): its first
+    // answer is "send anyway", the one act that clears the region check. No other card has it.
+    if kind.is_some_and(|(kind, _)| kind == "out_of_region") {
+        for action in &mut actions {
+            if *action == "resolve" {
+                *action = "send_anyway";
+            }
+        }
+    }
     // A row always has the event that created it; `updated_at` only covers a history that was lost.
     let state_since = row.state_since.unwrap_or(row.updated_at);
     let unsent = row.submitted_at.is_none()
@@ -247,7 +263,10 @@ pub(crate) fn card(row: &ApplicationRow, ctx: &CardContext) -> Card {
         reason,
         reason_kind: kind.map(|(kind, _)| kind),
         reason_short: kind.map(|(_, short)| short),
-        note: row.note.clone(),
+        note: row
+            .note
+            .as_deref()
+            .map(|note| jobbot_domain::gate::readable_note(note).to_string()),
         approved: row.approved,
         has_screenshot,
         has_cv: file_on_disk(row.cv_path.as_deref()),
@@ -361,6 +380,78 @@ mod tests {
     }
 
     #[test]
+    fn an_application_parked_for_its_region_says_so_in_its_card() {
+        let (panel, _dir) = panel();
+        let t = &panel.tracker;
+        let job = make_job_with(|j| j.external_id = "parked".into());
+        t.add_job(&job, 80.0, &BTreeMap::new(), *NOW).unwrap();
+        t.start_application(&job.key(), jobbot_domain::origin::Origin::Cold, *NOW)
+            .unwrap();
+        t.transition(
+            &job.key(),
+            State::NeedsGonza,
+            Some(jobbot_domain::gate::OUT_OF_REGION_NOTE),
+            *NOW,
+        )
+        .unwrap();
+
+        let snap = build_snapshot(&panel).unwrap();
+
+        let card = card_of(&snap, &job.key());
+        assert_eq!(card["reason_kind"], "out_of_region");
+        // Its first answer is "send anyway", never a plain resolve (which the server refuses for it).
+        assert_eq!(
+            card["actions"],
+            serde_json::json!(["send_anyway", "confirm"])
+        );
+        assert_eq!(
+            card["reason_short"],
+            "Fuera de la región con las reglas de hoy: revísala antes de enviar."
+        );
+    }
+
+    #[test]
+    fn an_application_sent_anyway_shows_a_sentence_and_never_the_machine_note() {
+        let (panel, _dir) = panel();
+        let t = &panel.tracker;
+        let job = make_job_with(|j| j.external_id = "anyway".into());
+        t.add_job(&job, 80.0, &BTreeMap::new(), *NOW).unwrap();
+        t.start_application(&job.key(), jobbot_domain::origin::Origin::Cold, *NOW)
+            .unwrap();
+        t.transition(
+            &job.key(),
+            State::NeedsGonza,
+            Some(jobbot_domain::gate::OUT_OF_REGION_NOTE),
+            *NOW,
+        )
+        .unwrap();
+        jobbot_app::actions::resolve(
+            &**t,
+            &job.key(),
+            *NOW,
+            jobbot_app::actions::ResolveIntent::SendOutsideRegion,
+        )
+        .unwrap();
+
+        let snap = build_snapshot(&panel).unwrap();
+        let detail = crate::snapshot::build_job_detail(&panel, &job.key())
+            .unwrap()
+            .unwrap();
+
+        let everything = format!(
+            "{}{}",
+            serde_json::to_string(&snap).unwrap(),
+            serde_json::to_string(&detail).unwrap()
+        );
+        assert!(!everything.contains("region_override"), "{everything}");
+        assert_eq!(
+            card_of(&snap, &job.key())["note"],
+            "Decidiste enviarla aunque queda fuera de la región."
+        );
+        assert!(everything.contains("Decidiste enviarla aunque queda fuera de la región."));
+    }
+
+    #[test]
     fn a_waiting_card_says_what_kind_of_help_it_needs_in_one_sentence() {
         let (panel, _dir) = panel();
         let cases = [
@@ -430,6 +521,11 @@ mod tests {
             .collect();
         expected.sort();
         assert_eq!(seen, expected);
+        // Only the region card offers `send_anyway`, and none of these is one; every one keeps `resolve`.
+        for card in &snap.needs_gonza.cards {
+            assert!(!card.actions.contains(&"send_anyway"), "{card:?}");
+            assert!(card.actions.contains(&"resolve"), "{card:?}");
+        }
         let prepared = column(&snap, "prepared");
         assert!(
             prepared.cards[0].reason_kind.is_none() && prepared.cards[0].reason_short.is_none()
@@ -571,12 +667,13 @@ mod tests {
         let dated = make_job_with(|j| {
             j.external_id = "dated".into();
             j.posted_at = Some(*NOW - TimeDelta::days(31));
-            j.salary_min_monthly_usd = Some(4000.0);
-            j.salary_max_monthly_usd = Some(6000.0);
+            j.salary_min_monthly_usd = Some(5200.0);
+            j.salary_max_monthly_usd = Some(7300.0);
         });
         let seen = *NOW - TimeDelta::days(2);
         t.add_job(&dated, 80.0, &BTreeMap::new(), seen).unwrap();
-        t.create_application(&dated.key(), seen).unwrap();
+        t.start_application(&dated.key(), jobbot_domain::origin::Origin::Cold, seen)
+            .unwrap();
         t.transition(
             &dated.key(),
             State::NeedsGonza,
@@ -588,8 +685,12 @@ mod tests {
         let sent = make_job_with(|j| j.external_id = "sent".into());
         t.add_job(&sent, 80.0, &BTreeMap::new(), *NOW - TimeDelta::days(50))
             .unwrap();
-        t.create_application(&sent.key(), *NOW - TimeDelta::days(50))
-            .unwrap();
+        t.start_application(
+            &sent.key(),
+            jobbot_domain::origin::Origin::Cold,
+            *NOW - TimeDelta::days(50),
+        )
+        .unwrap();
         for state in [State::Prepared, State::Submitted] {
             t.transition(&sent.key(), state, None, *NOW - TimeDelta::days(1))
                 .unwrap();
@@ -598,8 +699,12 @@ mod tests {
         let old = make_job_with(|j| j.external_id = "old".into());
         t.add_job(&old, 80.0, &BTreeMap::new(), *NOW - TimeDelta::days(50))
             .unwrap();
-        t.create_application(&old.key(), *NOW - TimeDelta::days(50))
-            .unwrap();
+        t.start_application(
+            &old.key(),
+            jobbot_domain::origin::Origin::Cold,
+            *NOW - TimeDelta::days(50),
+        )
+        .unwrap();
 
         let snap = build_snapshot(&panel).unwrap();
         let max_age = sample_criteria().max_posting_age_days;
@@ -609,7 +714,7 @@ mod tests {
         assert_eq!(card["first_seen"], "2026-09-29T12:00:00Z");
         assert_eq!(
             (card["salary_min"].as_f64(), card["salary_max"].as_f64()),
-            (Some(4000.0), Some(6000.0))
+            (Some(5200.0), Some(7300.0))
         );
         assert_eq!(card["age_days"], 31);
         assert_eq!(card["prune_in_days"], max_age - 31);

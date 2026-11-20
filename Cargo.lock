@@ -1466,6 +1466,7 @@ dependencies = [
  "jobbot-domain",
  "jobbot-store",
  "proptest",
+ "rusqlite",
  "scraper",
  "serde",
  "serde_json",

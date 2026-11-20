@@ -385,6 +385,198 @@ fn recently_dated(id: &str, company: &str) -> Job {
     job.posted_at = Some(*NOW - TimeDelta::days(3));
     job
 }
+/// The pruning rules with `company` added to the excluded names.
+fn rules_excluding(company: &str) -> (Criteria, Exclusions) {
+    let (criteria, exclusions) = pruning_rules();
+    let mut names = exclusions.names.clone();
+    names.push(company.into());
+    (
+        criteria,
+        Exclusions {
+            names,
+            ..exclusions
+        },
+    )
+}
+/// `count` queued excluded-company postings, the first two of which the source now dates as too
+/// old; one more discovery run with the exclusion in force. Returns the report and the tracker.
+async fn excluded_with_two_stale(count: usize) -> (DiscoveryReport, Tracker) {
+    let jobs: Vec<Job> = (1..=count)
+        .map(|n| recently_dated(&n.to_string(), &format!("Bulk Excluded {n}")))
+        .collect();
+    let tracker = stored_by_discovery(jobs.clone()).await;
+    let now_returned: Vec<Job> = jobs
+        .into_iter()
+        .enumerate()
+        .map(|(index, job)| Job {
+            posted_at: (index < 2)
+                .then_some(*NOW - TimeDelta::days(60))
+                .or(job.posted_at),
+            ..job
+        })
+        .collect();
+    let (criteria, exclusions) = rules_excluding("Bulk Excluded");
+    let report = discover(
+        &[fake(now_returned, &[])],
+        &criteria,
+        &exclusions,
+        &tracker,
+        *NOW,
+    )
+    .await
+    .unwrap();
+    (report, tracker)
+}
+#[tokio::test]
+async fn an_application_that_is_stale_is_withdrawn_as_stale_even_when_it_is_excluded_too() {
+    // 11 excluded, 2 of them stale: the 2 leave as stale, the other 9 by exclusion.
+    let (report, tracker) = excluded_with_two_stale(11).await;
+
+    assert_eq!(report.pruned_stale, 2);
+    assert_eq!(report.pruned_excluded, 9);
+    assert_eq!(state_and_note(&tracker, "test:1").1.unwrap(), STALE_NOTE);
+    // The note names the kind of rule, never the rule's own text.
+    assert_eq!(
+        state_and_note(&tracker, "test:5").1.unwrap(),
+        "excluded:name"
+    );
+    assert_eq!(state_and_note(&tracker, "test:5").0, State::Withdrawn);
+}
+#[tokio::test]
+async fn an_unconfirmed_click_on_an_excluded_company_is_listed_and_kept() {
+    let first = good("1", "Later Excluded Co");
+    let tracker = stored_by_discovery(vec![first.clone()]).await;
+    tracker
+        .transition(
+            "test:1",
+            State::NeedsGonza,
+            Some("unconfirmed_submit: la página no confirmó"),
+            *NOW,
+        )
+        .unwrap();
+    tracker.record_attempt("test:1", *NOW).unwrap();
+    let (criteria, exclusions) = rules_excluding("Later Excluded Co");
+
+    let report = discover(
+        &[fake(vec![first], &[])],
+        &criteria,
+        &exclusions,
+        &tracker,
+        *NOW,
+    )
+    .await
+    .unwrap();
+
+    // The click may have gone through: it is not withdrawn, and the owner is told.
+    assert_eq!(state_and_note(&tracker, "test:1").0, State::NeedsGonza);
+    assert_eq!(report.excluded_waiting, ["test:1"]);
+}
+#[tokio::test]
+async fn a_plain_by_hand_card_of_an_excluded_company_is_withdrawn() {
+    let first = good("1", "Later Excluded Co");
+    let tracker = stored_by_discovery(vec![first.clone()]).await;
+    // Waiting for Gonza to fill it in himself; nobody has clicked or confirmed anything.
+    tracker
+        .transition(
+            "test:1",
+            State::NeedsGonza,
+            Some("listing_only: envíalo tú"),
+            *NOW,
+        )
+        .unwrap();
+    let (criteria, exclusions) = rules_excluding("Later Excluded Co");
+
+    let report = discover(
+        &[fake(vec![first], &[])],
+        &criteria,
+        &exclusions,
+        &tracker,
+        *NOW,
+    )
+    .await
+    .unwrap();
+
+    let (state, note) = state_and_note(&tracker, "test:1");
+    assert_eq!(state, State::Withdrawn);
+    assert_eq!(note.unwrap(), "excluded:name");
+    assert_eq!(report.pruned_excluded, 1);
+    assert!(report.excluded_waiting.is_empty());
+}
+#[tokio::test]
+async fn a_form_confirmed_sent_by_hand_of_an_excluded_company_is_kept_and_reported() {
+    let first = good("1", "Later Excluded Co");
+    let tracker = stored_by_discovery(vec![first.clone()]).await;
+    tracker
+        .transition(
+            "test:1",
+            State::NeedsGonza,
+            Some("manual_record: lo envié yo"),
+            *NOW,
+        )
+        .unwrap();
+    let (criteria, exclusions) = rules_excluding("Later Excluded Co");
+
+    let report = discover(
+        &[fake(vec![first], &[])],
+        &criteria,
+        &exclusions,
+        &tracker,
+        *NOW,
+    )
+    .await
+    .unwrap();
+
+    // He says he sent it, so it is not withdrawn; he is told not to send it again.
+    assert_eq!(state_and_note(&tracker, "test:1").0, State::NeedsGonza);
+    assert_eq!(report.pruned_excluded, 0);
+    assert_eq!(report.excluded_waiting, ["test:1"]);
+}
+#[tokio::test]
+async fn a_company_excluded_after_its_posting_was_queued_has_the_application_withdrawn() {
+    let first = good("1", "Later Excluded Co");
+    let tracker = stored_by_discovery(vec![first.clone()]).await;
+    let (criteria, exclusions) = rules_excluding("Later Excluded Co");
+
+    // The source still returns the posting (so it is "already seen"); the next run must still act.
+    discover(
+        &[fake(vec![first], &[])],
+        &criteria,
+        &exclusions,
+        &tracker,
+        *NOW,
+    )
+    .await
+    .unwrap();
+
+    let (state, note) = state_and_note(&tracker, "test:1");
+    assert_eq!(state, State::Withdrawn);
+    assert_eq!(note.unwrap(), "excluded:name");
+}
+#[tokio::test]
+async fn rescore_does_not_queue_a_posting_of_a_company_excluded_since_it_was_stored() {
+    let (criteria, exclusions) = pruning_rules();
+    let tracker = Tracker::in_memory().unwrap();
+    let strict = Criteria {
+        apply_threshold: 99.0,
+        ..criteria.clone()
+    };
+    discover(
+        &[fake(vec![good("1", "Later Excluded Co")], &[])],
+        &strict,
+        &exclusions,
+        &tracker,
+        *NOW,
+    )
+    .await
+    .unwrap();
+    let (criteria, exclusions) = rules_excluding("Later Excluded Co");
+
+    assert_eq!(
+        rescore(&criteria, &exclusions, &tracker, *NOW).unwrap(),
+        RescoreReport::default()
+    );
+    assert!(tracker.get_application("test:1").unwrap().is_none());
+}
 #[tokio::test]
 async fn a_stored_posting_that_the_source_now_dates_as_too_old_is_withdrawn() {
     let first = recently_dated("1", "Acme AI");
@@ -473,6 +665,167 @@ async fn the_prune_follows_region_ok_on_the_fresh_fields() {
         };
         assert_eq!(state, expected, "{location:?}, remote {remote}");
     }
+}
+#[tokio::test]
+async fn the_prune_leaves_alone_what_is_parked_for_its_region_or_was_cleared_by_gonza() {
+    let parked = good("1", "Parked Co");
+    let cleared = good("2", "Cleared Co");
+    let ordinary = good("3", "Ordinary Co");
+    let tracker =
+        stored_by_discovery(vec![parked.clone(), cleared.clone(), ordinary.clone()]).await;
+    tracker
+        .transition("test:1", State::NeedsGonza, Some(REGION_NOTE), *NOW)
+        .unwrap();
+    cleared_outside_the_region(&tracker, &cleared, "test:2");
+    walk(&tracker, "test:3", &[State::Prepared]);
+    // The fetch: the parked one says USA, the cleared one says what he saw (and a new link, so it is refreshed),
+    // the ordinary one says USA.
+    let new_link = Job {
+        apply_url: "https://job-boards.greenhouse.io/acme/jobs/2".into(),
+        ..in_us(&cleared)
+    };
+
+    let report = discover_again(&tracker, vec![in_us(&parked), new_link, in_us(&ordinary)]).await;
+
+    assert_eq!(report.pruned_region, 1, "only the ordinary one");
+    assert_eq!(state_and_note(&tracker, "test:1").0, State::NeedsGonza);
+    assert_eq!(state_and_note(&tracker, "test:2").0, State::Scored);
+    assert_eq!(state_and_note(&tracker, "test:3").0, State::Withdrawn);
+}
+fn in_us(job: &Job) -> Job {
+    Job {
+        location: "Remote - USA".into(),
+        ..job.clone()
+    }
+}
+/// Gonza looked at the application with the posting saying "Remote - USA" and sent it on anyway.
+fn cleared_outside_the_region(tracker: &Tracker, job: &Job, key: &str) {
+    tracker.refresh_posting(&in_us(job)).unwrap();
+    tracker
+        .transition(key, State::NeedsGonza, Some(REGION_NOTE), *NOW)
+        .unwrap();
+    jobbot_app::actions::resolve(
+        tracker,
+        key,
+        *NOW,
+        jobbot_app::actions::ResolveIntent::SendOutsideRegion,
+    )
+    .unwrap();
+}
+#[tokio::test]
+async fn a_cleared_application_whose_posting_moved_is_parked_again_not_withdrawn() {
+    let moved = good("1", "Moved Co");
+    let tracker = stored_by_discovery(vec![moved.clone()]).await;
+    cleared_outside_the_region(&tracker, &moved, "test:1");
+    let events_before = tracker.events_for("test:1").unwrap().len();
+    let elsewhere = Job {
+        location: "San Francisco, CA".into(),
+        ..moved.clone()
+    };
+
+    // Through discovery, as in production: the fetch refreshes the location and the prune runs right after.
+    let report = discover_again(&tracker, vec![elsewhere.clone()]).await;
+
+    let row = tracker.get_application("test:1").unwrap().unwrap();
+    assert_eq!(
+        row.state,
+        State::NeedsGonza,
+        "he sees a card and decides again"
+    );
+    assert_eq!(row.needs_reason.as_deref(), Some(REGION_NOTE));
+    assert_eq!(
+        tracker.events_for("test:1").unwrap().len(),
+        events_before + 1
+    );
+    assert_eq!(
+        report.pruned_region, 0,
+        "parked again is not a withdrawal: it is not counted as pruned"
+    );
+    // A second pass finds it parked and leaves it alone.
+    discover_again(&tracker, vec![elsewhere]).await;
+    assert_eq!(state_and_note(&tracker, "test:1").0, State::NeedsGonza);
+    assert_eq!(
+        tracker.events_for("test:1").unwrap().len(),
+        events_before + 1
+    );
+}
+#[tokio::test]
+async fn a_cleared_application_that_waits_for_him_again_keeps_its_card_when_its_posting_moves() {
+    const BY_HAND: &str = "listing_only: envíalo tú";
+    let moved = good("1", "Moved Co");
+    let tracker = stored_by_discovery(vec![moved.clone()]).await;
+    cleared_outside_the_region(&tracker, &moved, "test:1");
+    // Later it stopped again, this time for a form he sends by hand.
+    tracker
+        .transition("test:1", State::NeedsGonza, Some(BY_HAND), *NOW)
+        .unwrap();
+    let events_before = tracker.events_for("test:1").unwrap().len();
+    let elsewhere = Job {
+        location: "San Francisco, CA".into(),
+        ..moved
+    };
+
+    let report = discover_again(&tracker, vec![elsewhere]).await;
+
+    // Not withdrawn (that would undo his decision with no card) and not moved: he reads the
+    // posting when he works the card he already has.
+    let row = tracker.get_application("test:1").unwrap().unwrap();
+    assert_eq!(row.state, State::NeedsGonza);
+    assert_eq!(row.needs_reason.as_deref(), Some(BY_HAND));
+    assert_eq!(
+        tracker.events_for("test:1").unwrap().len(),
+        events_before,
+        "nothing is written"
+    );
+    assert_eq!(report.pruned_region, 0);
+}
+#[tokio::test]
+async fn an_override_written_by_an_older_build_is_parked_again_too() {
+    let old = good("1", "Old Co");
+    let tracker = stored_by_discovery(vec![old.clone()]).await;
+    tracker.refresh_posting(&in_us(&old)).unwrap();
+    tracker
+        .transition("test:1", State::NeedsGonza, Some(REGION_NOTE), *NOW)
+        .unwrap();
+    tracker
+        .transition(
+            "test:1",
+            State::Scored,
+            Some("region_override: revisada por Gonza, se envía igual"),
+            *NOW,
+        )
+        .unwrap();
+
+    let report = discover_again(&tracker, vec![in_us(&old)]).await;
+
+    // The old note does not hold, so the region branch fires: parked again, not withdrawn.
+    assert_eq!(report.pruned_region, 0);
+    assert_eq!(state_and_note(&tracker, "test:1").0, State::NeedsGonza);
+}
+#[tokio::test]
+async fn a_cleared_application_whose_posting_moved_and_whose_company_is_excluded_is_withdrawn_as_excluded()
+ {
+    let moved = good("1", "Moved Co");
+    let tracker = stored_by_discovery(vec![moved.clone()]).await;
+    cleared_outside_the_region(&tracker, &moved, "test:1");
+    let elsewhere = Job {
+        location: "San Francisco, CA".into(),
+        ..moved
+    };
+    let (criteria, exclusions) = rules_excluding("Moved Co");
+
+    let report = discover(
+        &[fake(vec![elsewhere], &[])],
+        &criteria,
+        &exclusions,
+        &tracker,
+        *NOW,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(state_and_note(&tracker, "test:1").0, State::Withdrawn);
+    assert_eq!(report.pruned_excluded, 1);
 }
 #[tokio::test]
 async fn a_healthy_posting_stays_in_the_queue_and_its_fresh_fields_are_stored() {
@@ -749,6 +1102,48 @@ async fn a_form_waiting_for_gonza_to_send_by_hand_is_never_withdrawn() {
     }
 }
 #[tokio::test]
+async fn a_stale_listing_only_card_is_kept_unless_its_company_is_excluded() {
+    // Two rules, both pinned: age does not withdraw a card the owner sends by hand, but an
+    // exclusion does (such a card is an invitation to send; see `prune_ineligible`).
+    let kept = recently_dated("1", "Kept Co");
+    let excluded = recently_dated("2", "Later Excluded Co");
+    let tracker = stored_by_discovery(vec![kept.clone(), excluded.clone()]).await;
+    for key in ["test:1", "test:2"] {
+        tracker
+            .transition(
+                key,
+                State::NeedsGonza,
+                Some("listing_only: envíalo tú"),
+                *NOW,
+            )
+            .unwrap();
+    }
+    let now_old: Vec<Job> = [kept, excluded]
+        .into_iter()
+        .map(|job| Job {
+            posted_at: Some(*NOW - TimeDelta::days(60)),
+            ..job
+        })
+        .collect();
+    let (criteria, exclusions) = rules_excluding("Later Excluded Co");
+
+    let report = discover(
+        &[fake(now_old, &[])],
+        &criteria,
+        &exclusions,
+        &tracker,
+        *NOW,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(report.pruned_stale, 0);
+    assert_eq!(state_and_note(&tracker, "test:1").0, State::NeedsGonza);
+    let (state, note) = state_and_note(&tracker, "test:2");
+    assert_eq!(state, State::Withdrawn);
+    assert_eq!(note.unwrap(), "excluded:name");
+}
+#[tokio::test]
 async fn a_role_posted_again_after_the_old_one_went_stale_is_a_new_posting() {
     let (criteria, exclusions) = pruning_rules();
     let tracker = Tracker::in_memory().unwrap();
@@ -891,7 +1286,7 @@ fn left_in_the_queue(tracker: &Tracker, job: &Job) {
     tracker
         .add_job(job, 70.0, &Default::default(), *NOW)
         .unwrap();
-    tracker.create_application(&job.key(), *NOW).unwrap();
+    tracker.start_cold_for_tests(&job.key(), *NOW).unwrap();
 }
 #[tokio::test]
 async fn a_posting_the_source_no_longer_returns_is_pruned_when_stale_but_not_for_its_region() {
@@ -918,7 +1313,7 @@ fn first_seen_days_ago(tracker: &Tracker, job: &Job, days: i64) {
     tracker
         .add_job(job, 70.0, &Default::default(), then)
         .unwrap();
-    tracker.create_application(&job.key(), then).unwrap();
+    tracker.start_cold_for_tests(&job.key(), then).unwrap();
 }
 #[tokio::test]
 async fn an_undated_posting_is_pruned_once_it_has_been_known_for_over_45_days() {
@@ -964,7 +1359,7 @@ async fn rescore_does_not_queue_an_undated_posting_known_for_over_45_days() {
         .unwrap();
     }
 
-    let report = rescore(&criteria, &tracker, *NOW).unwrap();
+    let report = rescore(&criteria, &exclusions, &tracker, *NOW).unwrap();
 
     assert_eq!((report.rescored, report.newly_queued), (1, 1));
     assert!(tracker.get_application("test:1").unwrap().is_none());
@@ -1020,7 +1415,7 @@ async fn rescore_does_not_queue_a_stored_posting_that_is_out_of_region() {
 
     // Gonza puts the threshold back: a posting nobody could do from Chile is not queued.
     assert_eq!(
-        rescore(&criteria, &tracker, *NOW).unwrap(),
+        rescore(&criteria, &exclusions, &tracker, *NOW).unwrap(),
         RescoreReport::default()
     );
     assert!(tracker.get_application("test:1").unwrap().is_none());
@@ -1083,7 +1478,7 @@ async fn rescore_does_not_queue_a_posting_that_has_become_too_old() {
     // Sixty days later the same posting is 70 days old: it must not enter the queue now.
     let later = *NOW + TimeDelta::days(60);
     assert_eq!(
-        rescore(&criteria, &tracker, later).unwrap(),
+        rescore(&criteria, &exclusions, &tracker, later).unwrap(),
         RescoreReport::default()
     );
     assert!(tracker.get_application("test:1").unwrap().is_none());
@@ -1177,7 +1572,7 @@ async fn rescore_requeues_stored_jobs_after_a_threshold_change() {
     assert!(tracker.get_application("test:1").unwrap().is_none());
 
     // Gonza puts the threshold back: the stored posting is scored again and queued.
-    let report = rescore(&criteria, &tracker, *NOW).unwrap();
+    let report = rescore(&criteria, &exclusions, &tracker, *NOW).unwrap();
     assert_eq!(
         report,
         RescoreReport {
@@ -1194,7 +1589,7 @@ async fn rescore_requeues_stored_jobs_after_a_threshold_change() {
 
     // Nothing is left without an application, so a second pass does nothing.
     assert_eq!(
-        rescore(&criteria, &tracker, *NOW).unwrap(),
+        rescore(&criteria, &exclusions, &tracker, *NOW).unwrap(),
         RescoreReport::default()
     );
 }

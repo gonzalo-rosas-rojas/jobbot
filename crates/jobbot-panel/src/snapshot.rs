@@ -45,7 +45,7 @@ use controls::controls;
 pub use controls::{ClaudeAccount, Controls, ScheduledTask};
 pub use learn::{GapView, Learn, WeakTopic};
 use learn::{gap_view, learn};
-pub use metrics::{Funnel, Metrics, Pipeline, SourceFunnel, Trust};
+pub use metrics::{Funnel, FunnelGroup, Metrics, Pipeline, Trust};
 use metrics::{funnel, metrics, pipeline, trust};
 use today::today;
 pub use today::{Today, TodayEmail, TodayInbox, TodayTask};
@@ -226,7 +226,9 @@ pub fn build_job_detail(panel: &Panel, key: &str) -> Result<Option<JobDetail>> {
             at: iso(e.at),
             from: e.from_state.map(|s| s.as_str()),
             to: e.to_state.as_str(),
-            note: e.note,
+            note: e
+                .note
+                .map(|note| jobbot_domain::gate::readable_note(&note).to_string()),
         })
         .collect();
     // A dossier that does not exist is the normal case; one that exists and cannot be read
@@ -326,6 +328,8 @@ mod tests {
                 interviews: 0,
                 offers: 0,
                 by_source: BTreeMap::new(),
+                by_origin: BTreeMap::new(),
+                by_region: BTreeMap::new(),
             })
         );
         assert_eq!(snap.snoozed.total, 0);
@@ -574,7 +578,10 @@ mod tests {
             .tracker
             .add_job(&job, 80.0, &BTreeMap::new(), *NOW)
             .unwrap();
-        panel.tracker.create_application(&job.key(), *NOW).unwrap();
+        panel
+            .tracker
+            .start_application(&job.key(), jobbot_domain::origin::Origin::Cold, *NOW)
+            .unwrap();
         let detail = build_job_detail(&panel, &job.key()).unwrap().unwrap();
         assert_eq!(
             detail.description.chars().count(),
@@ -603,7 +610,10 @@ mod tests {
                 .tracker
                 .add_job(job, 80.0, &BTreeMap::new(), seen)
                 .unwrap();
-            panel.tracker.create_application(&job.key(), seen).unwrap();
+            panel
+                .tracker
+                .start_application(&job.key(), jobbot_domain::origin::Origin::Cold, seen)
+                .unwrap();
         }
 
         let dated_detail = build_job_detail(&panel, &dated.key()).unwrap().unwrap();

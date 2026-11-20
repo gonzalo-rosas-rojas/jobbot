@@ -4,14 +4,17 @@
 use std::path::Path;
 use std::sync::Mutex;
 
-use rusqlite::Connection;
+use jobbot_domain::handoff::MANUAL_RECORD_PREFIX;
+use jobbot_domain::models::MANUAL_SOURCE;
+use jobbot_domain::text::company_identity;
+use rusqlite::{Connection, TransactionBehavior, params};
 
 use super::{Result, Tracker, TrackerError, db_at, io};
 use crate::pragmas::{BUSY_TIMEOUT, use_wal};
 
 /// Version of the database layout this build writes (`PRAGMA user_version`). Raise it when a
 /// migration is added: `Tracker::open` copies an older database with data before it moves it up.
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 
 /// Indexes on columns `add_missing_columns` may have just added, so they run after it. The marks
 /// the panel can still undo are asked on every poll; only a hand mark keeps an `undo`.
@@ -30,7 +33,9 @@ CREATE TABLE IF NOT EXISTS applications (
   job_key TEXT PRIMARY KEY REFERENCES jobs(key), company_norm TEXT NOT NULL, state TEXT NOT NULL,
   note TEXT, needs_reason TEXT, cv_path TEXT, screenshot_path TEXT,
   approved INTEGER NOT NULL DEFAULT 0, submitted_at TEXT, updated_at TEXT NOT NULL,
-  attempted_at TEXT, snoozed_until TEXT
+  attempted_at TEXT, snoozed_until TEXT,
+  -- Version 5: how the application came about (`jobbot_domain::origin::Origin`, by its stored name).
+  origin TEXT NOT NULL DEFAULT 'cold'
 );
 CREATE TABLE IF NOT EXISTS events (
   id INTEGER PRIMARY KEY AUTOINCREMENT, job_key TEXT NOT NULL, at TEXT NOT NULL,
@@ -143,6 +148,16 @@ fn back_up_before_migrating(conn: &Connection, db_path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Whether SQLite refused a write because of where the database is right now (another connection holds the lock, or
+/// the file is read-only), not because of what was asked.
+fn cannot_write_now(error: &rusqlite::Error) -> bool {
+    use rusqlite::ErrorCode::{DatabaseBusy, DatabaseLocked, ReadOnly};
+    matches!(
+        error.sqlite_error_code(),
+        Some(DatabaseBusy | DatabaseLocked | ReadOnly)
+    )
+}
+
 impl Tracker {
     /// Opens (creating it and its parent directory if needed) the database at `path`. The file runs
     /// in WAL mode with every commit durable. A database made by an earlier version, one that
@@ -182,11 +197,13 @@ impl Tracker {
         Self::from_connection(Connection::open_in_memory()?)
     }
 
-    fn from_connection(conn: Connection) -> Result<Tracker> {
+    fn from_connection(mut conn: Connection) -> Result<Tracker> {
         conn.busy_timeout(BUSY_TIMEOUT)?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         conn.execute_batch(SCHEMA)?;
         Self::add_missing_columns(&conn)?;
+        Self::add_origin_column(&mut conn)?;
+        Self::repair_blank_company_norms_if_possible(&mut conn)?;
         conn.execute_batch(INDEXES_ON_ADDED_COLUMNS)?;
         Ok(Tracker {
             conn: Mutex::new(conn),
@@ -209,6 +226,104 @@ impl Tracker {
             }
         }
         Ok(())
+    }
+
+    /// Version 5: how each application came about (`applications.origin`). The column and the values of the
+    /// applications already stored are written in one IMMEDIATE transaction, so another process opening the same
+    /// file waits and then finds the column, and a cut between the two cannot leave a column without its values.
+    /// The column is looked for first without a lock, so every later open (the common case) never takes the write
+    /// lock; the transaction looks again, because another process may have added it in between.
+    /// Everything stored is `cold` except what Gonza recorded by hand, which is `unknown`: a posting whose source
+    /// is `manual`, or an application that went through `record`'s `manual_record:` step, which `record` writes
+    /// only when the application was still `scored` (`record` sets `unknown` under the same rule for new
+    /// applications). Nobody knows how those came about, and `cold` would claim jobbot found them and applied
+    /// without contact. `substr` and not `LIKE`: in `LIKE` the `_` of `manual_record` matches any character. The
+    /// statements are built with `format!` from constants, as `add_missing_columns` builds its `ALTER`.
+    fn add_origin_column(conn: &mut Connection) -> Result<()> {
+        if Self::has_column(conn, "applications", "origin")? {
+            return Ok(());
+        }
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if !Self::has_column(&tx, "applications", "origin")? {
+            let prefix = MANUAL_RECORD_PREFIX;
+            tx.execute_batch(&format!(
+                "ALTER TABLE applications ADD COLUMN origin TEXT NOT NULL DEFAULT 'cold';
+                 UPDATE applications SET origin = 'unknown'
+                  WHERE job_key IN (SELECT key FROM jobs WHERE source = '{MANUAL_SOURCE}')
+                     OR job_key IN (SELECT job_key FROM events
+                                     WHERE substr(note, 1, length('{prefix}')) = '{prefix}');"
+            ))?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// `give_blank_company_norms_their_identity` as the open runs it: not being able to write is not a failure. The
+    /// repair is cosmetic (those rows were just as blank before this build), so the write lock not coming within the
+    /// busy timeout, or a file that is read-only, must never be the reason the panel or the CLI cannot open the
+    /// tracker. The rows are still blank, so the next open tries again. Any other error is a defect of the repair
+    /// itself and is returned: swallowed, nobody would ever see it.
+    fn repair_blank_company_norms_if_possible(conn: &mut Connection) -> Result<()> {
+        match Self::give_blank_company_norms_their_identity(conn) {
+            Err(TrackerError::Db(error) | TrackerError::DbAt { source: error, .. })
+                if cannot_write_now(&error) =>
+            {
+                Ok(())
+            }
+            other => other,
+        }
+    }
+
+    /// Rows stored before `company_identity` existed kept `company_norm = ''` when `normalize` could not fold the
+    /// name (another script, or only a legal suffix), so such a company was nobody's and the cap, the cooldown and
+    /// the e-mail match never saw it. Those rows, and only those, get the identity now. A row that already has a
+    /// norm keeps it, and a company with no name stays blank, so a second run finds nothing to do. It runs on every
+    /// open, whatever the version of the file: the rows are looked for first without a lock (the common case finds
+    /// none and never takes the write lock), and the writes go in their own short IMMEDIATE transaction, which looks
+    /// again because another process may have done it in between.
+    fn give_blank_company_norms_their_identity(conn: &mut Connection) -> Result<()> {
+        // (see `repair_blank_company_norms_if_possible` for what happens when this cannot write)
+        if Self::company_norm_fills(conn)?.is_empty() {
+            return Ok(());
+        }
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        for (table, key_column, key, identity) in Self::company_norm_fills(&tx)? {
+            tx.execute(
+                &format!("UPDATE {table} SET company_norm = ?1 WHERE {key_column} = ?2"),
+                params![identity, key],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// The rows with `company_norm = ''` whose company has an identity: (table, key column, key, identity).
+    fn company_norm_fills(
+        conn: &Connection,
+    ) -> Result<Vec<(&'static str, &'static str, String, String)>> {
+        let mut found = Vec::new();
+        for (table, key_column, company_of) in [
+            ("jobs", "key", "company"),
+            (
+                "applications",
+                "job_key",
+                "(SELECT company FROM jobs WHERE jobs.key = applications.job_key)",
+            ),
+        ] {
+            let mut blank = conn.prepare(&format!(
+                "SELECT {key_column}, {company_of} FROM {table} WHERE company_norm = ''"
+            ))?;
+            let rows: Vec<(String, Option<String>)> = blank
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect::<rusqlite::Result<_>>()?;
+            for (key, company) in rows {
+                let identity = company_identity(&company.unwrap_or_default());
+                if !identity.is_empty() {
+                    found.push((table, key_column, key, identity));
+                }
+            }
+        }
+        Ok(found)
     }
 
     fn has_column(conn: &Connection, table: &str, column: &str) -> Result<bool> {
@@ -241,6 +356,7 @@ mod tests {
 
     use chrono::{DateTime, TimeDelta, Utc};
     use jobbot_domain::fixtures::{NOW, make_job};
+    use jobbot_domain::origin::Origin;
 
     use crate::tracker::test_support::{new_email, new_task, state_of, stored_at};
     use crate::tracker::{EmailAdded, EmailKind, INTENT_SUBMIT, NewTask, State, TaskAdded};
@@ -463,7 +579,7 @@ mod tests {
         let t = Tracker::open(&path).unwrap();
         let job = make_job();
         t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-        t.create_application(&job.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         t.record_attempt(&job.key(), *NOW).unwrap();
         assert_eq!(t.clicked_since(*NOW - TimeDelta::hours(1)).unwrap(), 1);
         // Opening it again does not try to add the column twice.
@@ -655,7 +771,7 @@ mod tests {
         let t = Tracker::open(&path).unwrap();
         let job = make_job();
         t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-        t.create_application(&job.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         let until = *NOW + TimeDelta::days(3);
         t.set_snoozed_until(&job.key(), Some(until)).unwrap();
         assert_eq!(
@@ -667,6 +783,318 @@ mod tests {
         );
         drop(t);
         assert!(Tracker::open(&path).is_ok());
+    }
+
+    /// A version 4 database: a job from a board with its application, a posting recorded by hand with its
+    /// application, an application recorded by hand on a board's posting (`manual_record:` event), and an
+    /// application whose posting row is missing. Returns the four job keys in that order.
+    fn version_4_database(path: &Path) -> [&'static str; 4] {
+        let conn = Connection::open(path).unwrap();
+        // The orphan below is only possible with foreign keys off, as in old files.
+        conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
+        conn.execute_batch(&format!(
+            "{}
+             CREATE TABLE events (
+               id INTEGER PRIMARY KEY AUTOINCREMENT, job_key TEXT NOT NULL, at TEXT NOT NULL,
+               from_state TEXT, to_state TEXT NOT NULL, note TEXT, undo TEXT
+             );
+             PRAGMA user_version = 4;",
+            old_schema("attempted_at TEXT, snoozed_until TEXT")
+        ))
+        .unwrap();
+        for (key, source) in [
+            ("board:1", "greenhouse"),
+            ("manual:1", "manual"),
+            ("board:2", "lever"),
+        ] {
+            conn.execute(
+                "INSERT INTO jobs (key, source, company, company_norm, title, title_lc, url, apply_url,
+                                   location, remote, description, score, score_detail, first_seen)
+                 VALUES (?1, ?2, 'Acme', 'acme', 'Engineer', 'engineer', 'u', 'u', '', 1, '', 50, '{}',
+                         '2026-10-01T12:00:00Z')",
+                [key, source],
+            )
+            .unwrap();
+        }
+        for key in ["board:1", "manual:1", "board:2", "gone:1"] {
+            conn.execute(
+                "INSERT INTO applications (job_key, company_norm, state, updated_at)
+                 VALUES (?1, 'acme', 'scored', '2026-10-01T12:00:00Z')",
+                [key],
+            )
+            .unwrap();
+        }
+        conn.execute(
+            "INSERT INTO events (job_key, at, from_state, to_state, note)
+             VALUES ('board:2', '2026-10-01T12:00:00Z', 'scored', 'needs_gonza', ?1)",
+            [format!(
+                "{MANUAL_RECORD_PREFIX} enviada a mano, registrándola"
+            )],
+        )
+        .unwrap();
+        ["board:1", "manual:1", "board:2", "gone:1"]
+    }
+
+    #[test]
+    fn a_version_4_database_is_copied_and_gains_origin_cold_except_what_was_recorded_by_hand() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.db");
+        let [board, manual, recorded, orphan] = version_4_database(&path);
+
+        let t = Tracker::open(&path).unwrap();
+
+        assert!(
+            dir.path()
+                .join("backups")
+                .join("jobbot-before-v5.db")
+                .is_file()
+        );
+        let version: i64 = t
+            .lock()
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 5);
+        assert_eq!(t.origin_of(board).unwrap(), Some(Origin::Cold));
+        assert_eq!(t.origin_of(manual).unwrap(), Some(Origin::Unknown));
+        assert_eq!(t.origin_of(recorded).unwrap(), Some(Origin::Unknown));
+        assert_eq!(t.origin_of(orphan).unwrap(), Some(Origin::Cold));
+    }
+
+    /// Adds to a version 4 database what `normalize` alone left blank: a company in a script it cannot fold to ASCII
+    /// (job and application both blank), and a company with no name at all (blank for good).
+    fn blank_company_norms(path: &Path) {
+        let conn = Connection::open(path).unwrap();
+        for (key, company) in [("blank:1", "ЖК Строй"), ("blank:2", "")] {
+            conn.execute(
+                "INSERT INTO jobs (key, source, company, company_norm, title, title_lc, url, apply_url,
+                                   location, remote, description, score, score_detail, first_seen)
+                 VALUES (?1, 'lever', ?2, '', 'Engineer', 'engineer', 'u', 'u', '', 1, '', 50, '{}',
+                         '2026-10-01T12:00:00Z')",
+                [key, company],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO applications (job_key, company_norm, state, updated_at)
+                 VALUES (?1, '', 'scored', '2026-10-01T12:00:00Z')",
+                [key],
+            )
+            .unwrap();
+        }
+    }
+
+    /// Every stored `company_norm`, jobs then applications, by key.
+    fn company_norms(t: &Tracker) -> Vec<(String, String)> {
+        let conn = t.lock();
+        let mut stmt = conn
+            .prepare(
+                "SELECT 'job ' || key, company_norm FROM jobs
+                 UNION ALL SELECT 'application ' || job_key, company_norm FROM applications
+                 ORDER BY 1",
+            )
+            .unwrap();
+        stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn the_migration_gives_a_blank_company_norm_its_identity_and_only_those() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.db");
+        version_4_database(&path);
+        blank_company_norms(&path);
+
+        let t = Tracker::open(&path).unwrap();
+
+        let norms = company_norms(&t);
+        let norm_of = |what: &str| {
+            norms
+                .iter()
+                .find(|(name, _)| name == what)
+                .map(|(_, norm)| norm.as_str())
+                .unwrap()
+        };
+        assert_eq!(norm_of("job blank:1"), "жк строй");
+        assert_eq!(norm_of("application blank:1"), "жк строй");
+        assert_eq!(norm_of("job blank:2"), "", "no name, no identity");
+        assert_eq!(norm_of("application blank:2"), "");
+        assert_eq!(
+            norm_of("job board:1"),
+            "acme",
+            "a filled one is left as it is"
+        );
+        assert_eq!(norm_of("application board:1"), "acme");
+    }
+
+    #[test]
+    fn a_database_that_already_has_origin_gets_its_blank_company_norms_on_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("current.db");
+        drop(Tracker::open(&path).unwrap());
+        blank_company_norms(&path);
+
+        let t = Tracker::open(&path).unwrap();
+
+        let norms = company_norms(&t);
+        assert!(norms.contains(&("job blank:1".to_string(), "жк строй".to_string())));
+        assert!(norms.contains(&("application blank:1".to_string(), "жк строй".to_string())));
+        assert!(norms.contains(&("job blank:2".to_string(), String::new())));
+    }
+
+    #[test]
+    fn a_second_open_writes_no_company_norm() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("current.db");
+        drop(Tracker::open(&path).unwrap());
+        blank_company_norms(&path);
+        let first = company_norms(&Tracker::open(&path).unwrap());
+
+        let second = Tracker::open(&path).unwrap();
+
+        assert_eq!(company_norms(&second), first);
+        assert_eq!(
+            second.lock().total_changes(),
+            0,
+            "the second open found nothing to fill and wrote nothing"
+        );
+    }
+
+    #[test]
+    fn a_repair_that_cannot_write_does_not_stop_the_open_and_a_later_open_does_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("current.db");
+        drop(Tracker::open(&path).unwrap());
+        blank_company_norms(&path);
+        // A connection that cannot write, as a read-only file or a lock that never frees would give.
+        let mut read_only = Connection::open_with_flags(
+            &path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .unwrap();
+
+        Tracker::repair_blank_company_norms_if_possible(&mut read_only)
+            .expect("not being able to write is not a failure");
+
+        drop(read_only);
+        let unchanged = Connection::open(&path).unwrap();
+        let norm: String = unchanged
+            .query_row(
+                "SELECT company_norm FROM jobs WHERE key = 'blank:1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(norm, "", "nothing was written");
+        drop(unchanged);
+        let later = Tracker::open(&path).unwrap();
+        assert!(
+            company_norms(&later).contains(&("job blank:1".to_string(), "жк строй".to_string()))
+        );
+    }
+
+    #[test]
+    fn a_repair_that_fails_for_any_other_reason_is_not_swallowed() {
+        // A database with no tables: the repair's own query is wrong here, which is a defect, not a busy file.
+        let mut empty = Connection::open_in_memory().unwrap();
+
+        let outcome = Tracker::repair_blank_company_norms_if_possible(&mut empty);
+
+        assert!(outcome.is_err(), "a defect of the repair must be seen");
+    }
+
+    #[test]
+    fn opening_a_migrated_database_again_changes_no_company_norm() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.db");
+        version_4_database(&path);
+        blank_company_norms(&path);
+        let first = company_norms(&Tracker::open(&path).unwrap());
+
+        let second = company_norms(&Tracker::open(&path).unwrap());
+
+        assert_eq!(second, first);
+    }
+
+    #[test]
+    fn the_backup_is_the_version_4_state_without_the_origin_column() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.db");
+        version_4_database(&path);
+        drop(Tracker::open(&path).unwrap());
+
+        let copy =
+            Connection::open(dir.path().join("backups").join("jobbot-before-v5.db")).unwrap();
+
+        let version: i64 = copy
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 4);
+        assert!(!Tracker::has_column(&copy, "applications", "origin").unwrap());
+    }
+
+    #[test]
+    fn a_database_with_the_column_that_still_says_version_4_finishes_without_a_second_backup_or_backfill()
+     {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.db");
+        let [_, manual, _, _] = version_4_database(&path);
+        let t = Tracker::open(&path).unwrap();
+        t.set_origin(manual, Origin::Referral).unwrap();
+        t.lock().pragma_update(None, "user_version", 4).unwrap();
+        drop(t);
+        let backup = dir.path().join("backups").join("jobbot-before-v5.db");
+        let backup_before = std::fs::read(&backup).unwrap();
+
+        let again = Tracker::open(&path).unwrap();
+
+        let version: i64 = again
+            .lock()
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 5, "the migration is finished");
+        assert_eq!(
+            again.origin_of(manual).unwrap(),
+            Some(Origin::Referral),
+            "the backfill did not run again"
+        );
+        assert_eq!(std::fs::read(&backup).unwrap(), backup_before);
+    }
+
+    #[test]
+    fn reopening_a_migrated_database_keeps_a_corrected_origin() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.db");
+        let [_, manual, _, _] = version_4_database(&path);
+        let t = Tracker::open(&path).unwrap();
+        assert!(t.set_origin(manual, Origin::Referral).unwrap());
+        drop(t);
+
+        let again = Tracker::open(&path).unwrap();
+
+        assert_eq!(again.origin_of(manual).unwrap(), Some(Origin::Referral));
+    }
+
+    #[test]
+    fn a_fresh_database_starts_every_application_cold() {
+        let t = Tracker::in_memory().unwrap();
+        let job = make_job();
+        t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
+        assert_eq!(t.origin_of(&job.key()).unwrap(), Some(Origin::Cold));
+    }
+
+    #[test]
+    fn an_unknown_stored_origin_is_an_error_not_a_guess() {
+        let t = Tracker::in_memory().unwrap();
+        let job = make_job();
+        t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
+        t.lock()
+            .execute("UPDATE applications SET origin = 'friend'", [])
+            .unwrap();
+        let error = t.origin_of(&job.key()).unwrap_err().to_string();
+        assert!(error.contains("unknown origin \"friend\""), "{error}");
     }
 
     #[test]
@@ -690,7 +1118,7 @@ mod tests {
         let t = Tracker::open(&path).unwrap();
         let job = make_job();
         t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-        t.create_application(&job.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         t.transition(&job.key(), State::Prepared, None, *NOW)
             .unwrap();
         t.transition(&job.key(), State::Submitted, None, *NOW)

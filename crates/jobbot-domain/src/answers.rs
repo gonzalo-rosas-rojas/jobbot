@@ -416,7 +416,14 @@ impl AnswerBank {
     /// the country you reside in?" but not "... reside in and in the US?"). A term that starts
     /// with `!` must NOT match (`visa&!reside` takes "Do you need a visa?" but not "... a visa in
     /// the country you reside in?"); a pattern needs at least one term without the `!`.
+    ///
+    /// A label on the never-filled list (`never_filled`: government identity numbers and banking)
+    /// gets no entry at all, whatever the bank says, loose or `=` pattern alike: the field is
+    /// reported as unanswered and goes to Gonza. Every fill path goes through this method.
     pub fn lookup(&self, label: &str) -> Option<&AnswerEntry> {
+        if crate::never_filled::is_never_filled(label) {
+            return None;
+        }
         // `normalize` drops "co" as a company suffix, which would turn "Co-applicant name" into
         // "applicant name": gluing a "co-" prefix first keeps it one word.
         let text = normalize(&label.to_lowercase().replace("co-", "co"));
@@ -696,7 +703,7 @@ fn ends_with_phrase(text: &str, phrase: &str) -> bool {
 
 /// True when `phrase` occurs in `text` delimited by non-alphanumerics, with an optional plural
 /// `s` after it. Both strings are already normalized (lowercase ASCII letters, digits, spaces).
-fn contains_phrase(text: &str, phrase: &str) -> bool {
+pub(crate) fn contains_phrase(text: &str, phrase: &str) -> bool {
     if phrase.is_empty() {
         return false;
     }

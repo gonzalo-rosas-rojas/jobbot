@@ -114,6 +114,13 @@
 
 .sistema .row[data-pending] .act { opacity: 0.3; pointer-events: none; }
 
+.sistema .funnel-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 2px 14px; padding-bottom: 6px; border-bottom: 1px solid var(--line-strong); }
+.sistema .funnel-head .block-title { padding-bottom: 0; border-bottom: 0; }
+.sistema .funnel-by { display: flex; flex-wrap: nowrap; align-items: baseline; gap: 0 12px; color: var(--ink-dim); }
+.sistema .funnel-by-pick { display: inline-flex; align-items: center; min-height: 24px; padding: 0 0 2px; color: var(--ink-dim); text-transform: inherit; letter-spacing: inherit; border-bottom: 1px solid transparent; white-space: nowrap; }
+.sistema .funnel-by-pick:hover { color: var(--ink); }
+.sistema .funnel-by-pick[aria-pressed="true"] { color: var(--ink); font-weight: 600; border-bottom-color: var(--ink); }
+
 .sistema .sources-table { width: 100%; border-collapse: collapse; }
 .sistema .sources-table th, .sistema .sources-table td { padding: 4px 0; border-bottom: 1px solid var(--line); text-align: right; vertical-align: baseline; font-size: var(--fs-3); }
 .sistema .sources-table thead th { padding: 4px 0; font-size: var(--fs-1); font-weight: 400; color: var(--ink-dim); white-space: nowrap; }
@@ -175,6 +182,8 @@
    the window gets lower the headline and the figures tighten, and under 850 px what is only explanation goes. */
 @media (min-width: 760px) and (max-height: 1100px) {
   .sistema .row { padding: 5px 0; }
+  /* The funnel note is two lines with the sentence about rejections, and at 1920x1080 after a failed run that line is what pushed the error of a card (and its Abrir) off the sheet. Only that note goes here: the note of the errors keeps showing down to 1060 px. */
+  .sistema .funnel-note { display: none; }
 }
 @media (min-width: 760px) and (max-height: 1060px) {
   /* 1600x1000, 1680x1050 and 1920x950 scrolled the sheet by 52, 69 and 20 px: what is only detail goes one step earlier than at 900 */
@@ -211,10 +220,10 @@
   .sistema .steps { grid-template-columns: minmax(0, 1fr); }
   .sistema .step { grid-column: auto; grid-template-columns: 5.9em minmax(0, 1fr); gap: 8px; }
   .sistema .cells { grid-template-columns: minmax(0, 1fr); }
-  /* the table turns into rows: the board on its own line and three numbers under their names; the real header stays for a screen reader */
+  /* the table turns into rows: the board on its own line and four numbers under their names; the real header stays for a screen reader */
   .sistema .sources-table, .sistema .sources-table tbody { display: block; }
   .sistema .sources-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-  .sistema .sources-table tbody tr { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .sistema .sources-table tbody tr { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
   .sistema .sources-table tbody th, .sistema .sources-table tbody td { display: block; padding: 0; border: 0; text-align: left; }
   .sistema .sources-table tbody th { grid-column: 1 / -1; }
   .sistema .sources-table tbody td::before { content: attr(data-label); display: block; margin-bottom: 1px; font-family: var(--body); font-size: var(--fs-1); letter-spacing: 0; color: var(--ink-dim); }

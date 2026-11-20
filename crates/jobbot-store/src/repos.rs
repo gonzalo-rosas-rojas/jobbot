@@ -8,6 +8,7 @@ use std::path::Path;
 use chrono::{DateTime, NaiveDate, Utc};
 use jobbot_app::ports::store::*;
 use jobbot_domain::models::Job;
+use jobbot_domain::origin::Origin;
 use jobbot_domain::prep::Question;
 use jobbot_domain::state::State;
 
@@ -78,8 +79,13 @@ impl JobRepo for Tracker {
 }
 
 impl ApplicationRepo for Tracker {
-    fn create_application(&self, job_key: &str, now: DateTime<Utc>) -> StoreResult<()> {
-        Tracker::create_application(self, job_key, now).map_err(StoreError::from)
+    fn start_application(
+        &self,
+        job_key: &str,
+        origin: Origin,
+        now: DateTime<Utc>,
+    ) -> StoreResult<()> {
+        Tracker::start_application(self, job_key, origin, now).map_err(StoreError::from)
     }
     fn get_application(&self, job_key: &str) -> StoreResult<Option<ApplicationRow>> {
         Tracker::get_application(self, job_key).map_err(StoreError::from)
@@ -126,6 +132,18 @@ impl ApplicationRepo for Tracker {
     }
     fn set_snoozed_until(&self, job_key: &str, until: Option<DateTime<Utc>>) -> StoreResult<()> {
         Tracker::set_snoozed_until(self, job_key, until).map_err(StoreError::from)
+    }
+    fn origin_of(&self, job_key: &str) -> StoreResult<Option<Origin>> {
+        Tracker::origin_of(self, job_key).map_err(StoreError::from)
+    }
+    fn set_origin(&self, job_key: &str, origin: Origin) -> StoreResult<bool> {
+        Tracker::set_origin(self, job_key, origin).map_err(StoreError::from)
+    }
+    fn region_override(&self, job_key: &str) -> StoreResult<bool> {
+        Tracker::region_override(self, job_key).map_err(StoreError::from)
+    }
+    fn had_region_override(&self, job_key: &str) -> StoreResult<bool> {
+        Tracker::had_region_override(self, job_key).map_err(StoreError::from)
     }
     fn approve(&self, job_key: &str) -> StoreResult<()> {
         Tracker::approve(self, job_key).map_err(StoreError::from)
@@ -311,8 +329,17 @@ impl HistoryRepo for Tracker {
     fn jobs_reaching_both(&self, first: State, then: State) -> StoreResult<i64> {
         Tracker::jobs_reaching_both(self, first, then).map_err(StoreError::from)
     }
-    fn funnel_by_source(&self) -> StoreResult<Vec<SourceFunnelRow>> {
+    fn funnel_by_source(&self) -> StoreResult<Vec<FunnelRow>> {
         Tracker::funnel_by_source(self).map_err(StoreError::from)
+    }
+    fn funnel_by_origin(&self) -> StoreResult<Vec<FunnelRow>> {
+        Tracker::funnel_by_origin(self).map_err(StoreError::from)
+    }
+    fn funnels(&self) -> StoreResult<Funnels> {
+        Tracker::funnels(self).map_err(StoreError::from)
+    }
+    fn funnel_by_region(&self) -> StoreResult<Vec<FunnelRow>> {
+        Tracker::funnel_by_region(self).map_err(StoreError::from)
     }
     fn cohort_since(&self, since: DateTime<Utc>) -> StoreResult<Vec<CohortRow>> {
         Tracker::cohort_since(self, since).map_err(StoreError::from)
@@ -408,7 +435,7 @@ mod tests {
         let tracker = Tracker::in_memory().unwrap();
         let job = make_job();
         tracker.add_job(&job, 0.9, &BTreeMap::new(), now()).unwrap();
-        tracker.create_application(&job.key(), now()).unwrap();
+        tracker.start_cold_for_tests(&job.key(), now()).unwrap();
         let store: &dyn Store = &tracker;
 
         let refused = store.transition(&job.key(), State::Offer, None, now());

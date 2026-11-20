@@ -46,7 +46,13 @@ pub struct ClaudeConfig {
     /// The `subscriptionType` values accepted (`pro`, `max` by default).
     #[serde(default = "default_allowed_subscriptions")]
     pub allowed_subscriptions: Vec<String>,
+    /// Passed to `--effort` (one of `EFFORT_LEVELS`). Absent means: no flag, the CLI's own default.
+    #[serde(default)]
+    pub effort: Option<String>,
 }
+
+/// The values `claude --effort` takes.
+const EFFORT_LEVELS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 
 fn default_model() -> String {
     "claude-sonnet-5-5".to_string()
@@ -83,6 +89,7 @@ impl Default for ClaudeConfig {
             expected_email: Pii::default(),
             expected_org_id: String::new(),
             allowed_subscriptions: default_allowed_subscriptions(),
+            effort: None,
         }
     }
 }
@@ -120,15 +127,15 @@ pub enum ConfigError {
     Merge(#[source] toml::ser::Error),
     /// A value of the right type that breaks one of the rules of `parse_claude_config`.
     #[error("{0}")]
-    Rule(&'static str),
+    Rule(String),
 }
 
 /// `Err(ConfigError::Rule(message))` unless `holds`.
-fn rule(holds: bool, message: &'static str) -> Result<(), ConfigError> {
+fn rule(holds: bool, message: impl Into<String>) -> Result<(), ConfigError> {
     if holds {
         Ok(())
     } else {
-        Err(ConfigError::Rule(message))
+        Err(ConfigError::Rule(message.into()))
     }
 }
 
@@ -165,6 +172,13 @@ pub fn parse_claude_config(text: &str) -> Result<ClaudeConfig, ConfigError> {
     rule(
         !config.allowed_subscriptions.is_empty(),
         "allowed_subscriptions must name at least one plan",
+    )?;
+    rule(
+        config
+            .effort
+            .as_deref()
+            .is_none_or(|level| EFFORT_LEVELS.contains(&level)),
+        format!("effort must be one of {}", EFFORT_LEVELS.join(", ")),
     )?;
     Ok(config)
 }
@@ -291,6 +305,21 @@ mod tests {
         ] {
             let err = parse_claude_config(text).unwrap_err().to_string();
             assert!(err.contains(mentions), "{text}: {err}");
+        }
+    }
+
+    #[test]
+    fn effort_is_optional_and_only_the_five_levels_are_accepted() {
+        assert_eq!(parse_claude_config("").unwrap().effort, None);
+        for level in ["low", "medium", "high", "xhigh", "max"] {
+            let c = parse_claude_config(&format!("effort = \"{level}\"\n")).unwrap();
+            assert_eq!(c.effort.as_deref(), Some(level));
+        }
+        for bad in ["", "ultra", "High", "  high"] {
+            let err = parse_claude_config(&format!("effort = \"{bad}\"\n"))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("effort must be one of"), "{bad:?}: {err}");
         }
     }
 

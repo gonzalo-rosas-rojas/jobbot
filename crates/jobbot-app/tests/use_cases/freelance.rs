@@ -49,10 +49,8 @@ fn never_name_joins_the_exclusion_list_as_names() {
             && rules.names.contains(&"Harbor Light".to_string())
     );
     assert_eq!(rules.categories, shipped_list().categories);
-    assert_eq!(
-        forbidden_in("I built DeskMate", &rules).as_deref(),
-        Some("name:DeskMate")
-    );
+    // The kind of rule, never its text.
+    assert_eq!(forbidden_in("I built DeskMate", &rules), Some("name"));
     assert_eq!(forbidden_in("I built a SaaS", &rules), None);
 }
 #[test]
@@ -348,11 +346,12 @@ async fn a_posting_in_an_excluded_category_is_refused_before_claude_is_called() 
     )
     .await
     .unwrap_err();
+    let text = err.to_string();
     assert!(
-        err.to_string()
-            .contains("El aviso cae en la lista de exclusión"),
+        text.contains("El aviso cae en la lista de exclusión (regla por category)"),
         "{err:#}"
     );
+    assert!(!text.contains("freight forwarding"), "no rule text: {text}");
     assert!(fake.requests().is_empty());
     let none = draft_proposal(
         &gate,

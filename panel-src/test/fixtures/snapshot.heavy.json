@@ -48,6 +48,7 @@
         "n": 31,
         "sent": 20,
         "answered": 6,
+        "rejected": 2,
         "tests": 2,
         "interviews": 1,
         "offers": 0
@@ -56,6 +57,7 @@
         "n": 30,
         "sent": 14,
         "answered": 4,
+        "rejected": 1,
         "tests": 2,
         "interviews": 2,
         "offers": 1
@@ -64,8 +66,76 @@
         "n": 29,
         "sent": 11,
         "answered": 2,
+        "rejected": 1,
         "tests": 1,
         "interviews": 1,
+        "offers": 0
+      }
+    },
+    "by_origin": {
+      "cold": {
+        "n": 60,
+        "sent": 30,
+        "answered": 7,
+        "rejected": 2,
+        "tests": 3,
+        "interviews": 2,
+        "offers": 0
+      },
+      "referral": {
+        "n": 10,
+        "sent": 6,
+        "answered": 3,
+        "rejected": 1,
+        "tests": 1,
+        "interviews": 1,
+        "offers": 1
+      },
+      "recruiter": {
+        "n": 8,
+        "sent": 5,
+        "answered": 1,
+        "rejected": 0,
+        "tests": 1,
+        "interviews": 1,
+        "offers": 0
+      },
+      "unknown": {
+        "n": 12,
+        "sent": 4,
+        "answered": 1,
+        "rejected": 1,
+        "tests": 0,
+        "interviews": 0,
+        "offers": 0
+      }
+    },
+    "by_region": {
+      "open": {
+        "n": 50,
+        "sent": 28,
+        "answered": 7,
+        "rejected": 2,
+        "tests": 3,
+        "interviews": 3,
+        "offers": 1
+      },
+      "silent": {
+        "n": 30,
+        "sent": 14,
+        "answered": 4,
+        "rejected": 2,
+        "tests": 2,
+        "interviews": 1,
+        "offers": 0
+      },
+      "other": {
+        "n": 10,
+        "sent": 3,
+        "answered": 1,
+        "rejected": 0,
+        "tests": 0,
+        "interviews": 0,
         "offers": 0
       }
     }
@@ -584,7 +654,10 @@
       }
     ],
     "emails_total": 3,
-    "inbox": { "imported_at": "2026-10-07T13:00:00Z", "waiting": 6 },
+    "inbox": {
+      "imported_at": "2026-10-07T13:00:00Z",
+      "waiting": 6
+    },
     "emails": [
       {
         "received_at": "2026-10-07T14:10:00Z",

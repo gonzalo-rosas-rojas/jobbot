@@ -96,7 +96,8 @@ impl Env {
                     j.title = title.into();
                 });
                 t.add_job(&job, 80.0, &BTreeMap::new(), *NOW).unwrap();
-                t.create_application(&job.key(), *NOW).unwrap();
+                t.start_application(&job.key(), jobbot_domain::origin::Origin::Cold, *NOW)
+                    .unwrap();
                 for state in states {
                     t.transition(&job.key(), *state, Some("falta email"), *NOW)
                         .unwrap();
@@ -226,7 +227,8 @@ impl Env {
             j.title = title.into();
         });
         t.add_job(&job, score, &BTreeMap::new(), *NOW).unwrap();
-        t.create_application(&job.key(), *NOW).unwrap();
+        t.start_application(&job.key(), jobbot_domain::origin::Origin::Cold, *NOW)
+            .unwrap();
         t.transition(&job.key(), State::Prepared, None, *NOW)
             .unwrap();
         let shot = self
@@ -1437,7 +1439,8 @@ async fn a_form_that_needs_him_is_confirmed_or_returned_to_the_queue_from_the_ke
         j.title = "Needs a hand".into();
     });
     t.add_job(&job, 75.0, &BTreeMap::new(), *NOW).unwrap();
-    t.create_application(&job.key(), *NOW).unwrap();
+    t.start_application(&job.key(), jobbot_domain::origin::Origin::Cold, *NOW)
+        .unwrap();
     t.transition(&job.key(), State::NeedsGonza, Some("falta email"), *NOW)
         .unwrap();
     drop(t);

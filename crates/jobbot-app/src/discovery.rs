@@ -3,17 +3,18 @@
 use std::collections::{BTreeMap, HashSet};
 
 use chrono::{DateTime, TimeDelta, Utc};
-use jobbot_domain::exclusion::check_exclusion;
-use jobbot_domain::gate::{is_stale, stale_note};
-use jobbot_domain::handoff::is_sent_by_hand;
+use jobbot_domain::exclusion::{check_exclusion, exclusion_note};
+use jobbot_domain::gate::{OUT_OF_REGION_NOTE, is_out_of_region_reason, is_stale, stale_note};
+use jobbot_domain::handoff::{form_may_have_gone_out, may_have_been_sent};
 use jobbot_domain::models::{FetchError, Job};
+use jobbot_domain::origin::Origin;
 use jobbot_domain::rules::{Criteria, Exclusions};
 use jobbot_domain::scoring::{ScoreResult, score_job};
 use jobbot_domain::state::State;
 
 use crate::apply::gate::is_stale_stored;
 use crate::ports::Source;
-use crate::ports::store::{INTENT_SUBMIT, INTERRUPTED_PREFIX, Store, StoreError};
+use crate::ports::store::{INTENT_SUBMIT, Store, StoreError};
 use tracing::field::Empty;
 
 // The region rules are pure and live in the domain crate.
@@ -42,6 +43,12 @@ pub struct DiscoveryReport {
     pub below_floor_flagged: usize,
     pub below_threshold: usize,
     pub queued: usize,
+    /// Applications withdrawn after the loop because their company or domain is excluded now
+    /// (it was added to the exclusions after the posting was queued).
+    pub pruned_excluded: usize,
+    /// Keys of applications already waiting for Gonza, or possibly clicked, whose company is
+    /// excluded now: kept, and reported so he does not send them.
+    pub excluded_waiting: Vec<String>,
     /// Applications withdrawn after the loop because their posting is now too old.
     pub pruned_stale: usize,
     /// Applications withdrawn after the loop because their posting cannot be done from Chile.
@@ -126,7 +133,9 @@ pub async fn discover(
             }
         }
     }
-    let pruned = prune_ineligible(criteria, tracker, &refreshed_keys, now)?;
+    let pruned = prune_ineligible(criteria, exclusions, tracker, &refreshed_keys, now)?;
+    report.pruned_excluded = pruned.excluded;
+    report.excluded_waiting = pruned.excluded_waiting;
     report.pruned_stale = pruned.stale;
     report.pruned_region = pruned.out_of_region;
     crate::record_counts(&[
@@ -141,60 +150,73 @@ pub async fn discover(
 /// What a prune pass withdrew, counted by the rule that decided each application.
 #[derive(Debug, Default, PartialEq)]
 pub struct PruneReport {
+    pub excluded: usize,
+    /// Keys of applications waiting for Gonza (by hand, or with a click that may have gone
+    /// through) whose company or domain is excluded now: kept, because they may be sent already.
+    pub excluded_waiting: Vec<String>,
     pub stale: usize,
     pub out_of_region: usize,
+    /// Applications Gonza had cleared the region of whose posting no longer says what he saw: parked again in
+    /// `needs_gonza` with the region reason, not withdrawn. They are not counted in `out_of_region`.
+    pub parked_region: usize,
 }
 
-/// The note of an application withdrawn for a region the job cannot be done from. The text before
-/// the colon is the rule that decided it; the stale note is the submission gate's own
-/// (`gate::stale_note`, `stale_posting: aviso de más de N días`).
-const OUT_OF_REGION_NOTE: &str = "fuera_de_region: no se puede hacer desde Chile";
-
-/// Reasons under which a form may have gone out although the application never reached
-/// `Submitted`: the page did not confirm a click, or Gonza finished an assisted form himself and
-/// closed it, or the run that clicked it died before recording the result. Withdrawing such an
-/// application would hide a real submission. The forms Gonza sends by hand
-/// (`handoff::is_sent_by_hand`) are protected the same way: he may have sent one and not yet run
-/// `confirm`, and withdrawn is terminal.
-///
-/// The panel sorts a waiting card by the same prefixes (`reason_kind` in the panel's `snapshot/cards.rs`), so it can
-/// tell Gonza to look before he applies again.
-pub const MAY_HAVE_BEEN_SENT: [&str; 4] = [
-    "unconfirmed_submit",
-    INTERRUPTED_PREFIX,
-    "assist_closed",
-    "assist_timeout",
-];
-
-fn may_have_been_sent(reason: &str) -> bool {
-    is_sent_by_hand(reason)
-        || MAY_HAVE_BEEN_SENT
-            .iter()
-            .any(|prefix| reason.starts_with(prefix))
-}
+/// The reasons under which a form may have gone out although the application never reached
+/// `Submitted` live in the domain (`handoff::MAY_HAVE_BEEN_SENT`, `may_have_been_sent`,
+/// `form_may_have_gone_out`). The panel sorts a waiting card by the same prefixes (`reason_kind`
+/// in the panel's `snapshot/cards.rs`), so it can tell Gonza to look before he applies again.
+pub use jobbot_domain::handoff::MAY_HAVE_BEEN_SENT;
 
 /// Withdraws the applications that were never sent and whose posting is not eligible any more.
 /// Withdrawal is terminal, so the pass only acts on what is clear:
 ///
 /// * Only `Scored`, `Prepared` and `NeedsGonza` applications with no submission and no unconfirmed
 ///   click are looked at (`Tracker::unsent_applications`), minus the `NeedsGonza` ones whose reason
-///   says the form may have gone out, and minus any application with a submit intent still open
+///   says the form may have gone out (for the stale and region rules, the broad
+///   `may_have_been_sent`, which includes the cards he sends by hand), and minus any application with a submit intent still open
 ///   (a run is clicking it or died clicking it). Everything submitted, answered, finished or
 ///   withdrawn stays.
+/// * A posting whose company, domain or category is excluded now (`check_exclusion`: the rule was
+///   added after the posting was queued) is withdrawn with the gate's own `excluded:<kind>` note
+///   (the kind of rule, never its text), after the two reasons below (an application that is stale
+///   or out of region is withdrawn for that reason even if it is excluded too). The submission
+///   gate would withdraw it too, but only once the application reached `prepared` and a run
+///   looked at it. One limit, because withdrawal is terminal: an application whose form may
+///   really have gone out (a click the page did not confirm, a run cut after the click, an
+///   assisted form closed or left open, an open submit intent, or a form recorded as sent by
+///   hand: `handoff::form_may_have_gone_out`) is kept and its key listed in `excluded_waiting`, so
+///   he does not send it again. A plain by-hand card (`listing_only`, `manual_only_platform`,
+///   `handoff`) is not that: it is withdrawn like any other, even though the owner may have sent
+///   it by hand without confirming. The trade-off is decided: such a card is an invitation to
+///   send, and never inviting a send to an excluded company outranks keeping the record of a
+///   send nobody confirmed; a reply from that company then shows up as an unmatched e-mail.
+///   The stale and region rules below use the broader `handoff::may_have_been_sent`, which
+///   keeps those cards.
 /// * A stale posting (the gate's `is_stale_stored`: the posting's date, or for a source that
 ///   publishes none, the day it was first seen) is withdrawn with `stale_posting`. The date needs
 ///   no fresh fetch: the submission gate would withdraw the same row anyway.
 /// * A posting outside the region (`region_ok`) is withdrawn with `fuera_de_region`, but only when
 ///   its key is in `refreshed`: the source returned it in this run, so its location and remote
 ///   flag are what the source says now. A row the sources no longer return keeps the location it
-///   was stored with, which an older version of a source may have read badly.
+///   was stored with, which an older version of a source may have read badly. The submission gate
+///   checks the region of every `prepared` application before a click, on the stored fields
+///   (`gate::decide`), but it does not withdraw: it parks the application in `needs_gonza` with the
+///   same note (`fuera_de_region`) and sends nothing. Withdrawal is terminal and has no undo, the
+///   gate runs before the approval check, and the region rules are still being tuned: a false
+///   positive on stored text must not destroy an approved application for good. Only a fresh fetch
+///   (this pass) withdraws. Except one Gonza sent on past the region check (`had_region_override`): if its posting
+///   no longer says what he saw it is parked again, with a card, never withdrawn (`parked_region`, not counted in
+///   `out_of_region`).
 /// * Eligibility beats the reason an application waits: a `NeedsGonza` application that waits for
-///   Gonza for another reason (missing answers, below the pay floor) is withdrawn too.
+///   Gonza for another reason (missing answers, below the pay floor) is withdrawn too. The one
+///   exception is the application he sent on past the region check: when its posting moves while
+///   it waits for him for another reason, it keeps that card and nothing is written.
 ///
 /// A second pass finds nothing new: withdrawn applications are not looked at again.
-#[tracing::instrument(skip_all, fields(stale = Empty, out_of_region = Empty))]
+#[tracing::instrument(skip_all, fields(excluded = Empty, stale = Empty, out_of_region = Empty, parked_region = Empty))]
 pub fn prune_ineligible(
     criteria: &Criteria,
+    exclusions: &Exclusions,
     tracker: &dyn Store,
     refreshed: &HashSet<String>,
     now: DateTime<Utc>,
@@ -209,19 +231,61 @@ pub fn prune_ineligible(
         .map(|intent| intent.job_key)
         .collect();
     for row in tracker.unsent_applications()? {
-        if clicking.contains(&row.job_key)
-            || (row.state == State::NeedsGonza
-                && row.needs_reason.as_deref().is_some_and(may_have_been_sent))
-        {
-            continue;
-        }
+        let waiting_reason = (row.state == State::NeedsGonza)
+            .then_some(row.needs_reason.as_deref())
+            .flatten();
+        // It may have been sent by hand, or by a click: age and region leave it alone.
+        let may_be_sent =
+            clicking.contains(&row.job_key) || waiting_reason.is_some_and(may_have_been_sent);
+        // A click that may have gone through, or a form recorded as sent: that one really may
+        // have gone out. A plain by-hand card (`listing_only`, `handoff`...) has not: it waits.
+        let gone_out =
+            clicking.contains(&row.job_key) || waiting_reason.is_some_and(form_may_have_gone_out);
         let Some(job) = tracker.get_job(&row.job_key)? else {
             continue;
         };
-        let (note, counter) = if is_stale_stored(&job, tracker, criteria, now)? {
+        // Parked for its region, or cleared by Gonza after he looked at it: a false positive of the region rule must
+        // not undo either (the gate parks instead of withdrawing for the same reason).
+        let region_decided = waiting_reason.is_some_and(is_out_of_region_reason)
+            || tracker.region_override(&row.job_key)?;
+        let exclusion = check_exclusion(&job, exclusions);
+        let region_closed = !may_be_sent
+            && !region_decided
+            && refreshed.contains(&row.job_key)
+            && !region_ok_for(&job, criteria);
+        // He cleared the region of this one before and the posting no longer says what he saw: his decision is not
+        // undone by a withdrawal (final, with no card). It is parked again, so he sees a card and decides again.
+        let had_override = region_closed && tracker.had_region_override(&row.job_key)?;
+        let parks_again = had_override && !exclusion.excluded;
+        // Age and region first, whether or not the company is also excluded: the reason that
+        // needs no rule is the one that goes on record.
+        let (note, counter) = if !may_be_sent && is_stale_stored(&job, tracker, criteria, now)? {
             (stale_note(criteria), &mut report.stale)
-        } else if refreshed.contains(&row.job_key) && !region_ok_for(&job, criteria) {
+        } else if parks_again {
+            // One that already waits for Gonza for another reason keeps the card it has: he reads the posting when he
+            // works that card, and a withdrawal would undo his decision with no card at all.
+            if row.state != State::NeedsGonza {
+                match tracker.transition(
+                    &row.job_key,
+                    State::NeedsGonza,
+                    Some(OUT_OF_REGION_NOTE),
+                    now,
+                ) {
+                    Ok(()) => report.parked_region += 1,
+                    // The panel or `mark` moved it since the list was read: that decision stands.
+                    Err(StoreError::IllegalTransition { .. }) => {}
+                    Err(other) => return Err(other.into()),
+                }
+            }
+            continue;
+        } else if region_closed && !had_override {
             (OUT_OF_REGION_NOTE.to_string(), &mut report.out_of_region)
+        } else if exclusion.excluded && gone_out {
+            // Not withdrawn (it may have gone out already), but Gonza must not send it again.
+            report.excluded_waiting.push(row.job_key);
+            continue;
+        } else if exclusion.excluded {
+            (exclusion_note(&exclusion), &mut report.excluded)
         } else {
             continue;
         };
@@ -232,9 +296,29 @@ pub fn prune_ineligible(
             Err(other) => return Err(other.into()),
         }
     }
+    // A click the page did not confirm leaves the application out of `unsent_applications` (it
+    // may have gone through), and it is the waiting application most likely to be sent already:
+    // it is listed too when its company is excluded now.
+    for row in tracker.list_by_state(State::NeedsGonza)? {
+        let gone_out = row
+            .needs_reason
+            .as_deref()
+            .is_some_and(form_may_have_gone_out);
+        if !gone_out || report.excluded_waiting.contains(&row.job_key) {
+            continue;
+        }
+        let excluded = tracker
+            .get_job(&row.job_key)?
+            .is_some_and(|job| check_exclusion(&job, exclusions).excluded);
+        if excluded {
+            report.excluded_waiting.push(row.job_key);
+        }
+    }
     crate::record_counts(&[
+        ("excluded", report.excluded),
         ("stale", report.stale),
         ("out_of_region", report.out_of_region),
+        ("parked_region", report.parked_region),
     ]);
     Ok(report)
 }
@@ -284,7 +368,8 @@ fn place(
     if scored.total < threshold {
         return Ok(Placement::BelowThreshold);
     }
-    tracker.create_application(&job.key(), now)?;
+    // jobbot found it and applies without contact: the channel is `cold`.
+    tracker.start_application(&job.key(), Origin::Cold, now)?;
     if scored.below_floor && !extra_eligible {
         tracker.transition(&job.key(), State::NeedsGonza, Some(BELOW_FLOOR_NOTE), now)?;
         Ok(Placement::Flagged)
@@ -318,14 +403,18 @@ pub struct RescoreReport {
 )]
 pub fn rescore(
     criteria: &Criteria,
+    exclusions: &Exclusions,
     tracker: &dyn Store,
     now: DateTime<Utc>,
 ) -> anyhow::Result<RescoreReport> {
     let mut report = RescoreReport::default();
     for job in tracker.jobs_without_application()? {
-        // Too old by now, or not doable from Chile: queueing it would only get it withdrawn. It
-        // stays stored, so a later refresh that fixes its data lets a later rescore queue it.
-        if is_stale_stored(&job, tracker, criteria, now)? || !region_ok_for(&job, criteria) {
+        // Excluded since it was stored, too old by now, or not doable from Chile: queueing it
+        // would only get it withdrawn. It stays stored, so a later refresh that fixes its data lets a later rescore queue it.
+        if check_exclusion(&job, exclusions).excluded
+            || is_stale_stored(&job, tracker, criteria, now)?
+            || !region_ok_for(&job, criteria)
+        {
             continue;
         }
         let scored = score_job(&job, criteria);

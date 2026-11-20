@@ -11,8 +11,10 @@ use std::path::PathBuf;
 use anyhow::Result;
 use chrono::{DateTime, Datelike, Months, NaiveTime, TimeDelta, TimeZone, Utc};
 use chrono_tz::America::Santiago;
+use jobbot_domain::gate::{is_out_of_region_reason, region_override_note};
 use jobbot_domain::handoff::is_sent_by_hand;
-use jobbot_domain::models::Job;
+use jobbot_domain::models::{Job, MANUAL_SOURCE};
+use jobbot_domain::origin::Origin;
 use jobbot_domain::outbound::{clean, plain_line};
 use jobbot_domain::prep::Question;
 use jobbot_domain::state::State;
@@ -100,7 +102,7 @@ pub fn explain(error: &StoreError) -> String {
         StoreError::UnknownKey(key) => format!("no existe la postulación {key}"),
         StoreError::IllegalTransition { from, to } => {
             let hint = if from == State::NeedsGonza.as_str() {
-                ". Está en «necesita a Gonza»: usa confirm si ya se envió, o resolve para devolverla a la cola"
+                ". Está en «necesita a Gonza»: usa confirm si ya se envió, o resolve para devolverla a la cola (una que quedó fuera de región vuelve con resolve --send-outside-region)"
             } else {
                 ""
             };
@@ -138,14 +140,50 @@ pub fn approve(tracker: &dyn Store, key: &str) -> Result<Outcome> {
     Ok(Outcome::done(format!("Aprobada: {key}")))
 }
 
+/// What a resolve means. `SendOutsideRegion` is the one act that clears the region check of a card parked for its
+/// region; it is chosen by name, by the "Send anyway" action of that card or by `jobbot resolve --send-outside-region`,
+/// and on a card parked for any other reason it behaves exactly like `Plain`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolveIntent {
+    Plain,
+    SendOutsideRegion,
+}
+
+/// The refusal of a plain resolve of a card parked for its region.
+pub const SEND_ANYWAY_REFUSAL: &str = "Esta postulación está fuera de la región con las reglas de hoy: usa «Enviar igual» en su tarjeta, o retírala.";
+/// What the card answers when it was sent back to the queue (`prepared`) with the region check cleared.
+const SEND_ANYWAY_DONE: &str = "Vuelve a la cola: se enviará sin la revisión de región.";
+/// The same when it has no CV and went back to `scored`, where `prepare` makes the PDF.
+const SEND_ANYWAY_DONE_WITHOUT_CV: &str =
+    "Vuelve a preparación: prepare le hará el PDF y se enviará sin la revisión de región.";
+
 /// Takes an application out of `needs_gonza`: to `prepared` when it has its CV, otherwise to
 /// `scored`, where `prepare` makes the PDF. An application that never got its PDF sent to
 /// `prepared` would only be handed straight back by `submit_all`.
+///
+/// A card parked for its region is different: sending it back to the queue means skipping the region check for
+/// good, so it is never done by a plain resolve (a bulk request, an unattended `jobbot resolve`, a stale page). Only
+/// `ResolveIntent::SendOutsideRegion` does it; a plain resolve of such a card is refused and writes nothing.
+///
+/// Known limit: the override is tied to what the posting says when the request arrives, not to what the page showed
+/// when he pressed. If a refresh changed the location in between, the override records the new one.
 #[tracing::instrument(skip_all, fields(ok = Empty))]
-pub fn resolve(tracker: &dyn Store, key: &str, now: DateTime<Utc>) -> Result<Outcome> {
+pub fn resolve(
+    tracker: &dyn Store,
+    key: &str,
+    now: DateTime<Utc>,
+    intent: ResolveIntent,
+) -> Result<Outcome> {
     let Some(row) = tracker.get_application(key)? else {
         return Ok(not_found(key));
     };
+    let region_card = row
+        .needs_reason
+        .as_deref()
+        .is_some_and(is_out_of_region_reason);
+    if region_card && intent == ResolveIntent::Plain {
+        return Ok(Outcome::refused(SEND_ANYWAY_REFUSAL.to_string()));
+    }
     let (target, message) = if row.cv_path.is_some() {
         (State::Prepared, "De vuelta a la cola")
     } else {
@@ -154,11 +192,30 @@ pub fn resolve(tracker: &dyn Store, key: &str, now: DateTime<Utc>) -> Result<Out
             "De vuelta a puntuadas (sin CV, prepare le hará el PDF)",
         )
     };
-    match tracker.transition(key, target, None, now) {
+    // "I looked at it, send it anyway": the move's own event carries what he saw (`region_override_note`), so the
+    // next run does not park it again while the posting still says the same.
+    let note = if region_card {
+        // An application always has its posting: a missing row is a broken database, not an unknown key.
+        let job = tracker
+            .get_job(&row.job_key)?
+            .ok_or_else(|| anyhow::anyhow!("the posting {} of {key} is not stored", row.job_key))?;
+        Some(region_override_note(&job.location, job.remote))
+    } else {
+        None
+    };
+    match tracker.transition(key, target, note.as_deref(), now) {
         Ok(()) => {
             // Gonza fixed what stopped it: the next run fills the form again and takes a fresh
             // screenshot, and an earlier unconfirmed click no longer holds the company.
             tracker.clear_for_retry(key)?;
+            if region_card {
+                let said = if target == State::Prepared {
+                    SEND_ANYWAY_DONE
+                } else {
+                    SEND_ANYWAY_DONE_WITHOUT_CV
+                };
+                return Ok(Outcome::done(said.to_string()));
+            }
             Ok(Outcome::done(format!("{message}: {key}")))
         }
         // A database failure is a real error; the other variants are just "cannot resolve this one".
@@ -173,7 +230,13 @@ pub fn confirm(tracker: &dyn Store, key: &str, now: DateTime<Utc>) -> Result<Out
     let Some(row) = tracker.get_application(key)? else {
         return Ok(not_found(key));
     };
-    let sent_by_hand = row.needs_reason.as_deref().is_some_and(is_sent_by_hand);
+    // A card parked for its region was never filled by the bot either. `is_sent_by_hand` stays about forms that
+    // may really have gone out (`may_have_been_sent`, the prune and the digest read it); this is only about what
+    // confirming counts as.
+    let sent_by_hand = row
+        .needs_reason
+        .as_deref()
+        .is_some_and(|reason| is_sent_by_hand(reason) || is_out_of_region_reason(reason));
     match tracker.transition(key, State::Submitted, Some("confirmada por Gonza"), now) {
         Ok(()) => {
             // A bot click that Gonza checked is a reviewed submission. A form he sent himself
@@ -363,6 +426,43 @@ pub struct RecordSpec {
     pub salary_min_monthly_usd: Option<f64>,
     pub salary_max_monthly_usd: Option<f64>,
     pub note: Option<String>,
+    /// How the application came about, as typed (`cold`, `referral`, ...). `None` or blank: a new application is
+    /// `unknown`, one that already exists keeps the origin it has.
+    pub origin: Option<String>,
+}
+
+/// The origin Gonza typed: trimmed and lowercased, then `Origin::parse`. `Err` is the refusal to give back.
+fn typed_origin(text: &str) -> Result<Origin, Outcome> {
+    Origin::parse(&text.trim().to_lowercase()).ok_or_else(|| {
+        let names: Vec<&str> = Origin::ALL.iter().map(|origin| origin.as_str()).collect();
+        Outcome::refused(format!(
+            "Origen no válido: {}. Usa uno de: {}",
+            clean(text, 40),
+            names.join(", ")
+        ))
+    })
+}
+
+/// Changes how a stored application came about (`jobbot origin`). Any state: the origin is a fact about how it
+/// began. Repeating it changes nothing. A refusal changes nothing.
+#[tracing::instrument(skip_all, fields(ok = Empty))]
+pub fn set_origin(tracker: &dyn Store, key: &str, origin_text: &str) -> Result<Outcome> {
+    let origin = match typed_origin(origin_text) {
+        Ok(origin) => origin,
+        Err(refusal) => return Ok(refusal),
+    };
+    let Some(before) = tracker.origin_of(key)? else {
+        return Ok(Outcome::refused(format!("No existe la postulación {key}")));
+    };
+    if before == origin {
+        return Ok(Outcome::done(format!(
+            "Sin cambios: {key} ya tenía origen {origin}"
+        )));
+    }
+    tracker.set_origin(key, origin)?;
+    Ok(Outcome::done(format!(
+        "Origen de {key}: {before} → {origin}"
+    )))
 }
 
 /// Puts an application sent outside jobbot into the tracker as `submitted` at `now` (the real
@@ -371,8 +471,25 @@ pub struct RecordSpec {
 /// all know about it. It stays unapproved: a form nobody filled with the bot proves nothing about
 /// the filler. An application already submitted (or later) or withdrawn is refused, and nothing
 /// changes.
+///
+/// How it came about (`RecordSpec::origin`): an invalid origin is refused before anything is written. A given
+/// origin is stored. Without one, an application that was still `scored` when it is recorded (the `scored` to
+/// `needs_gonza` step: new, or queued by discovery but never prepared by jobbot) becomes `unknown`, since nobody
+/// knows the channel; one recorded from `prepared` or `needs_gonza` keeps what it has. This is the migration's
+/// backfill rule too (`add_origin_column`).
 #[tracing::instrument(skip_all, fields(ok = Empty))]
 pub fn record(tracker: &dyn Store, spec: &RecordSpec, now: DateTime<Utc>) -> Result<Outcome> {
+    // Parsed before anything is written: a refused origin must leave no posting and no application behind.
+    let typed = match spec
+        .origin
+        .as_deref()
+        .filter(|text| !text.trim().is_empty())
+        .map(typed_origin)
+        .transpose()
+    {
+        Ok(typed) => typed,
+        Err(refusal) => return Ok(refusal),
+    };
     let key = match &spec.key {
         Some(key) => {
             if tracker.get_job(key)?.is_none() {
@@ -397,7 +514,7 @@ pub fn record(tracker: &dyn Store, spec: &RecordSpec, now: DateTime<Utc>) -> Res
             let base = link_base(&url);
             let id_source = if base.is_empty() { url.clone() } else { base };
             let job = Job {
-                source: "manual".to_string(),
+                source: MANUAL_SOURCE.to_string(),
                 external_id: safe_key(
                     id_source
                         .trim_start_matches("https://")
@@ -424,7 +541,9 @@ pub fn record(tracker: &dyn Store, spec: &RecordSpec, now: DateTime<Utc>) -> Res
             }
         }
     };
-    tracker.create_application(&key, now)?;
+    // What the origin is when nobody typed one: nobody wrote down how a hand-recorded application came about.
+    let origin_when_none_typed = typed.unwrap_or(Origin::Unknown);
+    tracker.start_application(&key, origin_when_none_typed, now)?;
     let Some(row) = tracker.get_application(&key)? else {
         return Ok(not_found(&key));
     };
@@ -441,6 +560,13 @@ pub fn record(tracker: &dyn Store, spec: &RecordSpec, now: DateTime<Utc>) -> Res
             )));
         }
     }
+    // After the state check, so a refused record changes nothing. Given: it wins. Not given: an application
+    // that is still `scored` (new, or queued by discovery but never prepared) is `unknown`, because jobbot had
+    // not prepared it and nobody wrote down how it came about; one that was already `prepared` or waiting
+    // (`needs_gonza`) keeps the origin it has. The same rule as the migration's backfill.
+    if typed.is_some() || row.state == State::Scored {
+        tracker.set_origin(&key, origin_when_none_typed)?;
+    }
     let note = spec
         .note
         .as_deref()
@@ -456,8 +582,9 @@ pub fn record(tracker: &dyn Store, spec: &RecordSpec, now: DateTime<Utc>) -> Res
     }
     let job = tracker.get_job(&key)?;
     let (company, title) = job.map(|job| (job.company, job.title)).unwrap_or_default();
+    let origin = tracker.origin_of(&key)?.unwrap_or(Origin::Unknown);
     Ok(Outcome::done(format!(
-        "Registrada como enviada: {company} — {title} ({key})"
+        "Registrada como enviada: {company} — {title} ({key}); origen: {origin}"
     )))
 }
 

@@ -8,7 +8,7 @@ import { candidates, turnCount, nightFigures, PERMANENT_ACTIONS } from "../../co
 import { ago, daysSince, kindLabel, stateLabel, windowLabel, spendLabel, scoreText, pointsOf } from "../../core/format.js";
 import { dayOf, serverDay, HOUR_MS } from "../../core/time.js";
 import { mailId } from "../../core/diff.js";
-import { keyShown } from "../../ui/keys.js";
+import { keyShownIfAny } from "../../ui/keys.js";
 import { safeHref, clean } from "../shared/util.js";
 import { askOf } from "../shared/stops.js";
 import { indexCards } from "../shared/cards.js";
@@ -27,8 +27,9 @@ export const turnWord = (n) => (Number.isInteger(n) && n >= 0 && n <= SPELLED_UP
 // The label of each action (words that common.js already has) and the verb that is primary for each kind of item (§5.1):
 // a task is done, a proposal is approved, a form the bot could not send is opened (`o`), the rest ask to be looked at (Enter).
 // A form that may already have gone out (`may_have_sent`) is looked at and never opened on its posting: first check whether it was sent.
-export const ACTION_LABEL = { done: "act.done", approve: "act.approve", confirm: "act.confirm", resolve: "act.resolve", open: "act.open", link: "act.viewPosting", snooze: "act.skip", withdraw: "hoy.act.withdraw", register: "hoy.act.register" };
-const PRIMARY = { task: "done", test: "done", interview: "done", approve: "approve", handoff: "link", manual_apply: "link", blocked: "link", may_have_sent: "open", error: "link", missing_answers: "open", offer: "open", followup: "open", other: "open" };
+// One the gate parked outside the region (`out_of_region`) is treated the same way: looked at first, never offered as a form to send.
+export const ACTION_LABEL = { done: "act.done", approve: "act.approve", confirm: "act.confirm", resolve: "act.resolve", send_anyway: "act.send_anyway", open: "act.open", link: "act.viewPosting", snooze: "act.skip", withdraw: "hoy.act.withdraw", register: "hoy.act.register" };
+const PRIMARY = { task: "done", test: "done", interview: "done", approve: "approve", handoff: "link", manual_apply: "link", blocked: "link", may_have_sent: "open", out_of_region: "open", error: "link", missing_answers: "open", offer: "open", followup: "open", other: "open" };
 const PERMANENT = new Set([...PERMANENT_ACTIONS, "done"]);          // what the drawer asks twice for, and finishing a task
 const MOVES_SHOWN = new Set(["submitted", "replied", "technical_test", "interview", "offer", "rejected", "needs_gonza"]);
 
@@ -37,8 +38,8 @@ const SAYS_NOTHING = /\b(?:null|undefined|NaN)\b/;
 const sane = (text) => (SAYS_NOTHING.test(text) ? "" : text);
 const whole = (x) => Math.max(0, Math.trunc(Number(x) || 0));
 
-// The key of an action as HOY draws it (ui/keys.js, which also names this room in its error).
-const keyOf = (id) => keyShown(id, { room: "hoy" });
+// The key of an action as HOY draws it (ui/keys.js); an action with no key, such as "send anyway", is drawn with none.
+const keyOf = (id) => keyShownIfAny(id, { room: "hoy" });
 
 /** The ids of what can be done to a candidate, in the order the keys are listed. */
 function actionIds(c, card) {

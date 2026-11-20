@@ -55,7 +55,10 @@ pub(super) fn seen_at(
         .add_job(&job, score, &BTreeMap::new(), seen)
         .unwrap();
     if let Some(walk) = walk {
-        panel.tracker.create_application(&job.key(), seen).unwrap();
+        panel
+            .tracker
+            .start_application(&job.key(), jobbot_domain::origin::Origin::Cold, seen)
+            .unwrap();
         for state in walk {
             panel
                 .tracker

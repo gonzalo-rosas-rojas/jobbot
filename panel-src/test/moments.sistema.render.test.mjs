@@ -66,3 +66,70 @@ test("a second snapshot keeps the rows of the sources table and of the errors li
     errors.forEach((li, i) => assert.equal(errorsAgain[i], li, "the same error node"));
   } finally { done(); }
 });
+
+test("the switch marks the pressed view and a click asks for it", async () => {
+  setLang("es");
+  setTimeZone("America/Santiago");
+  dom.reset();
+  const { createSistema } = await import("../src/moments/sistema/render.js");
+  const { sistemaView } = await import("../src/moments/sistema/view.js");
+  const asked = [];
+  const ui = createSistema({ run() {}, open() {}, funnelBy: (id) => asked.push(id) });
+  const host = dom.document.createElement("div");
+  dom.document.body.append(host);
+  host.append(ui.el);
+  const pressed = () => [...ui.el.querySelectorAll("button[data-funnel-by]")].map((b) => [b.dataset.funnelBy, b.getAttribute("aria-pressed")]);
+  ui.patch(sistemaView(model(snap), { nowMs }));
+  assert.deepEqual(pressed(), [["source", "true"], ["origin", "false"], ["region", "false"]]);
+  assert.equal(ui.el.querySelectorAll("tr[data-src]").length, 3, "the boards");
+  ui.el.querySelector('button[data-funnel-by="origin"]').click();
+  assert.deepEqual(asked, ["origin"], "the click asks for the view; the moment decides");
+  ui.patch(sistemaView(model(snap), { nowMs, by: "origin" }));
+  assert.deepEqual(pressed(), [["source", "false"], ["origin", "true"], ["region", "false"]]);
+  assert.equal(ui.el.querySelectorAll("tr[data-src]").length, 4, "the origins");
+  assert.equal(ui.el.querySelectorAll("tr[data-src]")[0].querySelectorAll("td").length, 4, "four numbers in a row");
+  assert.equal(ui.el.querySelectorAll("thead th").length, 5, "the board's column and four numbers");
+});
+
+test("the drawn by-board note says a rejection counts as an answer, in both languages", async () => {
+  const { createSistema } = await import("../src/moments/sistema/render.js");
+  const { sistemaView } = await import("../src/moments/sistema/view.js");
+  const drawn = {
+    es: "Un rechazo tambi\u00e9n cuenta como respuesta.",
+    en: "A rejection also counts as an answer.",
+  };
+  try {
+    for (const [lang, sentence] of Object.entries(drawn)) {
+      setLang(lang);
+      setTimeZone("America/Santiago");
+      dom.reset();
+      const ui = createSistema({ run() {}, open() {}, funnelBy() {} });
+      const host = dom.document.createElement("div");
+      dom.document.body.append(host);
+      host.append(ui.el);
+      ui.patch(sistemaView(model(snap), { nowMs, by: "source" }));
+      const note = ui.el.querySelector('[data-block="sources"] .note');
+      assert.ok(note && !note.hidden, lang + ": the by-board note is drawn");
+      assert.ok(note.textContent.endsWith(sentence), `${lang}: ${note.textContent}`);
+    }
+  } finally { setLang("es"); }
+});
+
+test("the funnel note has the funnel-note class and the errors note does not", async () => {
+  const { createSistema } = await import("../src/moments/sistema/render.js");
+  const { sistemaView } = await import("../src/moments/sistema/view.js");
+  setLang("es");
+  setTimeZone("America/Santiago");
+  dom.reset();
+  const ui = createSistema({ run() {}, open() {}, funnelBy() {} });
+  const host = dom.document.createElement("div");
+  dom.document.body.append(host);
+  host.append(ui.el);
+  ui.patch(sistemaView(model(snap), { nowMs }));
+  const funnel = ui.el.querySelectorAll(".funnel-note");
+  assert.equal(funnel.length, 1);
+  assert.ok(funnel[0].classList.contains("note") && funnel[0].classList.contains("label"), "it keeps the classes it had");
+  assert.ok(funnel[0].closest('[data-block="sources"]'));
+  const errorsNote = ui.el.querySelector('[data-block="errors"] .note');
+  assert.ok(errorsNote && !errorsNote.classList.contains("funnel-note"));
+});

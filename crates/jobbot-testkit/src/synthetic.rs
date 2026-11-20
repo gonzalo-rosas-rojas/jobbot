@@ -457,7 +457,7 @@ pub fn load(set: &SyntheticSet, tracker: &Tracker, now: DateTime<Utc>) -> Result
         tracker.add_job(job, *score, &detail, first_seen(job, now))?;
     }
     for app in &set.applications {
-        tracker.create_application(&app.job_key, app.started)?;
+        tracker.start_cold_for_tests(&app.job_key, app.started)?;
         for (step, state) in (1i64..).zip(&app.moves) {
             let at = (app.started + Duration::hours(7 * step)).min(now);
             let note = if *state == State::NeedsGonza {

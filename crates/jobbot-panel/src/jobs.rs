@@ -233,7 +233,9 @@ mod tests {
         p.tracker
             .add_job(&job, posting.score, &BTreeMap::new(), *NOW)
             .unwrap();
-        p.tracker.create_application(&job.key(), *NOW).unwrap();
+        p.tracker
+            .start_application(&job.key(), jobbot_domain::origin::Origin::Cold, *NOW)
+            .unwrap();
         let path: &[State] = match posting.state {
             State::Scored => &[],
             State::Prepared => &[State::Prepared],

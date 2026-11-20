@@ -215,12 +215,13 @@ fn an_application_sent_by_hand_can_be_recorded_from_the_page() {
         message.starts_with("Registrada como enviada: Acme — Backend Engineer (manual:"),
         "{message}"
     );
-    let key = message
-        .rsplit('(')
-        .next()
-        .unwrap()
-        .trim_end_matches(')')
-        .to_string();
+    let submitted = p.tracker.list_by_state(State::Submitted).unwrap();
+    assert_eq!(submitted.len(), 1, "only the recorded one is sent");
+    let key = submitted[0].job_key.clone();
+    assert!(
+        message.contains(&key),
+        "the message names the key: {message}"
+    );
     let row = p.tracker.get_application(&key).unwrap().unwrap();
     assert_eq!(row.state, State::Submitted);
     assert_eq!(
@@ -275,6 +276,57 @@ fn an_application_sent_by_hand_can_be_recorded_from_the_page() {
     assert_eq!(
         handle(&p, &guard(), &request("GET", "/api/record", "")).status,
         405
+    );
+}
+
+#[test]
+fn an_application_sent_by_hand_can_be_recorded_from_the_page_with_its_origin() {
+    let (p, _d) = panel();
+    let reply = post_value(
+        &p,
+        "/api/record",
+        serde_json::json!({
+            "company": "Acme",
+            "title": "Backend Engineer",
+            "url": "https://jobs.example.com/acme/42",
+            "origin": "agency",
+        }),
+    );
+    assert_eq!(reply.status, 200, "{}", text(&reply));
+    let key = p.tracker.list_by_state(State::Submitted).unwrap()[0]
+        .job_key
+        .clone();
+    assert_eq!(
+        p.tracker.origin_of(&key).unwrap(),
+        Some(jobbot_domain::origin::Origin::Agency)
+    );
+}
+
+#[test]
+fn a_record_from_the_page_with_an_unknown_origin_is_a_409() {
+    let (p, _d) = panel();
+    let reply = post_value(
+        &p,
+        "/api/record",
+        serde_json::json!({
+            "company": "Acme",
+            "title": "Backend Engineer",
+            "url": "https://jobs.example.com/acme/42",
+            "origin": "amigo",
+        }),
+    );
+    assert_eq!(reply.status, 409, "{}", text(&reply));
+    assert!(
+        json_of(&reply)["message"]
+            .as_str()
+            .unwrap()
+            .starts_with("Origen no válido: amigo."),
+        "{}",
+        text(&reply)
+    );
+    assert!(
+        p.tracker.counts().unwrap().is_empty(),
+        "nothing was written"
     );
 }
 
@@ -374,6 +426,89 @@ fn resolve_and_confirm_take_batches() {
         (state(&c), state(&d), state(&e)),
         (State::Scored, State::Scored, State::Submitted)
     );
+}
+
+/// An application parked for its region, as the gate leaves it.
+fn parked_for_region(p: &Panel, name: &str) -> String {
+    let key = add(p, name, 60.0, &[]);
+    p.tracker
+        .transition(
+            &key,
+            State::NeedsGonza,
+            Some(jobbot_domain::gate::OUT_OF_REGION_NOTE),
+            *jobbot_domain::fixtures::NOW,
+        )
+        .unwrap();
+    key
+}
+
+#[test]
+fn a_batch_resolve_refuses_the_region_card_and_resolves_the_others() {
+    let (p, _d) = panel();
+    let c = add(&p, "c", 60.0, &[State::Prepared, State::NeedsGonza]);
+    let region = parked_for_region(&p, "r");
+    let d = add(&p, "d", 60.0, &[State::Prepared, State::NeedsGonza]);
+
+    let reply = post_value(
+        &p,
+        "/api/resolve",
+        serde_json::json!({ "keys": [c, region, d] }),
+    );
+
+    assert_eq!(reply.status, 409, "{}", text(&reply));
+    let body = json_of(&reply);
+    assert_eq!(body["message"], "2 de 3 con éxito");
+    assert_eq!(body["results"][1]["ok"], false);
+    assert!(
+        body["results"][1]["message"]
+            .as_str()
+            .unwrap()
+            .contains("«Enviar igual»")
+    );
+    let row = |key: &str| p.tracker.get_application(key).unwrap().unwrap();
+    assert_eq!(row(&c).state, State::Scored);
+    assert_eq!(row(&d).state, State::Scored);
+    assert_eq!(row(&region).state, State::NeedsGonza);
+    assert!(!p.tracker.region_override(&region).unwrap());
+}
+
+#[test]
+fn send_anyway_takes_one_region_card_back_with_its_override_and_never_a_batch() {
+    let (p, _d) = panel();
+    let region = parked_for_region(&p, "r");
+    let other = parked_for_region(&p, "s");
+
+    let batch = post_value(
+        &p,
+        "/api/send_anyway",
+        serde_json::json!({ "keys": [region, other] }),
+    );
+    assert_eq!(batch.status, 400, "{}", text(&batch));
+    assert!(!p.tracker.region_override(&region).unwrap());
+
+    let one = post_value(&p, "/api/send_anyway", serde_json::json!({ "key": region }));
+    assert_eq!(one.status, 200, "{}", text(&one));
+    assert_eq!(
+        json_of(&one)["message"],
+        "Vuelve a preparación: prepare le hará el PDF y se enviará sin la revisión de región."
+    );
+    assert!(p.tracker.region_override(&region).unwrap());
+    assert!(!p.tracker.region_override(&other).unwrap());
+}
+
+#[test]
+fn send_anyway_on_a_card_with_another_reason_is_a_plain_resolve() {
+    let (p, _d) = panel();
+    let c = add(&p, "c", 60.0, &[State::Prepared, State::NeedsGonza]);
+
+    let reply = post_value(&p, "/api/send_anyway", serde_json::json!({ "key": c }));
+
+    assert_eq!(reply.status, 200, "{}", text(&reply));
+    assert_eq!(
+        p.tracker.get_application(&c).unwrap().unwrap().state,
+        State::Scored
+    );
+    assert!(!p.tracker.region_override(&c).unwrap());
 }
 
 #[test]

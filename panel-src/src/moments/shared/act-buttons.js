@@ -6,7 +6,8 @@ import { actButton, setActLabel } from "../../ui/act.js";
 import { setData } from "./util.js";
 import { setText } from "../../core/dom.js";
 
-const buttonOf = (a) => actButton({ key: a.key, label: a.label, primary: a.primary, "data-action": a.id, title: a.title || null });
+// An action with no key ("" from keyShownIfAny) is drawn with no key cap at all: to actButton an empty key means "a cap to fill later".
+const buttonOf = (a) => actButton({ key: a.key === "" ? undefined : a.key, label: a.label, primary: a.primary, "data-action": a.id, title: a.title || null });
 
 /**
  * patchActButtons(box, memo, actions, { armed, what, ariaKey })

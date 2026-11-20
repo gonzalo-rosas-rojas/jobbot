@@ -101,7 +101,7 @@ impl Db {
 
     /// An application of `job` moved to `Submitted` at `at`.
     fn submit(&self, job: &Job, at: DateTime<Utc>) {
-        self.tracker.create_application(&job.key(), at).unwrap();
+        self.tracker.start_cold_for_tests(&job.key(), at).unwrap();
         for state in [State::Prepared, State::Submitted] {
             self.tracker
                 .transition(&job.key(), state, None, at)
@@ -111,7 +111,7 @@ impl Db {
 
     /// An application of `job` moved to `Submitted` by hand at `at`, so it can be taken back.
     fn mark_submitted(&self, job: &Job, at: DateTime<Utc>) {
-        self.tracker.create_application(&job.key(), at).unwrap();
+        self.tracker.start_cold_for_tests(&job.key(), at).unwrap();
         self.tracker
             .transition(&job.key(), State::Prepared, None, at)
             .unwrap();
@@ -381,7 +381,7 @@ fn updated_at_read_from(stored: &str) -> jobbot_store::tracker::Result<DateTime<
     let db = Db::new();
     let job = db.add_job("1", "Acme", march_first(9, 0, 0, 0), None);
     db.tracker
-        .create_application(&job.key(), march_first(9, 0, 0, 0))
+        .start_cold_for_tests(&job.key(), march_first(9, 0, 0, 0))
         .unwrap();
     db.execute("UPDATE applications SET updated_at = ?1", stored);
     db.tracker
@@ -541,7 +541,7 @@ fn a_snooze_ending_inside_the_second_of_now_is_already_over() {
     let db = Db::new();
     let job = db.add_job("1", "Acme", march_first(11, 0, 0, 0), None);
     db.tracker
-        .create_application(&job.key(), march_first(11, 0, 0, 0))
+        .start_cold_for_tests(&job.key(), march_first(11, 0, 0, 0))
         .unwrap();
     db.tracker
         .set_snoozed_until(&job.key(), Some(march_first(12, 0, 0, 900_000_000)))

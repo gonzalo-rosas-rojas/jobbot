@@ -154,13 +154,22 @@ pub enum RulesError {
     },
 }
 
-/// Parses the text of `exclusions.toml`. Domains are lowercased.
+/// Parses the text of `exclusions.toml`. Entries are trimmed and the ones left blank are dropped
+/// (so that a stray empty line in the file is not kept as an entry); domains are lowercased.
 pub fn parse_exclusions(text: &str) -> Result<Exclusions, RulesError> {
     let mut rules: Exclusions = toml::from_str(text).map_err(RulesError::Exclusions)?;
-    rules.domains = rules
-        .domains
+    let trimmed = |entries: &[String]| -> Vec<String> {
+        entries
+            .iter()
+            .map(|entry| entry.trim().to_string())
+            .filter(|entry| !entry.is_empty())
+            .collect()
+    };
+    rules.names = trimmed(&rules.names);
+    rules.categories = trimmed(&rules.categories);
+    rules.domains = trimmed(&rules.domains)
         .iter()
-        .map(|d| d.trim().to_lowercase())
+        .map(|domain| domain.to_lowercase())
         .collect();
     Ok(rules)
 }
@@ -453,5 +462,18 @@ other = 10
         let ex = parse_exclusions("domains = [\" Harborlight-Shipping.com \"]").unwrap();
         assert_eq!(ex.domains, vec!["harborlight-shipping.com".to_string()]);
         assert!(ex.names.is_empty() && ex.categories.is_empty());
+    }
+
+    #[test]
+    fn exclusion_entries_are_trimmed_and_blank_ones_dropped() {
+        let ex = parse_exclusions(
+            "names = [\"  Blocked Co \", \"\", \"   \"]\n\
+             domains = [\" \", \"blocked.example\"]\n\
+             categories = [\"  gambling\", \"\\t\", \"\"]",
+        )
+        .unwrap();
+        assert_eq!(ex.names, vec!["Blocked Co".to_string()]);
+        assert_eq!(ex.domains, vec!["blocked.example".to_string()]);
+        assert_eq!(ex.categories, vec!["gambling".to_string()]);
     }
 }

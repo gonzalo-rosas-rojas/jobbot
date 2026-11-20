@@ -11,7 +11,7 @@ use super::{EmailKind, NewEmail, NewTask, State, Tracker};
 /// Stores `job` and walks its application to `Prepared`.
 fn prepare(t: &Tracker, job: &Job) {
     t.add_job(job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-    t.create_application(&job.key(), *NOW).unwrap();
+    t.start_cold_for_tests(&job.key(), *NOW).unwrap();
     t.transition(&job.key(), State::Prepared, None, *NOW)
         .unwrap();
 }
@@ -46,7 +46,7 @@ pub(super) fn tracker_with_prepared(ids: &[&str]) -> Tracker {
         tracker
             .add_job(&job, 70.0, &Default::default(), *NOW)
             .unwrap();
-        tracker.create_application(&job.key(), *NOW).unwrap();
+        tracker.start_cold_for_tests(&job.key(), *NOW).unwrap();
         tracker
             .transition(&job.key(), State::Prepared, None, *NOW)
             .unwrap();
@@ -63,7 +63,7 @@ pub(super) fn three_scored(t: &Tracker, now: DateTime<Utc>) {
             j.title = format!("Role {i}");
         });
         t.add_job(&job, score, &BTreeMap::new(), now).unwrap();
-        t.create_application(&job.key(), now).unwrap();
+        t.start_cold_for_tests(&job.key(), now).unwrap();
     }
 }
 
@@ -106,7 +106,7 @@ pub(super) fn stored_at(
     });
     t.add_job(&job, score, &BTreeMap::new(), seen).unwrap();
     if !walk.is_empty() {
-        t.create_application(&job.key(), seen).unwrap();
+        t.start_cold_for_tests(&job.key(), seen).unwrap();
         for state in walk {
             t.transition(&job.key(), *state, None, seen).unwrap();
         }

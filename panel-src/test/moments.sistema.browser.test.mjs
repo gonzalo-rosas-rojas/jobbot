@@ -210,6 +210,33 @@ test("limits: read only and honest, the batch threshold is 'sin dato' until some
   } finally { await t.close(); }
 });
 
+// ---- the funnel table can be read by board, origin or region ---------------------------------------------------------------------------
+
+test("the funnel switch: seven origins fit the sheet without a scroll, and the narrow page shows four labelled numbers per row", async () => {
+  const t = await open({ width: 1920, height: 1080 });
+  try {
+    await load(t, "night");
+    await ev(t, `window.__lab.refresh((s) => { s.funnel.by_origin = Object.fromEntries(["cold", "referral", "recruiter", "agency", "platform", "direct", "unknown"].map((id, i) => [id, { n: 30 - i, sent: 9 - i, answered: 3, rejected: 1, tests: 0, interviews: 0, offers: 0 }])); })`);
+    await ev(t, `document.querySelector('button[data-funnel-by="origin"]').click()`);
+    await t.page.wait(300);
+    const read = () => ev(t, `(() => { const host = document.querySelector("#host"); const rows = [...document.querySelectorAll(".sources-table tbody tr")];
+      return { fits: host.scrollHeight <= host.clientHeight, rows: rows.length, cells: rows.map((r) => r.querySelectorAll("td").length), labelled: rows.every((r) => [...r.querySelectorAll("td")].every((td) => td.dataset.label)),
+        head: [...document.querySelectorAll(".sources-table thead th")].map((th) => th.textContent), pressed: [...document.querySelectorAll("button[data-funnel-by]")].filter((b) => b.getAttribute("aria-pressed") === "true").map((b) => b.dataset.funnelBy),
+        grid: rows.length ? getComputedStyle(rows[0]).gridTemplateColumns.split(" ").length : 0, wide: document.documentElement.scrollWidth <= window.innerWidth }; })()`);
+    const desk = await read();
+    assert.equal(desk.fits, true, "seven origins give way row by row, the sheet does not scroll");
+    assert.ok(desk.rows >= 2 && desk.cells.every((n) => n === 4), JSON.stringify(desk));
+    assert.deepEqual([desk.head[0], desk.head.length, desk.pressed], ["origen", 5, ["origin"]]);
+    await t.page.viewport(390, 844, { dpr: 1, mobile: true });
+    await t.page.wait(300);
+    const phone = await read();
+    assert.equal(phone.labelled, true, "each number says what it counts");
+    assert.equal(phone.grid, 4, "four numbers under their names");
+    assert.equal(phone.wide, true, "no sideways scroll");
+    assert.deepEqual(t.page.problems(), []);
+  } finally { await t.close(); }
+});
+
 // ---- the lists give way when the sheet has no room -------------------------------------------------------------------------------------
 
 test("a night with many errors and boards: the lists are cut to what fits, say how many more, and fill the room when it grows, with no scroll at any size", async () => {
@@ -349,6 +376,9 @@ test("each error of a card has an Abrir that opens it; the error of the run has 
     await ev(t, `window.__lab.refresh((s) => { s.controls.last_run_result = "error: boom"; })`);
     const rows = await ev(t, `[...document.querySelectorAll(".err")].map((e) => [e.dataset.rowId, !!e.querySelector("button[data-open]"), e.querySelector(".err-hour").textContent])`);
     assert.equal(rows[0][0], "run");
+    // at the default 1920x1080, after a failed run, a card error and its Abrir are still on the sheet and in view
+    const visible = await ev(t, `(() => { const host = document.querySelector("#host").getBoundingClientRect(); return [...document.querySelectorAll(".err[data-row-id] button[data-open]")].filter((b) => { const r = b.getBoundingClientRect(); return r.width > 0 && r.top >= host.top && r.bottom <= host.bottom; }).length; })()`);
+    assert.ok(visible >= 1, "a card error with its Abrir is visible at 1920x1080 after a failed run");
     assert.equal(rows[0][1], false, "the run itself is not a card");
     assert.ok(rows.slice(1).every(([, hasButton]) => hasButton));
     assert.ok(rows.every(([, , hour]) => /^\d\d:\d\d$/.test(hour)));

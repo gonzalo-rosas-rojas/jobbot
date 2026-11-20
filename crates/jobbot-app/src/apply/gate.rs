@@ -4,10 +4,11 @@
 use std::path::Path;
 
 use chrono::{DateTime, TimeDelta, Utc};
-use jobbot_domain::exclusion::check_exclusion;
+use jobbot_domain::exclusion::{check_exclusion, exclusion_note};
 use jobbot_domain::models::Job;
+use jobbot_domain::region::region_ok_with;
 use jobbot_domain::rules::{Criteria, Exclusions};
-use jobbot_domain::text::normalize;
+use jobbot_domain::text::company_identity;
 
 use crate::ports::store::{ApplicationRow, Store};
 
@@ -36,11 +37,11 @@ fn in_warmup_hold(
     criteria: &Criteria,
     now: DateTime<Utc>,
 ) -> anyhow::Result<bool> {
-    let company = normalize(&job.company);
+    let company = company_identity(&job.company);
     if !criteria
         .priority_companies
         .iter()
-        .any(|name| normalize(name) == company)
+        .any(|name| company_identity(name) == company)
     {
         return Ok(false);
     }
@@ -98,18 +99,30 @@ fn decide(
     if stop_file.exists() {
         return Ok(GateDecision::block("stop_file"));
     }
-    if is_manual_only(&job.apply_url) || is_manual_only(&job.url) {
+    // First of the rules about the posting itself: an excluded company is withdrawn, whereas the
+    // two checks below send the application to Gonza as a form to fill by hand, which an excluded
+    // company must never be.
+    let exclusion = check_exclusion(job, exclusions);
+    if exclusion.excluded {
+        return Ok(GateDecision::block(exclusion_note(&exclusion)));
+    }
+    // Outside the region by today's rules: not sent. The submission flow parks it with Gonza (`needs_gonza`, with
+    // the region note) instead of withdrawing it: withdrawal is terminal and this check runs before the approval
+    // check, so a false positive of a rule that is still being tuned would destroy an approved application.
+    // Placed before the by-hand checks so that a posting he cannot take is not offered as a form to send by hand.
+    // Unless Gonza already looked at this one and said to send it anyway ("Send anyway" on its parked card, or
+    // `jobbot resolve KEY --send-outside-region`): that clears this check and no other, while the posting still says
+    // what he saw.
+    if !region_ok_with(job, &criteria.extra_open_places)
+        && !tracker.region_override(&app.job_key)?
+    {
+        return Ok(GateDecision::block(REASON_OUT_OF_REGION));
+    }
+    if is_manual_only_posting(job) {
         return Ok(GateDecision::block(REASON_MANUAL_ONLY));
     }
     if is_listing_only(&job.apply_url) {
         return Ok(GateDecision::block(REASON_LISTING_ONLY));
-    }
-    let exclusion = check_exclusion(job, exclusions);
-    if exclusion.excluded {
-        return Ok(GateDecision::block(format!(
-            "excluded:{}",
-            exclusion.reason.unwrap_or_default()
-        )));
     }
     // An old posting is probably filled, and applying would also burn the company cooldown.
     if is_stale_stored(job, tracker, criteria, now)? {
@@ -130,7 +143,7 @@ fn decide(
         return Ok(GateDecision::block("daily_cap"));
     }
     if tracker.company_in_cooldown(
-        &normalize(&job.company),
+        &company_identity(&job.company),
         criteria.company_cooldown_days,
         now,
     )? {
@@ -158,6 +171,20 @@ mod tests {
             "https://example.com/apply?ref=linkedin.com"
         ));
         assert!(!is_manual_only(""));
+    }
+
+    #[test]
+    fn a_posting_is_manual_only_by_its_own_link_or_by_its_apply_link() {
+        let at = |url: &str, apply_url: &str| Job {
+            url: url.into(),
+            apply_url: apply_url.into(),
+            ..Job::default()
+        };
+        let upwork = "https://www.upwork.com/jobs/1";
+        let own = "https://boards.example.com/jobs/1";
+        assert!(is_manual_only_posting(&at(upwork, own)));
+        assert!(is_manual_only_posting(&at(own, upwork)));
+        assert!(!is_manual_only_posting(&at(own, own)));
     }
 
     #[test]

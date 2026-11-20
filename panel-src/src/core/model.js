@@ -14,8 +14,8 @@ export const CLOSED = ["accepted", "rejected", "withdrawn"];
 export const SENT_STATES = [...STAGES, "accepted", "rejected", "ghosted"];
 // The kinds of "needs Gonza", in the order they are shown; `approve` is the awaiting-approval list. `may_have_sent` (the form may
 // already have gone out) sits right after `blocked`: it is as visible as the other things that stopped the robot, and always
-// before the generic `other`. A kind that is not in this list is not in the queue at all, so a new kind of the server is added here.
-export const REASON_KINDS = ["approve", "handoff", "missing_answers", "blocked", "may_have_sent", "error", "manual_apply", "other"];
+// before the generic `other`. `out_of_region` (the gate parked it: outside the region by the rules of today) follows it, as cautious. A kind that is not in this list is not in the queue at all, so a new kind of the server is added here.
+export const REASON_KINDS = ["approve", "handoff", "missing_answers", "blocked", "may_have_sent", "out_of_region", "error", "manual_apply", "other"];
 // The five layers between a posting and a send (the story's); the names are `layer.<id>`.
 export const LAYERS = ["aviso", "puntaje", "cv", "respuestas", "compuerta"];
 // The layers a card can wait in, found by name so reordering LAYERS cannot leave a wrong number behind.
@@ -25,12 +25,12 @@ const GATE = LAYERS.indexOf("compuerta");
 export const STALE_DAYS = 10;
 // Actions and marks that cannot be undone: the button needs a second, deliberate click (see twoStep in dom.js). `resolve` is here because the server has no way
 // back from it: it clears the capture and the unconfirmed click before the next run fills the form again.
-export const PERMANENT_ACTIONS = ["approve", "confirm", "resolve"];
+export const PERMANENT_ACTIONS = ["approve", "confirm", "resolve", "send_anyway"];
 export const PERMANENT_MARKS = ["withdrawn", "rejected", "accepted"];
 
 // What each id of a candidate's `kindId` is (the label is T16's, by i18n): a task, a task that came from a technical-test or
 // an interview email, an offer, a proposal to approve, the reasons a posting needs Gonza (REASON_KINDS), and a follow-up.
-export const KIND_IDS = ["task", "test", "interview", "offer", "approve", "handoff", "missing_answers", "blocked", "may_have_sent", "error", "manual_apply", "other", "followup"];
+export const KIND_IDS = ["task", "test", "interview", "offer", "approve", "handoff", "missing_answers", "blocked", "may_have_sent", "out_of_region", "error", "manual_apply", "other", "followup"];
 const TASK_KIND = { technical_test: "test", interview_invite: "interview" };
 
 export function countOf(s, state) {

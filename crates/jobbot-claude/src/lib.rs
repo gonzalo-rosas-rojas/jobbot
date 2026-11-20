@@ -69,7 +69,17 @@ const CHILD_ENV_REMOVED_ALSO: [&str; 4] = [
     "CLOUD_ML_REGION",
 ];
 
-/// True for a variable the child must not inherit (see the three constants above).
+/// Variables that would silently override a setting this program passes as a flag. Per the CLI's
+/// documentation `CLAUDE_CODE_EFFORT_LEVEL` outranks `--effort`, so a value in the parent's
+/// environment would decide the child's reasoning effort whatever `claude.toml` says. An explicit
+/// list on purpose, not a `CLAUDE_CODE_` prefix: the CLI reads others at start-up on Windows (for
+/// example `CLAUDE_CODE_GIT_BASH_PATH`). Removed even when not set.
+const CHILD_ENV_REMOVED_SETTINGS: [&str; 1] = ["CLAUDE_CODE_EFFORT_LEVEL"];
+
+/// True for a variable the child must not inherit because it picks the account or the bill: one
+/// that starts with a name of `CHILD_ENV_REMOVED_PREFIXES` or is a name of
+/// `CHILD_ENV_REMOVED_ALSO`. (`CHILD_ENV_REMOVED` and `CHILD_ENV_REMOVED_SETTINGS` are removed by
+/// name in `scrub_env`, whether or not the parent has them.)
 fn picks_account_or_bill(name: &str) -> bool {
     let upper = name.to_ascii_uppercase();
     CHILD_ENV_REMOVED_PREFIXES
@@ -342,6 +352,10 @@ pub fn build_args(config: &ClaudeConfig, req: &ClaudeRequest) -> Vec<String> {
         "--system-prompt".to_string(),
         req.system.clone(),
     ]);
+    if let Some(effort) = &config.effort {
+        args.push("--effort".to_string());
+        args.push(effort.clone());
+    }
     if let Some(schema) = &req.schema {
         args.push("--json-schema".to_string());
         args.push(schema.to_string());
@@ -552,14 +566,18 @@ impl CliClaude {
 
     /// The environment every child gets, whatever it is asked to do: nothing that picks another
     /// account or bill (`picks_account_or_bill`), then this program's own config folder, then
-    /// `CHILD_ENV`. The four names of `CHILD_ENV_REMOVED` are removed even when they are not set:
-    /// nothing can put them there between now and the spawn.
+    /// `CHILD_ENV`. The names of `CHILD_ENV_REMOVED` and `CHILD_ENV_REMOVED_SETTINGS` are removed
+    /// even when they are not set, so a value that appears in the parent between this check and the
+    /// spawn still never reaches the child.
     fn scrub_env(
         &self,
         command: &mut Command,
         env_names: impl IntoIterator<Item = std::ffi::OsString>,
     ) {
         for key in CHILD_ENV_REMOVED {
+            command.env_remove(key);
+        }
+        for key in CHILD_ENV_REMOVED_SETTINGS {
             command.env_remove(key);
         }
         for name in env_names {
@@ -1219,6 +1237,46 @@ mod tests {
         assert!(
             !args.iter().any(|a| a.contains("SECRET PROMPT TEXT")),
             "the prompt travels through stdin, never on the command line"
+        );
+    }
+
+    #[test]
+    fn effort_is_passed_only_when_the_config_sets_it() {
+        let flag_value = |config: &ClaudeConfig| {
+            let args = build_args(config, &request());
+            args.windows(2)
+                .find(|w| w[0] == "--effort")
+                .map(|w| w[1].clone())
+        };
+        assert_eq!(flag_value(&ClaudeConfig::default()), None);
+        let config = ClaudeConfig {
+            effort: Some("high".to_string()),
+            ..ClaudeConfig::default()
+        };
+        assert_eq!(flag_value(&config).as_deref(), Some("high"));
+    }
+
+    #[test]
+    fn the_child_never_inherits_the_effort_variable_which_outranks_the_flag() {
+        let dir = tempfile::tempdir().unwrap();
+        let runner = CliClaude::with_program(
+            ClaudeConfig::default(),
+            std::path::PathBuf::from("claude"),
+            Vec::new(),
+            dir.path().to_path_buf(),
+            dir.path().join("claude-config"),
+        );
+        // Removed even when the parent does not set it (the removal is explicit, not a scan of
+        // the parent's names); its sibling variables are left alone.
+        let command = runner.prepare_command_in(
+            &request(),
+            ["CLAUDE_CODE_GIT_BASH_PATH"].map(std::ffi::OsString::from),
+        );
+        let envs = envs_of(&command);
+        assert_eq!(envs.get("CLAUDE_CODE_EFFORT_LEVEL"), Some(&None));
+        assert!(
+            !envs.contains_key("CLAUDE_CODE_GIT_BASH_PATH"),
+            "the CLI reads this one at start-up on Windows"
         );
     }
 

@@ -149,7 +149,7 @@ mod tests {
         ];
         for (i, (_, job)) in postings().into_iter().enumerate() {
             t.add_job(&job, 80.0, &BTreeMap::new(), open_now()).unwrap();
-            t.create_application(&job.key(), open_now()).unwrap();
+            t.start_cold_for_tests(&job.key(), open_now()).unwrap();
             for state in walks[i % walks.len()] {
                 t.transition(&job.key(), *state, Some(&job.title), open_now())
                     .unwrap();

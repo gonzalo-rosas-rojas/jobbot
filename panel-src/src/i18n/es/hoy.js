@@ -71,6 +71,7 @@ export default {
   "hoy.kind.missing_answers": "Faltan respuestas",
   "hoy.kind.blocked": "Bloqueada",
   "hoy.kind.may_have_sent": "Revisa si salió",
+  "hoy.kind.out_of_region": "Revisa la región",
   "hoy.kind.error": "Falló",
   "hoy.kind.manual_apply": "Postula tú",
   "hoy.kind.other": "Otra",

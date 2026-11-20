@@ -9,6 +9,7 @@ use std::path::Path;
 
 use chrono::{DateTime, NaiveDate, Utc};
 use jobbot_domain::models::Job;
+use jobbot_domain::origin::Origin;
 use jobbot_domain::prep::Question;
 use jobbot_domain::privacy::Pii;
 use jobbot_domain::state::State;
@@ -36,8 +37,9 @@ pub type StoreResult<T> = Result<T, StoreError>;
 pub const INTENT_SUBMIT: &str = "submit";
 
 /// Start of the `needs_reason` of an application whose run was cut between the click and its
-/// confirmation. Discovery refuses to overwrite a row carrying it (see `MAY_HAVE_BEEN_SENT`).
-pub const INTERRUPTED_PREFIX: &str = "interrupted_submit";
+/// confirmation. Discovery refuses to overwrite a row carrying it (see `jobbot_domain::handoff::MAY_HAVE_BEEN_SENT`). It
+/// lives in the domain next to the rule that reads it.
+pub use jobbot_domain::handoff::INTERRUPTED_PREFIX;
 
 /// An act announced and not yet closed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,17 +103,29 @@ pub struct EventRow {
     pub note: Option<String>,
 }
 
-/// One source's line of the funnel (`funnel_by_source`): plain counts, never rates.
+/// One line of a funnel (`funnel_by_source`, `funnel_by_origin`, `funnel_by_region`): plain counts, never rates.
+/// `group` is the source's name, the origin's stored name or the region signal's name.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SourceFunnelRow {
-    pub source: String,
-    /// Applications of the source, whatever their state.
+pub struct FunnelRow {
+    pub group: String,
+    /// Applications in the group, whatever their state.
     pub n: i64,
     pub sent: i64,
+    /// Any answer, a rejection included.
     pub answered: i64,
+    /// Of `answered`, the ones that reached `rejected`.
+    pub rejected: i64,
     pub tests: i64,
     pub interviews: i64,
     pub offers: i64,
+}
+
+/// The three splits of the funnel, from one read of the applications (`HistoryRepo::funnels`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Funnels {
+    pub by_source: Vec<FunnelRow>,
+    pub by_origin: Vec<FunnelRow>,
+    pub by_region: Vec<FunnelRow>,
 }
 
 /// A stored posting with the application made for it, when there is one: one row of the weekly
@@ -377,8 +391,14 @@ pub trait JobRepo {
 
 /// The applications and their state machine (`applications`, `events`).
 pub trait ApplicationRepo {
-    /// Starts an application at `Scored`. Does nothing if one already exists.
-    fn create_application(&self, job_key: &str, now: DateTime<Utc>) -> StoreResult<()>;
+    /// Starts an application at `Scored` with how it came about. Does nothing if one already exists (it keeps the
+    /// origin it has).
+    fn start_application(
+        &self,
+        job_key: &str,
+        origin: Origin,
+        now: DateTime<Utc>,
+    ) -> StoreResult<()>;
     fn get_application(&self, job_key: &str) -> StoreResult<Option<ApplicationRow>>;
     /// Moves an application along the state machine and records the event. Moving to
     /// `NeedsGonza` stores `note` as the reason; leaving it clears the reason; moving to
@@ -425,6 +445,17 @@ pub trait ApplicationRepo {
     /// Puts an application off until `until` (`None` brings it back). The row keeps its state:
     /// only the panel's queues look at this.
     fn set_snoozed_until(&self, job_key: &str, until: Option<DateTime<Utc>>) -> StoreResult<()>;
+    /// How the application came about, or `None` when there is no application for `job_key`.
+    fn origin_of(&self, job_key: &str) -> StoreResult<Option<Origin>>;
+    /// Sets how the application came about. False when there is no application for `job_key` (nothing written).
+    /// Nothing else of the row changes: not `updated_at`, not the state, no event.
+    fn set_origin(&self, job_key: &str, origin: Origin) -> StoreResult<bool>;
+    /// Whether Gonza cleared the region of this application (`resolve` on a card parked for its region): the region
+    /// check no longer applies to it, and nothing else about it changes.
+    fn region_override(&self, job_key: &str) -> StoreResult<bool>;
+    /// Whether Gonza ever cleared the region of this application, whatever the posting says now. The prune parks
+    /// such an application again when its posting changed instead of withdrawing it.
+    fn had_region_override(&self, job_key: &str) -> StoreResult<bool>;
     /// Marks an application as reviewed and approved by Gonza.
     fn approve(&self, job_key: &str) -> StoreResult<()>;
     /// Applications in `state`, best score first.
@@ -592,7 +623,15 @@ pub trait HistoryRepo {
     /// stages mean what `submitted_since` and `jobs_reaching` mean for the whole funnel: `sent`
     /// is a submission stamp, the rest "reached that state at least once"; `n` is every
     /// application of the source, sent or not, so the page can show a base with each count.
-    fn funnel_by_source(&self) -> StoreResult<Vec<SourceFunnelRow>>;
+    fn funnel_by_source(&self) -> StoreResult<Vec<FunnelRow>>;
+    /// The same funnel split by how each application came about (`Origin`), sorted by stored name; only the
+    /// origins that have applications appear.
+    fn funnel_by_origin(&self) -> StoreResult<Vec<FunnelRow>>;
+    /// The same funnel split by what the posting names about its region (`region::region_signal`: `open`,
+    /// `silent`, `other`), read from each posting now. Nothing is stored.
+    fn funnel_by_region(&self) -> StoreResult<Vec<FunnelRow>>;
+    /// The three funnels from one read of the applications (the panel's poll).
+    fn funnels(&self) -> StoreResult<Funnels>;
     /// Every posting first seen at or after `since`, with its application when it has one
     /// (`jobs LEFT JOIN applications`, one query). Withdrawn applications are in too.
     fn cohort_since(&self, since: DateTime<Utc>) -> StoreResult<Vec<CohortRow>>;

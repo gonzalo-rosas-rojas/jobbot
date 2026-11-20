@@ -6,14 +6,22 @@ use chrono::{DateTime, TimeDelta, Utc};
 use rusqlite::types::Value;
 use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params, params_from_iter};
 
+use jobbot_domain::gate::{REGION_OVERRIDE_PREFIX, region_override_note};
+use jobbot_domain::origin::Origin;
+use jobbot_domain::outbound::plain_line;
+
 use super::{
     ApplicationRow, Result, State, Tracker, TrackerError, from_text, optional_from_text,
-    placeholders, state_from_text, to_text,
+    origin_from_text, placeholders, state_from_text, to_text,
 };
 
 /// The states of an application that is not finished and was never sent: the ones
 /// `unsent_applications` reads.
 const UNSENT_STATES: [State; 3] = [State::Scored, State::Prepared, State::NeedsGonza];
+
+/// The events that are a move out of `needs_gonza` back to the queue, as an SQL condition on `events`: the only
+/// moves `resolve` makes when Gonza sends a parked application on, and so the only ones that can carry an override.
+const BACK_TO_THE_QUEUE: &str = "from_state = 'needs_gonza' AND to_state IN ('scored', 'prepared')";
 
 /// The states of an application waiting in the queue: the ones `top_scored` reads.
 const QUEUED_STATES: [State; 2] = [State::Scored, State::Prepared];
@@ -67,8 +75,16 @@ fn query_applications(
 }
 
 impl Tracker {
-    /// Starts an application at `Scored`. Does nothing if one already exists.
-    pub fn create_application(&self, job_key: &str, now: DateTime<Utc>) -> Result<()> {
+    /// Starts an application at `Scored` with the origin it begins with. Discovery passes `Cold`; `record` passes
+    /// what it decided. An application that already exists keeps the origin it has. The column's default stays
+    /// `'cold'` so a running older process, whose INSERT names no origin, still inserts. The one way the code that
+    /// opens real applications does it.
+    pub fn start_application(
+        &self,
+        job_key: &str,
+        origin: Origin,
+        now: DateTime<Utc>,
+    ) -> Result<()> {
         let mut conn = self.lock();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let exists: bool = tx.query_row(
@@ -91,8 +107,14 @@ impl Tracker {
         };
         let at = to_text(now);
         tx.execute(
-            "INSERT INTO applications (job_key, company_norm, state, updated_at) VALUES (?1, ?2, ?3, ?4)",
-            params![job_key, company_norm, State::Scored.as_str(), at],
+            "INSERT INTO applications (job_key, company_norm, state, updated_at, origin) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                job_key,
+                company_norm,
+                State::Scored.as_str(),
+                at,
+                origin.as_str()
+            ],
         )?;
         tx.execute(
             "INSERT INTO events (job_key, at, from_state, to_state, note) VALUES (?1, ?2, NULL, ?3, NULL)",
@@ -169,9 +191,86 @@ impl Tracker {
         self.update_column("snoozed_until", until.map(to_text), job_key)
     }
 
+    /// How the application came about, or `None` when there is no application for `job_key`.
+    pub fn origin_of(&self, job_key: &str) -> Result<Option<Origin>> {
+        let conn = self.lock();
+        Ok(conn
+            .query_row(
+                "SELECT origin FROM applications WHERE job_key = ?1",
+                [job_key],
+                |row| origin_from_text(0, &row.get::<_, String>(0)?),
+            )
+            .optional()?)
+    }
+
+    /// Sets how the application came about. False when there is no application for `job_key` (nothing written).
+    /// Nothing else of the row changes: not `updated_at`, not the state, no event. The origin is a fact about how
+    /// the application began, not a move, and the board orders by `updated_at`.
+    pub fn set_origin(&self, job_key: &str, origin: Origin) -> Result<bool> {
+        let conn = self.lock();
+        let changed = conn.execute(
+            "UPDATE applications SET origin = ?1 WHERE job_key = ?2",
+            params![origin.as_str(), job_key],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// Whether Gonza cleared the region of this application as it stands: some move of it carries the note
+    /// `region_override_note` builds from the `location` and `remote` the stored posting has now (the move's note went
+    /// through `plain_line`, so the expected one does too). The fact is the event, not a column, so it outlives every
+    /// later move (the row's own note is overwritten by each); and because the note holds what he saw, a refresh that
+    /// changes the location or the remote flag makes it stop applying. Only the move out of `needs_gonza` back to the
+    /// queue counts (`resolve` makes it), so a note typed on any other move can never be an override.
+    pub fn region_override(&self, job_key: &str) -> Result<bool> {
+        let conn = self.lock();
+        let seen: Option<(String, bool)> = conn
+            .query_row(
+                "SELECT location, remote FROM jobs WHERE key = ?1",
+                [job_key],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let Some((location, remote)) = seen else {
+            return Ok(false);
+        };
+        let expected = plain_line(&region_override_note(&location, remote));
+        Ok(conn.query_row(
+            &format!(
+                "SELECT EXISTS(SELECT 1 FROM events WHERE job_key = ?1 AND note = ?2 AND {BACK_TO_THE_QUEUE})"
+            ),
+            params![job_key, expected],
+            |row| row.get(0),
+        )?)
+    }
+
+    /// Whether Gonza EVER sent this application back past the region check, whatever the posting said then or says
+    /// now: some move out of `needs_gonza` back to the queue has a note that starts with `REGION_OVERRIDE_PREFIX`
+    /// (the notes of an older build count too: any text after the prefix). The prune uses it to park such an
+    /// application again when its posting changed, instead of withdrawing it.
+    pub fn had_region_override(&self, job_key: &str) -> Result<bool> {
+        let conn = self.lock();
+        Ok(conn.query_row(
+            &format!(
+                "SELECT EXISTS(SELECT 1 FROM events WHERE job_key = ?1 AND substr(note, 1, ?2) = ?3 AND {BACK_TO_THE_QUEUE})"
+            ),
+            params![
+                job_key,
+                REGION_OVERRIDE_PREFIX.len() as i64,
+                REGION_OVERRIDE_PREFIX
+            ],
+            |row| row.get(0),
+        )?)
+    }
+
     /// Marks an application as reviewed and approved by Gonza.
     pub fn approve(&self, job_key: &str) -> Result<()> {
         self.update_application("approved = 1", &[], job_key)
+    }
+
+    /// `start_application` as `Cold`, for fixtures and tests that do not care how the application came about. Not
+    /// for the code that opens real applications: that names the origin with `start_application`.
+    pub fn start_cold_for_tests(&self, job_key: &str, now: DateTime<Utc>) -> Result<()> {
+        self.start_application(job_key, Origin::Cold, now)
     }
 
     // ---- queries
@@ -283,6 +382,36 @@ mod tests {
     use super::*;
 
     #[test]
+    fn set_origin_changes_only_that_row_and_writes_no_event() {
+        let t = Tracker::in_memory().unwrap();
+        let a = make_job_with(|j| j.external_id = "a".into());
+        let b = make_job_with(|j| j.external_id = "b".into());
+        for job in [&a, &b] {
+            t.add_job(job, 70.0, &BTreeMap::new(), *NOW).unwrap();
+            t.start_cold_for_tests(&job.key(), *NOW).unwrap();
+        }
+        let events_before = t.events_for(&a.key()).unwrap().len();
+        let updated_before = t.get_application(&a.key()).unwrap().unwrap().updated_at;
+
+        assert!(t.set_origin(&a.key(), Origin::Recruiter).unwrap());
+
+        assert_eq!(t.origin_of(&a.key()).unwrap(), Some(Origin::Recruiter));
+        assert_eq!(t.origin_of(&b.key()).unwrap(), Some(Origin::Cold));
+        assert_eq!(t.events_for(&a.key()).unwrap().len(), events_before);
+        assert_eq!(
+            t.get_application(&a.key()).unwrap().unwrap().updated_at,
+            updated_before
+        );
+    }
+
+    #[test]
+    fn set_origin_of_an_unknown_key_is_false_and_writes_nothing() {
+        let t = Tracker::in_memory().unwrap();
+        assert!(!t.set_origin("nope:1", Origin::Agency).unwrap());
+        assert_eq!(t.origin_of("nope:1").unwrap(), None);
+    }
+
+    #[test]
     fn job_and_application_lifecycle() {
         let now = *NOW;
         let t = Tracker::in_memory().unwrap();
@@ -290,7 +419,7 @@ mod tests {
         let detail = BTreeMap::from([("fit".to_string(), 30.0)]);
         t.add_job(&job, 77.0, &detail, now).unwrap();
         assert!(t.has_posting(&job).unwrap());
-        t.create_application(&job.key(), now).unwrap();
+        t.start_cold_for_tests(&job.key(), now).unwrap();
         assert_eq!(state_of(&t, &job.key()), State::Scored);
         t.transition(&job.key(), State::Prepared, None, now)
             .unwrap();
@@ -314,7 +443,7 @@ mod tests {
         let add = |id: &str| {
             let job = make_job_with(|j| j.external_id = id.into());
             t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-            t.create_application(&job.key(), *NOW).unwrap();
+            t.start_cold_for_tests(&job.key(), *NOW).unwrap();
             job.key()
         };
         add("scored");
@@ -359,14 +488,14 @@ mod tests {
     }
 
     #[test]
-    fn create_application_is_idempotent() {
+    fn start_cold_for_tests_is_idempotent() {
         let t = Tracker::in_memory().unwrap();
         let job = make_job();
         t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-        t.create_application(&job.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         t.transition(&job.key(), State::Prepared, None, *NOW)
             .unwrap();
-        t.create_application(&job.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         assert_eq!(state_of(&t, &job.key()), State::Prepared);
         assert_eq!(
             t.count_events(&[State::Scored], *NOW - TimeDelta::days(1))
@@ -424,7 +553,7 @@ mod tests {
         let add = |id: &str, score: f64, walk: &[State]| {
             let job = make_job_with(|j| j.external_id = id.into());
             t.add_job(&job, score, &BTreeMap::new(), *NOW).unwrap();
-            t.create_application(&job.key(), *NOW).unwrap();
+            t.start_cold_for_tests(&job.key(), *NOW).unwrap();
             for state in walk {
                 t.transition(&job.key(), *state, None, *NOW).unwrap();
             }
@@ -456,7 +585,7 @@ mod tests {
         let t = Tracker::in_memory().unwrap();
         let job = make_job();
         t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-        t.create_application(&job.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         t.set_cv_path(&job.key(), Path::new("out/cv.pdf")).unwrap();
         t.set_screenshot(&job.key(), Path::new("shots/a.png"))
             .unwrap();
@@ -468,7 +597,7 @@ mod tests {
     /// An application whose click the page did not confirm: `needs_gonza` with an attempt stamp.
     fn click_without_confirmation(t: &Tracker, job: &Job) {
         t.add_job(job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-        t.create_application(&job.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         t.transition(&job.key(), State::Prepared, None, *NOW)
             .unwrap();
         t.record_attempt(&job.key(), *NOW).unwrap();
@@ -543,7 +672,7 @@ mod tests {
         let t = Tracker::in_memory().unwrap();
         let job = make_job();
         t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-        t.create_application(&job.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         t.transition(&job.key(), State::NeedsGonza, Some("falta email"), *NOW)
             .unwrap();
         let row = t.get_application(&job.key()).unwrap().unwrap();
@@ -602,7 +731,7 @@ mod tests {
         let t = Tracker::in_memory().unwrap();
         let job = make_job();
         t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-        t.create_application(&job.key(), *NOW).unwrap();
+        t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         let row = t.get_application(&job.key()).unwrap().unwrap();
         assert_eq!(row.snoozed_until, None);
 
@@ -631,18 +760,18 @@ mod tests {
         let t = Tracker::in_memory().unwrap();
         let job = make_job_with(|j| {
             j.posted_at = Some(*NOW - TimeDelta::days(10));
-            j.salary_min_monthly_usd = Some(4000.0);
-            j.salary_max_monthly_usd = Some(6000.0);
+            j.salary_min_monthly_usd = Some(5200.0);
+            j.salary_max_monthly_usd = Some(7300.0);
         });
         let seen = *NOW - TimeDelta::days(2);
         t.add_job(&job, 70.0, &BTreeMap::new(), seen).unwrap();
-        t.create_application(&job.key(), seen).unwrap();
+        t.start_cold_for_tests(&job.key(), seen).unwrap();
         let row = t.get_application(&job.key()).unwrap().unwrap();
         assert_eq!(row.posted_at, job.posted_at);
         assert_eq!(row.first_seen, seen);
         assert_eq!(
             (row.salary_min, row.salary_max),
-            (Some(4000.0), Some(6000.0))
+            (Some(5200.0), Some(7300.0))
         );
         assert_eq!(row.state_since, Some(seen), "created at `scored` then");
 
@@ -675,7 +804,7 @@ mod tests {
         for (id, score) in [("1", 50.0), ("2", 90.0), ("3", 70.0), ("4", 70.0)] {
             let job = make_job_with(|j| j.external_id = id.into());
             t.add_job(&job, score, &BTreeMap::new(), *NOW).unwrap();
-            t.create_application(&job.key(), *NOW).unwrap();
+            t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         }
         let keys = |rows: Vec<ApplicationRow>| -> Vec<String> {
             rows.into_iter().map(|r| r.job_key).collect()
@@ -696,7 +825,7 @@ mod tests {
         for id in ["1", "2", "3"] {
             let job = make_job_with(|j| j.external_id = id.into());
             t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-            t.create_application(&job.key(), *NOW).unwrap();
+            t.start_cold_for_tests(&job.key(), *NOW).unwrap();
         }
         t.transition("test:2", State::NeedsGonza, Some("captcha"), *NOW)
             .unwrap();

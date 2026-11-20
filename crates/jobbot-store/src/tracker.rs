@@ -25,14 +25,15 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use rusqlite::Connection;
 use rusqlite::types::Type;
 
+use jobbot_domain::origin::Origin;
 // The state machine lives in the pure domain crate; the tracker stores the states.
 pub use jobbot_domain::state::{SUBMITTED_STATES, State};
 
 // The records the tracker reads and writes are the application's port types.
 pub use jobbot_app::ports::store::{
-    ApplicationRow, AttemptStart, CohortRow, EmailAdded, EmailKind, EmailRow, EventRow,
-    INTENT_SUBMIT, INTERRUPTED_PREFIX, Intent, MoveRow, NewEmail, NewTask, SourceFunnelRow,
-    StoredPage, TaskAdded, TaskCompletion, TaskRow, UndoRefusal, UndoableMark,
+    ApplicationRow, AttemptStart, CohortRow, EmailAdded, EmailKind, EmailRow, EventRow, FunnelRow,
+    Funnels, INTENT_SUBMIT, INTERRUPTED_PREFIX, Intent, MoveRow, NewEmail, NewTask, StoredPage,
+    TaskAdded, TaskCompletion, TaskRow, UndoRefusal, UndoableMark,
 };
 
 /// Everything the tracker can fail with. The first two are answers about the data (the caller
@@ -132,6 +133,10 @@ fn parse_column<T>(
 
 fn state_from_text(column: usize, text: &str) -> rusqlite::Result<State> {
     parse_column(column, text, "state", State::parse)
+}
+
+fn origin_from_text(column: usize, text: &str) -> rusqlite::Result<Origin> {
+    parse_column(column, text, "origin", Origin::parse)
 }
 
 fn email_kind_from_text(column: usize, text: &str) -> rusqlite::Result<EmailKind> {

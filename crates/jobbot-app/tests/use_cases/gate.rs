@@ -27,7 +27,7 @@ fn exclusions() -> Exclusions {
 fn prepared(tracker: &Tracker, job: &Job, approved: bool, submit: bool) -> ApplicationRow {
     let key = job.key();
     tracker.add_job(job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-    tracker.create_application(&key, *NOW).unwrap();
+    tracker.start_cold_for_tests(&key, *NOW).unwrap();
     tracker
         .transition(&key, State::Prepared, None, *NOW)
         .unwrap();
@@ -298,7 +298,7 @@ fn submitted_hours_ago(tracker: &Tracker, id: &str, hours: i64) {
         j.company = format!("Co{id}");
     });
     tracker.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
-    tracker.create_application(&job.key(), *NOW).unwrap();
+    tracker.start_cold_for_tests(&job.key(), *NOW).unwrap();
     tracker
         .transition(&job.key(), State::Prepared, None, *NOW)
         .unwrap();
@@ -348,7 +348,77 @@ fn exclusion_is_rechecked() {
     let job = make_job_with(|j| j.company = sample_exclusions().names[0].clone());
     prepared(&tracker, &job, true, false);
     let decision = decide(&tracker, &job, &criteria(), &stop, *NOW);
-    assert!(decision.reason.unwrap().starts_with("excluded:"));
+    assert_eq!(decision.reason.unwrap(), "excluded:name");
+}
+#[test]
+fn an_excluded_company_is_withdrawn_even_when_its_form_is_one_to_fill_by_hand() {
+    // The reason decides where the application goes: "excluded:" is withdrawn, while a
+    // manual-only host sends the posting to Gonza as a form to fill himself.
+    let (_dir, stop) = no_stop_file();
+    let tracker = Tracker::in_memory().unwrap();
+    let job = make_job_with(|j| {
+        j.company = sample_exclusions().names[0].clone();
+        j.apply_url = "https://www.upwork.com/jobs/1".into();
+    });
+    prepared(&tracker, &job, true, false);
+    let decision = decide(&tracker, &job, &criteria(), &stop, *NOW);
+    assert_eq!(decision.reason.unwrap(), "excluded:name");
+}
+#[test]
+fn a_posting_outside_the_region_is_blocked_as_fuera_de_region() {
+    let (_dir, stop) = no_stop_file();
+    let tracker = Tracker::in_memory().unwrap();
+    let job = make_job_with(|j| {
+        j.location = "San Francisco, CA".into();
+        j.remote = true;
+    });
+    prepared(&tracker, &job, true, false);
+    let decision = decide(&tracker, &job, &criteria(), &stop, *NOW);
+    assert_eq!(decision.reason.as_deref(), Some("fuera_de_region"));
+}
+#[test]
+fn a_posting_in_an_extra_place_passes_the_region_check() {
+    let (_dir, stop) = no_stop_file();
+    let tracker = Tracker::in_memory().unwrap();
+    let job = make_job_with(|j| {
+        j.location = "Sydney, Australia".into();
+        j.remote = true;
+    });
+    prepared(&tracker, &job, true, false);
+    let crit = Criteria {
+        extra_open_places: vec!["Australia".to_string()],
+        ..criteria()
+    };
+    let decision = decide(&tracker, &job, &crit, &stop, *NOW);
+    // The prepared application is approved, so nothing else blocks it: the gate lets it through.
+    assert!(decision.allowed, "{decision:?}");
+    assert_eq!(decision.reason, None);
+}
+#[test]
+fn an_excluded_posting_outside_the_region_is_blocked_as_excluded() {
+    let (_dir, stop) = no_stop_file();
+    let tracker = Tracker::in_memory().unwrap();
+    let job = make_job_with(|j| {
+        j.company = sample_exclusions().names[0].clone();
+        j.location = "San Francisco, CA".into();
+    });
+    prepared(&tracker, &job, true, false);
+    let decision = decide(&tracker, &job, &criteria(), &stop, *NOW);
+    assert_eq!(decision.reason.as_deref(), Some("excluded:name"));
+}
+#[test]
+fn a_listing_only_posting_outside_the_region_is_blocked_for_the_region_not_handed_over() {
+    // `listing_only` would send the posting to Gonza as a form to fill by hand with no warning; the region
+    // reason comes first so the card he gets says the posting is outside the region.
+    let (_dir, stop) = no_stop_file();
+    let tracker = Tracker::in_memory().unwrap();
+    let job = make_job_with(|j| {
+        j.apply_url = "https://remotive.com/remote-jobs/software-dev/x-123".into();
+        j.location = "San Francisco, CA".into();
+    });
+    prepared(&tracker, &job, true, false);
+    let decision = decide(&tracker, &job, &criteria(), &stop, *NOW);
+    assert_eq!(decision.reason.as_deref(), Some("fuera_de_region"));
 }
 #[test]
 fn daily_cap() {

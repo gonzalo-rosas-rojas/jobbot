@@ -191,7 +191,7 @@ fn hostile_emails_are_stored_as_plain_lines_and_open_nothing() {
     tracker
         .add_job(&job, 80.0, &BTreeMap::new(), sent_at)
         .unwrap();
-    tracker.create_application(&job.key(), sent_at).unwrap();
+    tracker.start_cold_for_tests(&job.key(), sent_at).unwrap();
     for state in [State::Prepared, State::Submitted] {
         tracker
             .transition(&job.key(), state, None, sent_at)
@@ -234,7 +234,7 @@ fn a_hostile_note_from_a_web_page_is_stored_on_one_plain_line() {
         let tracker = Tracker::in_memory().unwrap();
         let job = make_job_with(|job| job.external_id = name.into());
         tracker.add_job(&job, 80.0, &BTreeMap::new(), *NOW).unwrap();
-        tracker.create_application(&job.key(), *NOW).unwrap();
+        tracker.start_cold_for_tests(&job.key(), *NOW).unwrap();
         for state in [State::Prepared, State::Submitted] {
             tracker.transition(&job.key(), state, None, *NOW).unwrap();
         }

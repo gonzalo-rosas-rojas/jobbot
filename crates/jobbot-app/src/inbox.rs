@@ -6,9 +6,10 @@
 
 use anyhow::{Result, anyhow, bail};
 use chrono::{DateTime, TimeDelta, Utc};
+use jobbot_domain::handoff::may_have_been_sent;
 use jobbot_domain::outbound::{clean, plain_line};
 use jobbot_domain::state::State;
-use jobbot_domain::text::normalize;
+use jobbot_domain::text::company_identity;
 use serde_json::{Map, Value};
 
 use crate::actions;
@@ -38,7 +39,8 @@ pub const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 pub const INBOX_IMPORTED_AT: &str = "inbox_imported_at";
 
 /// The states in which a company may still answer: the ones a company name can match. Silence
-/// (`Ghosted`) and an `Offer` are in: a late reply or a withdrawn offer is real.
+/// (`Ghosted`) and an `Offer` are in: a late reply or a withdrawn offer is real. A `NeedsGonza`
+/// application whose form may already have gone out is a candidate too (see `resolve_job`).
 pub const LIVE_STATES: [State; 6] = [
     State::Submitted,
     State::Replied,
@@ -287,7 +289,23 @@ fn resolve_job(tracker: &dyn Store, item: &Item) -> Result<Link> {
             why.unwrap_or_else(|| "sin job_key ni empresa".to_string()),
         ));
     };
-    let keys = tracker.job_keys_of_company(&normalize(company), &LIVE_STATES)?;
+    let company_norm = company_identity(company);
+    let mut keys = tracker.job_keys_of_company(&company_norm, &LIVE_STATES)?;
+    // A waiting application whose form may already have gone out (sent by hand, or a click the
+    // page did not confirm) is a candidate too: an email of the company may be about it, and
+    // moving an older application of the same company instead would be a guess. A name that
+    // normalizes to nothing matches nothing (as in `job_keys_of_company`), not every row without
+    // a company.
+    if !company_norm.is_empty() {
+        for row in tracker.list_by_state(State::NeedsGonza)? {
+            if row.company_norm == company_norm
+                && row.needs_reason.as_deref().is_some_and(may_have_been_sent)
+                && !keys.contains(&row.job_key)
+            {
+                keys.push(row.job_key);
+            }
+        }
+    }
     let by_company = match keys.as_slice() {
         [only] => return Ok(Link::Found(only.clone())),
         [] => format!("ninguna postulación enviada de «{company}»"),
@@ -390,11 +408,35 @@ pub fn import(tracker: &dyn Store, items: &[Value], now: DateTime<Utc>) -> Resul
     Ok(report)
 }
 
-/// Moves the application a message belongs to, through `actions::mark_from_email` only, and says what
-/// happened in `notes`. Nothing moves for an email from before the application was sent (it
-/// answers an earlier process, and its event would come before the application's own
-/// `submitted`), or when the move is not legal from the current state: both are reported, never
-/// an error.
+/// The earliest moment the form of `key` can have gone out: the first history entry that is a
+/// `submitted`, or a `needs_gonza` whose note says the form may have gone out (a form Gonza sends
+/// by hand, or a click the page did not confirm); else its `submitted_at`. Not the `scored` entry
+/// (an application is scored days before anything is sent) and not a `needs_gonza` for another
+/// reason (below the pay floor, missing answers): nothing was sent then, and mail from the
+/// company in between answers something else. `None` when the application never got that far.
+fn form_could_have_gone_out_at(tracker: &dyn Store, key: &str) -> Result<Option<DateTime<Utc>>> {
+    let from_history = tracker
+        .events_for(key)?
+        .into_iter()
+        .find(|event| match event.to_state {
+            State::Submitted => true,
+            State::NeedsGonza => event.note.as_deref().is_some_and(may_have_been_sent),
+            _ => false,
+        })
+        .map(|event| event.at);
+    Ok(match from_history {
+        Some(at) => Some(at),
+        None => tracker
+            .get_application(key)?
+            .and_then(|app| app.submitted_at),
+    })
+}
+
+/// Moves the application a message belongs to, through `actions::mark_from_email` only, and says
+/// what happened in `notes`. Returns whether the state changed. Nothing moves for an email from
+/// before the form could have gone out (`form_could_have_gone_out_at`: it answers an earlier
+/// process), or when the move is not legal from the current state: both are reported in `notes`,
+/// never an error.
 fn move_state(
     tracker: &dyn Store,
     key: &str,
@@ -402,16 +444,19 @@ fn move_state(
     now: DateTime<Utc>,
     notes: &mut Vec<String>,
     report: &mut ImportReport,
-) -> Result<()> {
+) -> Result<bool> {
     let Some(target) = target_state(mail.kind) else {
-        return Ok(());
+        return Ok(false);
     };
-    if let Some(app) = tracker.get_application(key)?
-        && let Some(sent_at) = app.submitted_at
-        && mail.received_at < sent_at
+    // `submitted_at` is when `confirm` or `record` ran, which for a form Gonza sent by hand is
+    // later than the send itself, so a reply that came in between would look "earlier". The
+    // earliest moment a form can have gone out is when the application first reached
+    // `needs_gonza` or `submitted`; mail from before that answers an earlier process.
+    if let Some(earliest) = form_could_have_gone_out_at(tracker, key)?
+        && mail.received_at < earliest
     {
         notes.push("anterior a la postulación, sin cambio de estado".to_string());
-        return Ok(());
+        return Ok(false);
     }
     let subject = if mail.subject.is_empty() {
         "correo recibido"
@@ -419,8 +464,13 @@ fn move_state(
         mail.subject
     };
     let note = clean(&format!("correo: {subject}"), NOTE_MAX);
-    // The history records when the email arrived, not when it was imported.
-    let at = mail.received_at.min(now);
+    // The history records when the email arrived, not when it was imported, but never before the
+    // application's own `submitted` entry (a late `confirm` stamps that one at command time).
+    let sent_at = tracker
+        .get_application(key)?
+        .and_then(|app| app.submitted_at)
+        .unwrap_or(mail.received_at);
+    let at = mail.received_at.min(now).max(sent_at);
     let outcome = actions::mark_from_email(tracker, key, target.as_str(), Some(&note), at)?;
     if outcome.ok {
         report.state_changes += 1;
@@ -432,7 +482,7 @@ fn move_state(
             .unwrap_or(&outcome.message);
         notes.push(format!("sin cambio de estado: {why}"));
     }
-    Ok(())
+    Ok(outcome.ok)
 }
 
 /// What `move_state` needs to know about a message.
@@ -460,8 +510,29 @@ fn revisit_known(
     now: DateTime<Utc>,
     report: &mut ImportReport,
 ) -> Result<()> {
+    let mail = Mail {
+        kind: known.kind,
+        subject: &known.subject,
+        received_at: known.received_at,
+    };
     let key = match (&known.job_key, resolve_job(tracker, item)?) {
         (None, Link::Found(key)) => key,
+        (Some(key), _) if still_unanswered(tracker, key)? => {
+            // Already linked, but the application has not moved since it was sent: the move
+            // that was refused before may be legal now. Only a change is worth a line.
+            let mut notes = Vec::new();
+            if move_state(tracker, key, &mail, now, &mut notes, report)? {
+                report.lines.push(plain_line(&format!(
+                    "elemento {position} reaplicado: ya estaba importado ({}) · {}",
+                    item.message_id,
+                    notes.join(" · ")
+                )));
+            } else {
+                report.skipped += 1;
+                report.lines.push(skipped_line(position, &item.message_id));
+            }
+            return Ok(());
+        }
         _ => {
             report.skipped += 1;
             report.lines.push(skipped_line(position, &item.message_id));
@@ -476,11 +547,6 @@ fn revisit_known(
     }
     report.linked += 1;
     let mut notes = vec![format!("postulación {key}")];
-    let mail = Mail {
-        kind: known.kind,
-        subject: &known.subject,
-        received_at: known.received_at,
-    };
     move_state(tracker, &key, &mail, now, &mut notes, report)?;
     report.lines.push(plain_line(&format!(
         "elemento {position} vinculado: ya estaba importado ({}) · {}",
@@ -488,6 +554,21 @@ fn revisit_known(
         notes.join(" · ")
     )));
     Ok(())
+}
+
+/// True when the application is `submitted` and nothing has happened to it since: no answer was
+/// ever applied. A message linked to it then has not moved it yet, either because the move was
+/// refused (the reply came while the application still waited for Gonza's `confirm`) or because
+/// the message says nothing to move for.
+fn still_unanswered(tracker: &dyn Store, key: &str) -> Result<bool> {
+    let in_submitted = tracker
+        .get_application(key)?
+        .is_some_and(|app| app.state == State::Submitted);
+    Ok(in_submitted
+        && tracker
+            .events_for(key)?
+            .last()
+            .is_some_and(|event| event.to_state == State::Submitted))
 }
 
 fn import_one(

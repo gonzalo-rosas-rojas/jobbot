@@ -3,7 +3,7 @@
     "generated_at",
     "controls.stopped", "controls.window_open", "controls.next_window", "controls.last_run_at", "controls.engine", "controls.last_run_result", "controls.last_run_steps", "controls.claude_account", "controls.scheduled_task", "controls.auto_approve_min",
     "metrics.sent_week", "metrics.responses_week", "metrics.response_rate",
-    "funnel.sent", "funnel.answered", "funnel.tests", "funnel.interviews", "funnel.offers", "funnel.by_source",
+    "funnel.sent", "funnel.answered", "funnel.tests", "funnel.interviews", "funnel.offers", "funnel.by_source", "funnel.by_origin", "funnel.by_region",
     "pipeline.days", "pipeline.threshold", "pipeline.seen", "pipeline.above", "pipeline.with_cv", "pipeline.complete", "pipeline.sent", "pipeline.score_counts",
     "trust",
     "activity.from", "activity.to", "activity.slot_minutes", "activity.slots", "activity.moves", "activity.moves_total", "activity.moves_by_state",
