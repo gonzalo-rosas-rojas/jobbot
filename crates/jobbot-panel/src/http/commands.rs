@@ -164,6 +164,19 @@ fn keyed(req: &Request, act: impl Fn(&str) -> Result<Outcome>) -> Result<Reply> 
     }
 }
 
+/// `keyed` for an act that is one decision per application: the `key` of the body, and a batch is a 400.
+fn keyed_one(req: &Request, act: impl Fn(&str) -> Result<Outcome>) -> Result<Reply> {
+    let body: KeysBody = match parse(req) {
+        Ok(body) => body,
+        Err(reply) => return Ok(reply),
+    };
+    match keys_of(body.key, body.keys) {
+        Ok(Keys::One(key)) => Ok(outcome_reply(act(&key)?)),
+        Ok(Keys::Batch(_)) => Ok(Reply::message(400, "Falta key: se envía una por una")),
+        Err(reply) => Ok(reply),
+    }
+}
+
 /// An optional text field of the page without its surrounding blanks; `None` when it is missing or
 /// only blanks.
 fn trimmed(text: Option<&str>) -> Option<&str> {
@@ -340,21 +353,14 @@ pub(super) fn post(panel: &Panel, api: &str, req: &Request) -> Result<Reply> {
         }),
         // The one act that clears the region check of a card (`ResolveIntent::SendOutsideRegion`): a single key,
         // never a batch, and no other route sends the intent.
-        "send_anyway" => {
-            let body: KeysBody = match parse(req) {
-                Ok(body) => body,
-                Err(reply) => return Ok(reply),
-            };
-            match (body.key, body.keys) {
-                (Some(key), None) => Ok(outcome_reply(actions::resolve(
-                    &*panel.tracker,
-                    &key,
-                    panel.now(),
-                    ResolveIntent::SendOutsideRegion,
-                )?)),
-                _ => Ok(Reply::message(400, "Falta key: se envía una por una")),
-            }
-        }
+        "send_anyway" => keyed_one(req, |key| {
+            actions::resolve(
+                &*panel.tracker,
+                key,
+                panel.now(),
+                ResolveIntent::SendOutsideRegion,
+            )
+        }),
         "confirm" => keyed(req, |key| {
             actions::confirm(&*panel.tracker, key, panel.now())
         }),
