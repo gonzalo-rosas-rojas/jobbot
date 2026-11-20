@@ -1,6 +1,6 @@
 //! Discovery: fetch every source, drop what must not be applied to, score the rest and queue it.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use chrono::{DateTime, TimeDelta, Utc};
 use jobbot_domain::exclusion::check_exclusion;
@@ -45,6 +45,13 @@ pub struct DiscoveryReport {
     /// Applications withdrawn after the loop because their company or domain is excluded now
     /// (it was added to the exclusions after the posting was queued).
     pub pruned_excluded: usize,
+    /// Matched by an exclusion but kept because one pass would have withdrawn too many (see
+    /// `MAX_EXCLUSION_WITHDRAWALS_PER_PASS`), and the rules that matched.
+    pub excluded_held_back: usize,
+    pub excluded_held_back_rules: Vec<String>,
+    /// Keys of applications already waiting for Gonza, or possibly clicked, whose company is
+    /// excluded now: kept, and reported so he does not send them.
+    pub excluded_waiting: Vec<String>,
     /// Applications withdrawn after the loop because their posting is now too old.
     pub pruned_stale: usize,
     /// Applications withdrawn after the loop because their posting cannot be done from Chile.
@@ -140,6 +147,9 @@ pub async fn discover(
     }
     let pruned = prune_ineligible(criteria, exclusions, tracker, &refreshed_keys, now)?;
     report.pruned_excluded = pruned.excluded;
+    report.excluded_held_back = pruned.excluded_held_back;
+    report.excluded_held_back_rules = pruned.excluded_held_back_rules;
+    report.excluded_waiting = pruned.excluded_waiting;
     report.pruned_stale = pruned.stale;
     report.pruned_region = pruned.out_of_region;
     crate::record_counts(&[
@@ -199,10 +209,23 @@ fn withdraw_replaced_copy(
     }
 }
 
+/// The most applications one prune pass withdraws by exclusion. Withdrawal is terminal, so a pass
+/// that would withdraw more (a blank or too-wide rule, a name that is also an ordinary word)
+/// withdraws none of them and reports instead. The gate still refuses each one at submit.
+pub const MAX_EXCLUSION_WITHDRAWALS_PER_PASS: usize = 10;
+
 /// What a prune pass withdrew, counted by the rule that decided each application.
 #[derive(Debug, Default, PartialEq)]
 pub struct PruneReport {
     pub excluded: usize,
+    /// Applications an exclusion matched but that were not withdrawn because the pass would have
+    /// withdrawn more than `MAX_EXCLUSION_WITHDRAWALS_PER_PASS` of them, and the rules that
+    /// matched (each once, sorted).
+    pub excluded_held_back: usize,
+    pub excluded_held_back_rules: Vec<String>,
+    /// Keys of applications waiting for Gonza (by hand, or with a click that may have gone
+    /// through) whose company or domain is excluded now: kept, because they may be sent already.
+    pub excluded_waiting: Vec<String>,
     pub stale: usize,
     pub out_of_region: usize,
 }
@@ -246,7 +269,11 @@ fn may_have_been_sent(reason: &str) -> bool {
 /// * A posting whose company, domain or category is excluded now (`check_exclusion`: the rule was
 ///   added after the posting was queued) is withdrawn with the gate's own `excluded:<rule>` note,
 ///   before any other reason. The submission gate would withdraw it too, but only once the
-///   application reached `prepared` and a run looked at it.
+///   application reached `prepared` and a run looked at it. Two limits, because withdrawal is
+///   terminal: an application that may have gone out already (waiting for Gonza by hand, or with
+///   an open click) is kept and listed in `excluded_waiting`, and when one pass would withdraw
+///   more than `MAX_EXCLUSION_WITHDRAWALS_PER_PASS` of them it withdraws none and reports the
+///   count and the rules instead.
 /// * A stale posting (the gate's `is_stale_stored`: the posting's date, or for a source that
 ///   publishes none, the day it was first seen) is withdrawn with `stale_posting`. The date needs
 ///   no fresh fetch: the submission gate would withdraw the same row anyway.
@@ -258,7 +285,7 @@ fn may_have_been_sent(reason: &str) -> bool {
 ///   Gonza for another reason (missing answers, below the pay floor) is withdrawn too.
 ///
 /// A second pass finds nothing new: withdrawn applications are not looked at again.
-#[tracing::instrument(skip_all, fields(excluded = Empty, stale = Empty, out_of_region = Empty))]
+#[tracing::instrument(skip_all, fields(excluded = Empty, excluded_held_back = Empty, stale = Empty, out_of_region = Empty))]
 pub fn prune_ineligible(
     criteria: &Criteria,
     exclusions: &Exclusions,
@@ -275,23 +302,29 @@ pub fn prune_ineligible(
         .into_iter()
         .map(|intent| intent.job_key)
         .collect();
+    // Applications an exclusion would withdraw, decided after the loop (see the bulk guard).
+    let mut by_exclusion: Vec<(String, String)> = Vec::new();
     for row in tracker.unsent_applications()? {
-        if clicking.contains(&row.job_key)
+        let may_be_sent = clicking.contains(&row.job_key)
             || (row.state == State::NeedsGonza
-                && row.needs_reason.as_deref().is_some_and(may_have_been_sent))
-        {
-            continue;
-        }
+                && row.needs_reason.as_deref().is_some_and(may_have_been_sent));
         let Some(job) = tracker.get_job(&row.job_key)? else {
             continue;
         };
         let exclusion = check_exclusion(&job, exclusions);
-        let (note, counter) = if exclusion.excluded {
-            (
-                format!("excluded:{}", exclusion.reason.unwrap_or_default()),
-                &mut report.excluded,
-            )
-        } else if is_stale_stored(&job, tracker, criteria, now)? {
+        if may_be_sent {
+            // Not withdrawn (it may have gone out already), but Gonza must not send it again.
+            if exclusion.excluded {
+                report.excluded_waiting.push(row.job_key);
+            }
+            continue;
+        }
+        if exclusion.excluded {
+            let rule = exclusion.reason.unwrap_or_default();
+            by_exclusion.push((row.job_key, rule));
+            continue;
+        }
+        let (note, counter) = if is_stale_stored(&job, tracker, criteria, now)? {
             (stale_note(criteria), &mut report.stale)
         } else if refreshed.contains(&row.job_key) && !region_ok_for(&job, criteria) {
             (OUT_OF_REGION_NOTE.to_string(), &mut report.out_of_region)
@@ -305,8 +338,27 @@ pub fn prune_ineligible(
             Err(other) => return Err(other.into()),
         }
     }
+    if by_exclusion.len() > MAX_EXCLUSION_WITHDRAWALS_PER_PASS {
+        report.excluded_held_back = by_exclusion.len();
+        report.excluded_held_back_rules = by_exclusion
+            .iter()
+            .map(|(_, rule)| rule.clone())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+    } else {
+        for (key, rule) in by_exclusion {
+            let note = format!("excluded:{rule}");
+            match tracker.transition(&key, State::Withdrawn, Some(&note), now) {
+                Ok(()) => report.excluded += 1,
+                Err(StoreError::IllegalTransition { .. }) => {}
+                Err(other) => return Err(other.into()),
+            }
+        }
+    }
     crate::record_counts(&[
         ("excluded", report.excluded),
+        ("excluded_held_back", report.excluded_held_back),
         ("stale", report.stale),
         ("out_of_region", report.out_of_region),
     ]);

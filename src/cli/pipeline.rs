@@ -46,6 +46,21 @@ fn format_report(r: &DiscoveryReport) -> String {
             r.pruned_excluded
         ));
     }
+    if !r.excluded_waiting.is_empty() {
+        text.push_str(&format!(
+            "\n  ATENCIÓN: {} postulaciones que te esperan son de una empresa o dominio excluido y no deben enviarse: {}",
+            r.excluded_waiting.len(),
+            r.excluded_waiting.join(", ")
+        ));
+    }
+    if r.excluded_held_back > 0 {
+        text.push_str(&format!(
+            "\n  {} postulaciones de empresas excluidas no se retiraron: son más de {} en una pasada (reglas: {}); el envío las rechaza igual",
+            r.excluded_held_back,
+            crate::discovery::MAX_EXCLUSION_WITHDRAWALS_PER_PASS,
+            r.excluded_held_back_rules.join(", ")
+        ));
+    }
     if r.rate_limited > 0 {
         text.push_str(&format!(
             "\n  {} consultas en pausa: el sitio pidió esperar y se retoman en otra corrida",
@@ -266,6 +281,9 @@ mod tests {
             already_seen: 7,
             refreshed: 8,
             pruned_excluded: 0,
+            excluded_held_back: 0,
+            excluded_held_back_rules: vec![],
+            excluded_waiting: vec![],
             pruned_stale: 9,
             pruned_region: 11,
             rate_limited: 0,
@@ -289,6 +307,34 @@ mod tests {
             format_report(&report).contains("2 postulaciones retiradas: su empresa o dominio"),
             "{}",
             format_report(&report)
+        );
+    }
+
+    #[test]
+    fn format_report_warns_about_excluded_applications_waiting_for_gonza_and_about_a_held_back_pass()
+     {
+        let quiet = format_report(&DiscoveryReport::default());
+        assert!(!quiet.contains("ATENCIÓN") && !quiet.contains("no se retiraron"));
+        let report = DiscoveryReport {
+            excluded_waiting: vec!["a:1".into(), "b:2".into()],
+            excluded_held_back: 11,
+            excluded_held_back_rules: vec!["name:Blocked".into(), "domain:x.example".into()],
+            ..DiscoveryReport::default()
+        };
+        let text = format_report(&report);
+        assert!(
+            text.contains(
+                "\n  ATENCIÓN: 2 postulaciones que te esperan son de una empresa o dominio \
+                 excluido y no deben enviarse: a:1, b:2"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains(
+                "\n  11 postulaciones de empresas excluidas no se retiraron: son más de 10 en \
+                 una pasada (reglas: name:Blocked, domain:x.example); el envío las rechaza igual"
+            ),
+            "{text}"
         );
     }
 

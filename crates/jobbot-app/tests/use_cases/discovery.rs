@@ -398,6 +398,75 @@ fn rules_excluding(company: &str) -> (Criteria, Exclusions) {
         },
     )
 }
+/// `count` queued postings of companies "Bulk Excluded 1", "Bulk Excluded 2"... and the tracker
+/// they are in.
+async fn queued_bulk(count: usize) -> (Tracker, Vec<Job>) {
+    let jobs: Vec<Job> = (1..=count)
+        .map(|n| good(&n.to_string(), &format!("Bulk Excluded {n}")))
+        .collect();
+    (stored_by_discovery(jobs.clone()).await, jobs)
+}
+#[tokio::test]
+async fn an_exclusion_withdraws_up_to_ten_applications_in_one_pass() {
+    let (tracker, jobs) = queued_bulk(MAX_EXCLUSION_WITHDRAWALS_PER_PASS).await;
+    let (criteria, exclusions) = rules_excluding("Bulk Excluded");
+
+    let report = discover(&[fake(jobs, &[])], &criteria, &exclusions, &tracker, *NOW)
+        .await
+        .unwrap();
+
+    assert_eq!(report.pruned_excluded, MAX_EXCLUSION_WITHDRAWALS_PER_PASS);
+    assert_eq!(report.excluded_held_back, 0);
+    assert_eq!(state_and_note(&tracker, "test:3").0, State::Withdrawn);
+}
+#[tokio::test]
+async fn an_exclusion_that_would_withdraw_more_than_ten_withdraws_none_and_says_so() {
+    let (tracker, jobs) = queued_bulk(MAX_EXCLUSION_WITHDRAWALS_PER_PASS + 1).await;
+    let (criteria, exclusions) = rules_excluding("Bulk Excluded");
+
+    let report = discover(&[fake(jobs, &[])], &criteria, &exclusions, &tracker, *NOW)
+        .await
+        .unwrap();
+
+    // Withdrawal is terminal: a wrong rule (a blank entry, a name that is also a word) must not
+    // empty the queue. The gate still refuses each of these at submit.
+    assert_eq!(report.pruned_excluded, 0);
+    assert_eq!(
+        report.excluded_held_back,
+        MAX_EXCLUSION_WITHDRAWALS_PER_PASS + 1
+    );
+    assert_eq!(report.excluded_held_back_rules, ["name:Bulk Excluded"]);
+    assert_eq!(state_and_note(&tracker, "test:3").0, State::Scored);
+}
+#[tokio::test]
+async fn an_excluded_company_already_on_the_by_hand_list_is_kept_and_reported() {
+    let first = good("1", "Later Excluded Co");
+    let tracker = stored_by_discovery(vec![first.clone()]).await;
+    tracker
+        .transition(
+            "test:1",
+            State::NeedsGonza,
+            Some("listing_only: envíalo tú"),
+            *NOW,
+        )
+        .unwrap();
+    let (criteria, exclusions) = rules_excluding("Later Excluded Co");
+
+    let report = discover(
+        &[fake(vec![first], &[])],
+        &criteria,
+        &exclusions,
+        &tracker,
+        *NOW,
+    )
+    .await
+    .unwrap();
+
+    // He may have sent it already, so it is not withdrawn; he is told not to send it.
+    assert_eq!(state_and_note(&tracker, "test:1").0, State::NeedsGonza);
+    assert_eq!(report.pruned_excluded, 0);
+    assert_eq!(report.excluded_waiting, ["test:1"]);
+}
 #[tokio::test]
 async fn a_company_excluded_after_its_posting_was_queued_has_the_application_withdrawn() {
     let first = good("1", "Later Excluded Co");
