@@ -137,7 +137,7 @@ export default {
   "sistema.funnel.title.source": "Sources by board",
   "sistema.funnel.head.source": "board",
   "sistema.funnel.empty.source": "No sends by board yet.",
-  "sistema.funnel.note.source": "Counts, not rates: with few sent it would be noise.",
+  "sistema.funnel.note.source": "Counts, not rates: with few sent it would be noise. A rejection also counts as an answer.",
   "sistema.funnel.by": "View by",
   "sistema.funnel.by.source": "board",
   "sistema.funnel.by.origin": "origin",

@@ -90,3 +90,12 @@ test("the switch marks the pressed view and a click asks for it", async () => {
   assert.equal(ui.el.querySelectorAll("tr[data-src]")[0].querySelectorAll("td").length, 4, "four numbers in a row");
   assert.equal(ui.el.querySelectorAll("thead th").length, 5, "the board's column and four numbers");
 });
+
+test("the by-board note says a rejection counts as an answer, in both languages", async () => {
+  const { t } = await import("../src/i18n/index.js");
+  setLang("es");
+  assert.ok(t("sistema.funnel.note.source").endsWith("Un rechazo tambi\u00e9n cuenta como respuesta."));
+  setLang("en");
+  assert.ok(t("sistema.funnel.note.source").endsWith("A rejection also counts as an answer."));
+  setLang("es");
+});

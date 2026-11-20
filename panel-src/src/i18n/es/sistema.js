@@ -138,7 +138,7 @@ export default {
   "sistema.funnel.title.source": "Fuentes por tablón",
   "sistema.funnel.head.source": "tablón",
   "sistema.funnel.empty.source": "Todavía no hay envíos por tablón.",
-  "sistema.funnel.note.source": "Conteos, no tasas: con pocas enviadas sería ruido.",
+  "sistema.funnel.note.source": "Conteos, no tasas: con pocas enviadas sería ruido. Un rechazo también cuenta como respuesta.",
   "sistema.funnel.by": "Ver por",
   "sistema.funnel.by.source": "tablón",
   "sistema.funnel.by.origin": "origen",
