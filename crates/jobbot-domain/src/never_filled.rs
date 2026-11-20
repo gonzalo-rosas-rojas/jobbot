@@ -24,11 +24,12 @@ use crate::text::{fold_look_alikes, normalize};
 /// or follows a word of `WORDS_BEFORE_AN_ID_TOKEN`; RFC also needs a label of at most four words.
 /// EIN, PAN and SIN are NOT caught in capitals (ordinary words and acronyms in English): only
 /// their phrases below ("ein number", "pan card", "sin number") count. "C.I." is read by
-/// `carnet_abbreviation_is_an_id` and "CI" in capitals by `carnet_capitals_are_an_id`.
+/// `carnet_abbreviation_is_an_id` and "CI" in capitals by `carnet_capitals_are_an_id`. "SWIFT" in
+/// capitals counts only as the whole label (`swift_code_is_the_whole_label`).
 ///
 /// The rest of the rule is structural and read by `is_never_filled_after_reading`: a number-word
 /// beside a document of `DOCUMENTS`, a banking noun with its number, a label of only document
-/// words, a bare generic word. Phrases stay specific so that "LinkedIn ID", "valid passport?", the
+/// words, a banking block that is the whole label (`BANK_DETAILS_BLOCKS`), a bare generic word. Phrases stay specific so that "LinkedIn ID", "valid passport?", the
 /// Swift language or experience in banking stay answerable.
 const NEVER_FILLED_TERMS: &[&str] = &[
     // Government identity numbers.
@@ -378,7 +379,38 @@ const ACCOUNT_DETAILS_WRAPPERS: &[&str] = &["please", "enter", "your"];
 /// Words that make "account details" a bank account wherever it stands in the label.
 const BANK_CONTEXT_WORDS: &[&str] = &[
     "payment", "salary", "payroll", "deposit", "bank", "banking", "transfer", "wire", "pago",
+    "payout", "payouts",
 ];
+
+/// Banking blocks that are the request for the details when they are the whole label (after
+/// markers and the `ACCOUNT_DETAILS_WRAPPERS`), normalized: "Bank information", "Datos de pago",
+/// "Account type (checking/savings)". Only the whole label: "Experience with payment systems" or
+/// "Bank reconciliation experience" mention the topic and ask something else. Not here on
+/// purpose: "Banco", "Bank name" and "Tipo de cuenta" alone, which the tests keep answerable
+/// ("Tipo de cuenta de GitHub" and a bank name in a work history sit beside them).
+const BANK_DETAILS_BLOCKS: &[&str] = &[
+    "bank information",
+    "banking information",
+    "bank info",
+    "payment details",
+    "payout details",
+    "wire transfer details",
+    "bank transfer details",
+    "direct deposit information",
+    "direct deposit details",
+    "informacion bancaria",
+    "datos para transferencia",
+    "datos de pago",
+    "nombre del banco",
+    "account type checking savings",
+];
+
+/// The banking code SWIFT, in capitals. Lowercase or mixed case ("Swift") it is the programming
+/// language, and with other words around it ("SWIFT messaging") it is a question about experience,
+/// so it counts only as the whole label (`nothing_but_wrapping_words`). "SWIFT code" and
+/// "SWIFT/BIC" are already in `NEVER_FILLED_TERMS`.
+static SWIFT_CODE_TOKEN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\bSWIFT\b").expect("SWIFT_CODE_TOKEN is valid"));
 
 /// What a name field may say about the document its name must match: "as on your national ID",
 /// "según tu pasaporte", "tal cual tu cédula", on a normalized label. Built from the `named` rows
@@ -733,10 +765,12 @@ fn read_label(label: &str) -> String {
 /// True when `label` is a field the program never fills: what `AnswerBank::lookup` asks before it
 /// reads any entry, so that no bank pattern can answer it.
 pub fn is_never_filled(label: &str) -> bool {
-    // These two read the raw label: lowercased, "RUN" would be a verb and "C.I." a dotted noise.
+    // These read the raw label: lowercased, "RUN" would be a verb, "C.I." a dotted noise and
+    // "SWIFT" the programming language.
     if capital_token_is_an_id(label)
         || carnet_abbreviation_is_an_id(label)
         || carnet_capitals_are_an_id(label)
+        || swift_code_is_the_whole_label(label)
     {
         return true;
     }
@@ -809,6 +843,7 @@ fn is_never_filled_after_reading(text: &str) -> bool {
         || number_beside_banking_noun(&words)
         || tax_then_number(&words)
         || account_details(&words)
+        || is_a_bank_details_block(&words)
         || ends_with_no_after_a_document(&words)
         || spanish_no_de_a_document(&words)
         || only_document_words(&words)
@@ -842,19 +877,37 @@ fn tax_then_number(words: &[&str]) -> bool {
 /// "Account details" is the bank-account block when it is the whole label (after markers and the
 /// wrappers of `ACCOUNT_DETAILS_WRAPPERS`) or when a word of `BANK_CONTEXT_WORDS` is in the label.
 /// "LinkedIn account details" is a social profile and stays answerable, so this cannot be a
-/// phrase of `NEVER_FILLED_TERMS`.
+/// phrase of `NEVER_FILLED_TERMS`. The payout words are in `BANK_CONTEXT_WORDS`, so "Account
+/// details (for payouts)" is a bank account too.
 fn account_details(words: &[&str]) -> bool {
     let words = without_markers(words);
     if !words.windows(2).any(|pair| pair == ["account", "details"]) {
         return false;
     }
-    let unwrapped: Vec<&str> = words
+    without_wrappers(&words) == ["account", "details"]
+        || words.iter().any(|word| BANK_CONTEXT_WORDS.contains(word))
+}
+
+/// The words after the wrappers of `ACCOUNT_DETAILS_WRAPPERS` a form puts in front of a label.
+fn without_wrappers<'a>(words: &[&'a str]) -> Vec<&'a str> {
+    words
         .iter()
         .copied()
         .skip_while(|word| ACCOUNT_DETAILS_WRAPPERS.contains(word))
-        .collect();
-    unwrapped == ["account", "details"]
-        || words.iter().any(|word| BANK_CONTEXT_WORDS.contains(word))
+        .collect()
+}
+
+/// Whether the whole label (after markers and wrappers) is one of `BANK_DETAILS_BLOCKS`.
+fn is_a_bank_details_block(words: &[&str]) -> bool {
+    let whole_label = without_wrappers(&without_markers(words)).join(" ");
+    BANK_DETAILS_BLOCKS.contains(&whole_label.as_str())
+}
+
+/// Whether the raw label is only the capitals "SWIFT" and the words a form wraps around a label.
+fn swift_code_is_the_whole_label(label: &str) -> bool {
+    SWIFT_CODE_TOKEN
+        .find_iter(label)
+        .any(|token| nothing_but_wrapping_words(&label[..token.start()], &label[token.end()..]))
 }
 
 /// Spanish writes the abbreviation of "número" as "No" or "N°", and without its dot it still
@@ -1185,6 +1238,34 @@ mod tests {
         "Nro. de tarjeta",
         "N° tarjeta",
         "Tarjeta N°",
+        // A banking block whose whole label is the request for the details.
+        "Bank information",
+        "Banking information",
+        "Bank info",
+        "Bank details",
+        "Banking details",
+        "Payment details",
+        "Payout details",
+        "Wire transfer details",
+        "Bank transfer details",
+        "Direct deposit information",
+        "Direct deposit details",
+        "Payout account details",
+        "Account details (for payouts)",
+        "Datos bancarios",
+        "Información bancaria",
+        "Datos de la cuenta bancaria",
+        "Datos para transferencia",
+        "Datos de pago",
+        "Nombre del banco",
+        "Account type (checking/savings)",
+        "IBAN",
+        "SWIFT/BIC",
+        "SWIFT code",
+        "BIC code",
+        "Routing number",
+        "CLABE",
+        "Sort code",
     ];
 
     /// Terms that are never filled alone by phrase (any case), in Chilean, foreign and banking
@@ -1310,6 +1391,11 @@ mod tests {
         "CBU",
         "CUIT",
         "CUIL",
+        // The banking code SWIFT, in capitals and as the whole label. Lowercase or mixed case it
+        // is the programming language.
+        "SWIFT",
+        "Please enter your SWIFT",
+        "SWIFT (required)",
     ];
 
     /// Never filled on purpose although they could be read as ordinary: that is the safe side.
@@ -1482,6 +1568,24 @@ mod tests {
         "Account manager experience",
         "GitHub account",
         "Nombre de usuario de la cuenta de GitHub",
+        // Questions that only mention payment or banking, and the Swift language.
+        "Preferred payment method",
+        "Expected payment terms",
+        "Payment terms (hourly/fixed)",
+        "Experience with payment systems",
+        "Experience with banking APIs",
+        "Have you worked in banking or fintech?",
+        "Experience with Stripe or other payment gateways",
+        "Describe a payment integration you built",
+        "Bank reconciliation experience",
+        "Años de experiencia en banca",
+        "Experiencia con medios de pago",
+        "Do you have experience with SWIFT messaging?",
+        "Swift (iOS) experience",
+        "Experience with direct deposit systems",
+        "Details of your last project",
+        "Tipo de contrato",
+        "Tipo de cuenta de GitHub (personal u organización)",
     ];
 
     /// Name fields that only say which document the name must match. Each one is never filled
