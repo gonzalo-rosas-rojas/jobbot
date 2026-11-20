@@ -12,7 +12,7 @@ use anyhow::Result;
 use chrono::{DateTime, Datelike, Months, NaiveTime, TimeDelta, TimeZone, Utc};
 use chrono_tz::America::Santiago;
 use jobbot_domain::handoff::is_sent_by_hand;
-use jobbot_domain::models::Job;
+use jobbot_domain::models::{Job, MANUAL_SOURCE};
 use jobbot_domain::outbound::{clean, plain_line};
 use jobbot_domain::prep::Question;
 use jobbot_domain::state::State;
@@ -397,7 +397,7 @@ pub fn record(tracker: &dyn Store, spec: &RecordSpec, now: DateTime<Utc>) -> Res
             let base = link_base(&url);
             let id_source = if base.is_empty() { url.clone() } else { base };
             let job = Job {
-                source: "manual".to_string(),
+                source: MANUAL_SOURCE.to_string(),
                 external_id: safe_key(
                     id_source
                         .trim_start_matches("https://")
