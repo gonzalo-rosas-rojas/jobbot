@@ -22,8 +22,9 @@ static RANGE: LazyLock<Regex> = LazyLock::new(|| {
 /// break), and a currency word, itself followed by such separators: `, per year`, `(USD) per
 /// year`. The word is `per year`, `a month`, `/yr`, `annually`, `p.a.`, or a bare `annual`,
 /// `yearly`, `monthly` (see `period_after` for the last one). Anything else in between (`+ annual
-/// bonus`, `. Annual leave`) means the word is not about the pay, and `annually`/`p.a.` count only
-/// when they close the phrase (`annually reviewed` does not).
+/// bonus`, `. Annual leave`) means the word is not about the pay. `annually` and `p.a.` count
+/// whatever follows them: `annually reviewed` reads as yearly, which holds a low posting for the
+/// owner rather than passing it as a monthly pay.
 static PERIOD_AFTER: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?i)^[^\p{L}\p{N}/+.;]*(?:(?:usd|us\$|dollars?|gross|net)[^\p{L}\p{N}/+.;]*)*(?:(?:per|a|each|/)\s?(?P<fixed>year|yr|annum|month|mo)\b|(?P<adverb>annually\b|p\.a\.?)|(?P<bare>annual|yearly|monthly)\b)",
@@ -71,19 +72,6 @@ fn period_after(tail: &str) -> Option<Period> {
     let rest = &tail[end..];
     if rest.starts_with(['-', '\u{2010}', '\u{2013}', '\u{2014}']) {
         return None;
-    }
-    // An adverb (`annually`, `p.a.`) names the pay's period only when it closes the phrase: at the
-    // end of the text or the line, or before punctuation. `annually reviewed` is about something
-    // else.
-    if caps.name("adverb").is_some() {
-        let after = rest.trim_start_matches([' ', '\t']);
-        let closes_the_phrase = after
-            .chars()
-            .next()
-            .is_none_or(|next| matches!(next, '\n' | '\r') || !next.is_alphanumeric());
-        if !closes_the_phrase {
-            return None;
-        }
     }
     let bare = caps.name("bare");
     let same_line = rest.split(['\n', '\r']).next().unwrap_or_default();
@@ -611,34 +599,52 @@ mod tests {
     }
 
     #[test]
-    fn an_adverb_after_the_range_counts_only_when_it_closes_the_phrase() {
-        // `annually reviewed` is about the review: the size of the numbers decides (monthly).
-        for text in [
-            "$4,000 – $6,000, annually reviewed",
-            "$4,000 - $6,000 annually reviewed",
-            "$4,000 - $6,000 p.a. plus bonus",
-        ] {
-            assert_eq!(
-                parse_salary_monthly_usd(text),
-                (Some(4000.0), Some(6000.0)),
-                "{text:?}"
-            );
-        }
-        // At the end of the text or the line, or before punctuation, it is the period.
+    fn an_adverb_after_the_range_is_the_period_whatever_follows_it() {
         for text in [
             "$15,000 - $19,000 annually",
             "$15,000 - $19,000 annually.",
             "$15,000 - $19,000 annually, plus equity",
-            "$15,000 - $19,000 annually\nRequirements",
+            "$15,000 - $19,000 annually
+Requirements",
             "$15,000 - $19,000 p.a., plus equity",
+            "Compensation: $15,000 - $19,000 annually depending on experience",
+            "$12,000 - $18,000 annually plus performance bonus",
+            "$18,000 - $19,800 p.a. plus bonus",
         ] {
             let (low, high) = parse_salary_monthly_usd(text);
-            assert_eq!(
-                (low.map(f64::round), high.map(f64::round)),
-                (Some(1250.0), Some(1583.0)),
-                "{text:?}"
+            let (low, high) = (low.expect(text), high.expect(text));
+            assert!(
+                high < 2000.0,
+                "{text:?}: read as a monthly pay ({low}, {high})"
             );
         }
+        let (low, high) =
+            parse_salary_monthly_usd("$15,000 - $19,000 annually depending on experience");
+        assert_eq!(
+            (low.map(f64::round), high.map(f64::round)),
+            (Some(1250.0), Some(1583.0))
+        );
+    }
+
+    #[test]
+    fn a_range_followed_by_super_is_ignored_whatever_its_period_word() {
+        // "super" next to the range is the Australian pension: another currency, so no range.
+        assert_eq!(
+            parse_salary_monthly_usd("$18,000 - $19,800 p.a. plus super"),
+            (None, None)
+        );
+    }
+
+    #[test]
+    fn annually_reviewed_reads_as_yearly_which_is_the_safe_direction() {
+        // Known and accepted: the word after the range is about the review, but it still reads as
+        // the period. A low posting is then held for the owner instead of being passed as a
+        // monthly pay.
+        let (low, high) = parse_salary_monthly_usd("$4,000 - $6,000, annually reviewed");
+        assert_eq!(
+            (low.map(f64::round), high.map(f64::round)),
+            (Some(333.0), Some(500.0))
+        );
     }
 
     #[test]
