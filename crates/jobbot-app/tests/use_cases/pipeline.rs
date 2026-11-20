@@ -301,9 +301,6 @@ async fn refresh_reports_each_readable_copy_it_could_not_refresh_and_not_a_missi
     );
     // The stale copy is still there, and now it is on record.
     assert_eq!(std::fs::read(&stuck).unwrap(), b"%PDF-before");
-    let mut permissions = std::fs::metadata(&stuck).unwrap().permissions();
-    permissions.set_readonly(false);
-    std::fs::set_permissions(&stuck, permissions).unwrap();
 }
 #[tokio::test]
 async fn refresh_renders_waiting_cvs_again_keeps_the_old_ones_and_never_touches_sent_ones() {
