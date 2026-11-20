@@ -13,6 +13,7 @@ use chrono::{DateTime, Datelike, Months, NaiveTime, TimeDelta, TimeZone, Utc};
 use chrono_tz::America::Santiago;
 use jobbot_domain::handoff::is_sent_by_hand;
 use jobbot_domain::models::{Job, MANUAL_SOURCE};
+use jobbot_domain::origin::Origin;
 use jobbot_domain::outbound::{clean, plain_line};
 use jobbot_domain::prep::Question;
 use jobbot_domain::state::State;
@@ -363,6 +364,43 @@ pub struct RecordSpec {
     pub salary_min_monthly_usd: Option<f64>,
     pub salary_max_monthly_usd: Option<f64>,
     pub note: Option<String>,
+    /// How the application came about, as typed (`cold`, `referral`, ...). `None` or blank: a new application is
+    /// `unknown`, one that already exists keeps the origin it has.
+    pub origin: Option<String>,
+}
+
+/// The origin Gonza typed: trimmed and lowercased, then `Origin::parse`. `Err` is the refusal to give back.
+fn typed_origin(text: &str) -> Result<Origin, Outcome> {
+    Origin::parse(&text.trim().to_lowercase()).ok_or_else(|| {
+        let names: Vec<&str> = Origin::ALL.iter().map(|origin| origin.as_str()).collect();
+        Outcome::refused(format!(
+            "Origen no válido: {}. Usa uno de: {}",
+            clean(text, 40),
+            names.join(", ")
+        ))
+    })
+}
+
+/// Changes how a stored application came about (`jobbot origin`). Any state: the origin is a fact about how it
+/// began. Repeating it changes nothing. A refusal changes nothing.
+#[tracing::instrument(skip_all, fields(ok = Empty))]
+pub fn set_origin(tracker: &dyn Store, key: &str, origin_text: &str) -> Result<Outcome> {
+    let origin = match typed_origin(origin_text) {
+        Ok(origin) => origin,
+        Err(refusal) => return Ok(refusal),
+    };
+    let Some(before) = tracker.origin_of(key)? else {
+        return Ok(Outcome::refused(format!("No existe la postulación {key}")));
+    };
+    if before == origin {
+        return Ok(Outcome::done(format!(
+            "Sin cambios: {key} ya tenía origen {origin}"
+        )));
+    }
+    tracker.set_origin(key, origin)?;
+    Ok(Outcome::done(format!(
+        "Origen de {key}: {before} → {origin}"
+    )))
 }
 
 /// Puts an application sent outside jobbot into the tracker as `submitted` at `now` (the real
@@ -373,6 +411,17 @@ pub struct RecordSpec {
 /// changes.
 #[tracing::instrument(skip_all, fields(ok = Empty))]
 pub fn record(tracker: &dyn Store, spec: &RecordSpec, now: DateTime<Utc>) -> Result<Outcome> {
+    // Parsed before anything is written: a refused origin must leave no posting and no application behind.
+    let typed = match spec
+        .origin
+        .as_deref()
+        .filter(|text| !text.trim().is_empty())
+        .map(typed_origin)
+        .transpose()
+    {
+        Ok(typed) => typed,
+        Err(refusal) => return Ok(refusal),
+    };
     let key = match &spec.key {
         Some(key) => {
             if tracker.get_job(key)?.is_none() {
@@ -424,6 +473,7 @@ pub fn record(tracker: &dyn Store, spec: &RecordSpec, now: DateTime<Utc>) -> Res
             }
         }
     };
+    let is_new = tracker.get_application(&key)?.is_none();
     tracker.create_application(&key, now)?;
     let Some(row) = tracker.get_application(&key)? else {
         return Ok(not_found(&key));
@@ -441,6 +491,17 @@ pub fn record(tracker: &dyn Store, spec: &RecordSpec, now: DateTime<Utc>) -> Res
             )));
         }
     }
+    // After the state check, so a refused record changes nothing. Given: it wins. Not given: a new application
+    // is `unknown` (nobody wrote down how it came about); one discovery queued keeps the origin it has.
+    match typed {
+        Some(origin) => {
+            tracker.set_origin(&key, origin)?;
+        }
+        None if is_new => {
+            tracker.set_origin(&key, Origin::Unknown)?;
+        }
+        None => {}
+    }
     let note = spec
         .note
         .as_deref()
@@ -456,8 +517,9 @@ pub fn record(tracker: &dyn Store, spec: &RecordSpec, now: DateTime<Utc>) -> Res
     }
     let job = tracker.get_job(&key)?;
     let (company, title) = job.map(|job| (job.company, job.title)).unwrap_or_default();
+    let origin = tracker.origin_of(&key)?.unwrap_or(Origin::Unknown);
     Ok(Outcome::done(format!(
-        "Registrada como enviada: {company} — {title} ({key})"
+        "Registrada como enviada: {company} — {title} ({key}); origen: {origin}"
     )))
 }
 

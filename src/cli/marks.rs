@@ -120,6 +120,7 @@ pub(super) fn cmd_record(
         salary_min_monthly_usd: args.salary_min,
         salary_max_monthly_usd: args.salary_max,
         note: args.note,
+        origin: None,
     };
     let tracker = open_tracker(paths)?;
     let outcome = actions::record(&tracker, &spec, at)?;

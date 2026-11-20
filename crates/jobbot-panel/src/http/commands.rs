@@ -295,6 +295,7 @@ fn record(panel: &Panel, req: &Request) -> Result<Reply> {
         salary_min_monthly_usd: body.salary_min,
         salary_max_monthly_usd: body.salary_max,
         note: body.note,
+        origin: None,
     };
     Ok(outcome_reply(actions::record(&*panel.tracker, &spec, at)?))
 }

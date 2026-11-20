@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, TimeDelta, TimeZone, Utc};
 
 use jobbot_app::actions::*;
+use jobbot_domain::origin::Origin;
 use jobbot_domain::prep::Question;
 use jobbot_domain::state::State;
 use jobbot_testkit::PrepStore;
@@ -550,13 +551,7 @@ fn record_stores_the_text_it_is_given_as_one_clean_line_and_cut() {
     let outcome = record(&t, &spec, *NOW).unwrap();
 
     assert!(outcome.ok, "{outcome:?}");
-    let key = outcome
-        .message
-        .rsplit('(')
-        .next()
-        .unwrap()
-        .trim_end_matches(')');
-    let job = t.get_job(key).unwrap().unwrap();
+    let job = t.get_job(&submitted_key(&t)).unwrap().unwrap();
     assert_eq!(job.company, "Acme Labs");
     assert!(job.title.starts_with("Backend Engineer y") && job.title.chars().count() <= 301);
     assert!(job.location.starts_with("Remoto x") && job.location.chars().count() <= 201);
@@ -587,7 +582,9 @@ fn record_of_a_new_posting_creates_it_and_stamps_the_given_time() {
     let key = "manual:jobs.ashbyhq.com_toku_abc";
     assert_eq!(
         outcome.message,
-        format!("Registrada como enviada: Toku — Senior Software Engineer ({key})")
+        format!(
+            "Registrada como enviada: Toku — Senior Software Engineer ({key}); origen: unknown"
+        )
     );
     let app = t.get_application(key).unwrap().unwrap();
     assert_eq!(app.state, State::Submitted);
@@ -762,6 +759,151 @@ fn record_without_a_key_needs_company_title_and_link() {
         );
     }
     assert!(t.counts().unwrap().is_empty(), "nothing was stored");
+}
+/// The key of the one application a record made.
+fn submitted_key(t: &Tracker) -> String {
+    t.list_by_state(State::Submitted).unwrap()[0]
+        .job_key
+        .clone()
+}
+#[test]
+fn record_with_an_origin_stores_it() {
+    let t = Tracker::in_memory().unwrap();
+    let spec = RecordSpec {
+        origin: Some("Referral ".into()),
+        ..record_spec("Acme", "Cargo", "https://x.example/1")
+    };
+
+    let outcome = record(&t, &spec, *NOW).unwrap();
+
+    assert!(outcome.ok, "{outcome:?}");
+    assert!(
+        outcome.message.ends_with("; origen: referral"),
+        "{outcome:?}"
+    );
+    let key = submitted_key(&t);
+    assert_eq!(t.origin_of(&key).unwrap(), Some(Origin::Referral));
+}
+#[test]
+fn record_without_an_origin_stores_unknown_on_a_new_application() {
+    let t = Tracker::in_memory().unwrap();
+
+    let outcome = record(
+        &t,
+        &record_spec("Acme", "Cargo", "https://x.example/1"),
+        *NOW,
+    )
+    .unwrap();
+
+    assert!(outcome.ok, "{outcome:?}");
+    let key = submitted_key(&t);
+    assert_eq!(t.origin_of(&key).unwrap(), Some(Origin::Unknown));
+}
+#[test]
+fn record_of_a_queued_posting_without_an_origin_keeps_cold() {
+    let (t, key) = tracker_with(&[]);
+    let spec = RecordSpec {
+        key: Some(key.clone()),
+        ..RecordSpec::default()
+    };
+
+    assert!(record(&t, &spec, *NOW).unwrap().ok);
+
+    assert_eq!(t.origin_of(&key).unwrap(), Some(Origin::Cold));
+}
+#[test]
+fn record_of_a_queued_posting_with_an_origin_replaces_cold() {
+    let (t, key) = tracker_with(&[]);
+    let spec = RecordSpec {
+        key: Some(key.clone()),
+        origin: Some("recruiter".into()),
+        ..RecordSpec::default()
+    };
+
+    assert!(record(&t, &spec, *NOW).unwrap().ok);
+
+    assert_eq!(t.origin_of(&key).unwrap(), Some(Origin::Recruiter));
+}
+#[test]
+fn record_with_an_invalid_origin_is_refused_and_writes_nothing() {
+    let t = Tracker::in_memory().unwrap();
+    let spec = RecordSpec {
+        origin: Some("amigo".into()),
+        ..record_spec("Acme", "Cargo", "https://x.example/1")
+    };
+
+    let outcome = record(&t, &spec, *NOW).unwrap();
+
+    assert!(!outcome.ok);
+    assert_eq!(
+        outcome.message,
+        "Origen no válido: amigo. Usa uno de: cold, referral, recruiter, agency, platform, direct, unknown"
+    );
+    assert!(t.counts().unwrap().is_empty(), "no application");
+    let epoch = *NOW - TimeDelta::days(3650);
+    assert!(t.cohort_since(epoch).unwrap().is_empty(), "no posting");
+}
+#[test]
+fn a_refused_record_does_not_change_the_origin() {
+    let (t, key) = tracker_with(&[State::Prepared, State::Submitted]);
+    let spec = RecordSpec {
+        key: Some(key.clone()),
+        origin: Some("referral".into()),
+        ..RecordSpec::default()
+    };
+
+    let outcome = record(&t, &spec, *NOW).unwrap();
+
+    assert!(!outcome.ok);
+    assert!(
+        outcome.message.contains("ya está registrada"),
+        "{outcome:?}"
+    );
+    assert_eq!(t.origin_of(&key).unwrap(), Some(Origin::Cold));
+}
+#[test]
+fn set_origin_changes_the_origin_and_says_from_what() {
+    let (t, key) = tracker_with(&[]);
+
+    let outcome = set_origin(&t, &key, "recruiter").unwrap();
+
+    assert!(outcome.ok, "{outcome:?}");
+    assert_eq!(outcome.message, "Origen de test:1: cold → recruiter");
+    assert_eq!(t.origin_of(&key).unwrap(), Some(Origin::Recruiter));
+}
+#[test]
+fn set_origin_refuses_an_unknown_key_and_an_invalid_origin() {
+    let (t, key) = tracker_with(&[]);
+
+    let missing = set_origin(&t, "nope:1", "cold").unwrap();
+    let invalid = set_origin(&t, &key, "amigo").unwrap();
+
+    assert!(!missing.ok);
+    assert_eq!(missing.message, "No existe la postulación nope:1");
+    assert!(!invalid.ok);
+    assert!(
+        invalid.message.starts_with("Origen no válido: amigo."),
+        "{invalid:?}"
+    );
+    assert_eq!(t.origin_of(&key).unwrap(), Some(Origin::Cold));
+}
+#[test]
+fn set_origin_to_the_same_origin_changes_nothing() {
+    let (t, key) = tracker_with(&[]);
+
+    let outcome = set_origin(&t, &key, " COLD ").unwrap();
+
+    assert!(outcome.ok, "{outcome:?}");
+    assert_eq!(outcome.message, "Sin cambios: test:1 ya tenía origen cold");
+}
+#[test]
+fn set_origin_works_on_a_withdrawn_application() {
+    let (t, key) = tracker_with(&[State::Withdrawn]);
+
+    let outcome = set_origin(&t, &key, "agency").unwrap();
+
+    assert!(outcome.ok, "{outcome:?}");
+    assert_eq!(t.origin_of(&key).unwrap(), Some(Origin::Agency));
 }
 #[test]
 fn grade_card_records_the_review() {
