@@ -7,8 +7,8 @@ use jobbot_domain::state::ANSWERED_STATES;
 use rusqlite::{params, params_from_iter};
 
 use super::{
-    CohortRow, EventRow, MoveRow, Result, SourceFunnelRow, State, Tracker, from_text,
-    optional_from_text, placeholders, state_from_text, to_text,
+    CohortRow, EventRow, FunnelRow, MoveRow, Result, State, Tracker, from_text, optional_from_text,
+    placeholders, state_from_text, to_text,
 };
 
 /// The span the state changes of `moves_between` are read from (`?1` from, `?2` until), with the
@@ -212,7 +212,7 @@ impl Tracker {
     /// stages mean what `submitted_since` and `jobs_reaching` mean for the whole funnel: `sent`
     /// is a submission stamp, the rest "reached that state at least once"; `n` is every
     /// application of the source, sent or not, so the page can show a base with each count.
-    pub fn funnel_by_source(&self) -> Result<Vec<SourceFunnelRow>> {
+    pub fn funnel_by_source(&self) -> Result<Vec<FunnelRow>> {
         // `events` is read once, and only its moves to an answered state (few, found through the
         // `to_state` index): one row per application that got an answer, with the stages it reached.
         let marks = placeholders(ANSWERED_STATES.len());
@@ -242,8 +242,8 @@ impl Tracker {
                     .map(|state| state.as_str()),
             ),
             |row| {
-                Ok(SourceFunnelRow {
-                    source: row.get(0)?,
+                Ok(FunnelRow {
+                    group: row.get(0)?,
                     n: row.get(1)?,
                     sent: row.get(2)?,
                     answered: row.get(3)?,
@@ -299,7 +299,7 @@ mod tests {
     use jobbot_domain::fixtures::{NOW, make_job, make_job_with};
 
     use crate::tracker::test_support::{stored_at, submit, submit_approved, three_scored};
-    use crate::tracker::{SourceFunnelRow, State, Tracker, to_text};
+    use crate::tracker::{FunnelRow, State, Tracker, to_text};
 
     #[test]
     fn approved_submitted_total_counts_only_approved() {
@@ -628,9 +628,9 @@ mod tests {
         walk("workable", "6", &[State::Prepared, State::Submitted]);
 
         let by_source = t.funnel_by_source().unwrap();
-        let sources: Vec<&str> = by_source.iter().map(|f| f.source.as_str()).collect();
+        let sources: Vec<&str> = by_source.iter().map(|f| f.group.as_str()).collect();
         assert_eq!(sources, ["ashby", "lever", "workable"], "sorted by name");
-        let stages = |row: &SourceFunnelRow| {
+        let stages = |row: &FunnelRow| {
             (
                 row.n,
                 row.sent,

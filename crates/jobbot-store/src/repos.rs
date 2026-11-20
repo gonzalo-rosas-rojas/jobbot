@@ -318,7 +318,7 @@ impl HistoryRepo for Tracker {
     fn jobs_reaching_both(&self, first: State, then: State) -> StoreResult<i64> {
         Tracker::jobs_reaching_both(self, first, then).map_err(StoreError::from)
     }
-    fn funnel_by_source(&self) -> StoreResult<Vec<SourceFunnelRow>> {
+    fn funnel_by_source(&self) -> StoreResult<Vec<FunnelRow>> {
         Tracker::funnel_by_source(self).map_err(StoreError::from)
     }
     fn cohort_since(&self, since: DateTime<Utc>) -> StoreResult<Vec<CohortRow>> {

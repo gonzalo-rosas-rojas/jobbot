@@ -31,9 +31,9 @@ pub use jobbot_domain::state::{SUBMITTED_STATES, State};
 
 // The records the tracker reads and writes are the application's port types.
 pub use jobbot_app::ports::store::{
-    ApplicationRow, AttemptStart, CohortRow, EmailAdded, EmailKind, EmailRow, EventRow,
-    INTENT_SUBMIT, INTERRUPTED_PREFIX, Intent, MoveRow, NewEmail, NewTask, SourceFunnelRow,
-    StoredPage, TaskAdded, TaskCompletion, TaskRow, UndoRefusal, UndoableMark,
+    ApplicationRow, AttemptStart, CohortRow, EmailAdded, EmailKind, EmailRow, EventRow, FunnelRow,
+    INTENT_SUBMIT, INTERRUPTED_PREFIX, Intent, MoveRow, NewEmail, NewTask, StoredPage, TaskAdded,
+    TaskCompletion, TaskRow, UndoRefusal, UndoableMark,
 };
 
 /// Everything the tracker can fail with. The first two are answers about the data (the caller

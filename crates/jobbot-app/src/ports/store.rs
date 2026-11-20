@@ -103,11 +103,12 @@ pub struct EventRow {
     pub note: Option<String>,
 }
 
-/// One source's line of the funnel (`funnel_by_source`): plain counts, never rates.
+/// One line of a funnel (`funnel_by_source`, `funnel_by_origin`, `funnel_by_region`): plain counts, never rates.
+/// `group` is the source's name, the origin's stored name or the region signal's name.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SourceFunnelRow {
-    pub source: String,
-    /// Applications of the source, whatever their state.
+pub struct FunnelRow {
+    pub group: String,
+    /// Applications in the group, whatever their state.
     pub n: i64,
     pub sent: i64,
     pub answered: i64,
@@ -599,7 +600,7 @@ pub trait HistoryRepo {
     /// stages mean what `submitted_since` and `jobs_reaching` mean for the whole funnel: `sent`
     /// is a submission stamp, the rest "reached that state at least once"; `n` is every
     /// application of the source, sent or not, so the page can show a base with each count.
-    fn funnel_by_source(&self) -> StoreResult<Vec<SourceFunnelRow>>;
+    fn funnel_by_source(&self) -> StoreResult<Vec<FunnelRow>>;
     /// Every posting first seen at or after `since`, with its application when it has one
     /// (`jobs LEFT JOIN applications`, one query). Withdrawn applications are in too.
     fn cohort_since(&self, since: DateTime<Utc>) -> StoreResult<Vec<CohortRow>>;

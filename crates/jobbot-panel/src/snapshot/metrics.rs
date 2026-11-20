@@ -141,7 +141,7 @@ pub(super) fn funnel(panel: &Panel) -> Result<Funnel> {
             .into_iter()
             .map(|row| {
                 (
-                    row.source,
+                    row.group,
                     SourceFunnel {
                         n: row.n,
                         sent: row.sent,
