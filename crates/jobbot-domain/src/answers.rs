@@ -417,7 +417,7 @@ impl AnswerBank {
     /// with `!` must NOT match (`visa&!reside` takes "Do you need a visa?" but not "... a visa in
     /// the country you reside in?"); a pattern needs at least one term without the `!`.
     ///
-    /// A label on the never-filled list (`FIELD_NEVER`: government identity numbers and banking)
+    /// A label on the never-filled list (`never_filled`: government identity numbers and banking)
     /// gets no entry at all, whatever the bank says, loose or `=` pattern alike: the field is
     /// reported as unanswered and goes to Gonza. Every fill path goes through this method.
     pub fn lookup(&self, label: &str) -> Option<&AnswerEntry> {
