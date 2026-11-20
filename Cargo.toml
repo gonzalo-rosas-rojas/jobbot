@@ -42,7 +42,7 @@ async-trait = "0.1.92"
 chrono = "0.4.45"
 chrono-tz = "0.10.4"
 getrandom = "0.4"
-html-escape = "0.2.15"
+html-escape = "0.3.1"
 pdf-extract = "0.12.1"
 # Pinned exactly: the form filler is tied to this driver's API and its bundled Chromium.
 playwright-rs = "=0.20.1"
