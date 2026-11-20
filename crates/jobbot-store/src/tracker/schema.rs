@@ -193,7 +193,7 @@ impl Tracker {
         conn.execute_batch(SCHEMA)?;
         Self::add_missing_columns(&conn)?;
         Self::add_origin_column(&mut conn)?;
-        Self::give_blank_company_norms_their_identity(&mut conn)?;
+        Self::repair_blank_company_norms_if_possible(&mut conn);
         conn.execute_batch(INDEXES_ON_ADDED_COLUMNS)?;
         Ok(Tracker {
             conn: Mutex::new(conn),
@@ -228,9 +228,7 @@ impl Tracker {
     /// only when the application was still `scored` (`record` sets `unknown` under the same rule for new
     /// applications). Nobody knows how those came about, and `cold` would claim jobbot found them and applied
     /// without contact. `substr` and not `LIKE`: in `LIKE` the `_` of `manual_record` matches any character. The
-    /// statements are built with `format!` from constants, as `add_missing_columns` builds its `ALTER`. Filling the
-    /// blank `company_norm` of older rows is not part of this step: it runs on every open
-    /// (`give_blank_company_norms_their_identity`), so a file that already has the column gets it too.
+    /// statements are built with `format!` from constants, as `add_missing_columns` builds its `ALTER`.
     fn add_origin_column(conn: &mut Connection) -> Result<()> {
         if Self::has_column(conn, "applications", "origin")? {
             return Ok(());
@@ -250,6 +248,14 @@ impl Tracker {
         Ok(())
     }
 
+    /// `give_blank_company_norms_their_identity` as the open runs it: a failure is swallowed. The repair is cosmetic
+    /// (those rows were just as blank before this build), so the write lock not coming within the busy timeout, or a
+    /// file that is read-only, must never be the reason the panel or the CLI cannot open the tracker. The rows are
+    /// still blank, so the next open tries again.
+    fn repair_blank_company_norms_if_possible(conn: &mut Connection) {
+        let _ = Self::give_blank_company_norms_their_identity(conn);
+    }
+
     /// Rows stored before `company_identity` existed kept `company_norm = ''` when `normalize` could not fold the
     /// name (another script, or only a legal suffix), so such a company was nobody's and the cap, the cooldown and
     /// the e-mail match never saw it. Those rows, and only those, get the identity now. A row that already has a
@@ -258,11 +264,12 @@ impl Tracker {
     /// none and never takes the write lock), and the writes go in their own short IMMEDIATE transaction, which looks
     /// again because another process may have done it in between.
     fn give_blank_company_norms_their_identity(conn: &mut Connection) -> Result<()> {
-        if Self::blank_company_norms(conn)?.is_empty() {
+        // (see `repair_blank_company_norms_if_possible` for what happens when this cannot write)
+        if Self::company_norm_fills(conn)?.is_empty() {
             return Ok(());
         }
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        for (table, key_column, key, identity) in Self::blank_company_norms(&tx)? {
+        for (table, key_column, key, identity) in Self::company_norm_fills(&tx)? {
             tx.execute(
                 &format!("UPDATE {table} SET company_norm = ?1 WHERE {key_column} = ?2"),
                 params![identity, key],
@@ -273,7 +280,7 @@ impl Tracker {
     }
 
     /// The rows with `company_norm = ''` whose company has an identity: (table, key column, key, identity).
-    fn blank_company_norms(
+    fn company_norm_fills(
         conn: &Connection,
     ) -> Result<Vec<(&'static str, &'static str, String, String)>> {
         let mut found = Vec::new();
@@ -903,8 +910,7 @@ mod tests {
     }
 
     #[test]
-    fn a_database_that_already_has_origin_gets_its_blank_company_norms_on_open_and_a_second_open_writes_nothing()
-     {
+    fn a_database_that_already_has_origin_gets_its_blank_company_norms_on_open() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("current.db");
         drop(Tracker::open(&path).unwrap());
@@ -916,10 +922,56 @@ mod tests {
         assert!(norms.contains(&("job blank:1".to_string(), "жк строй".to_string())));
         assert!(norms.contains(&("application blank:1".to_string(), "жк строй".to_string())));
         assert!(norms.contains(&("job blank:2".to_string(), String::new())));
-        let mut conn = t.lock();
-        let before = conn.total_changes();
-        Tracker::give_blank_company_norms_their_identity(&mut conn).unwrap();
-        assert_eq!(conn.total_changes(), before, "nothing left to write");
+    }
+
+    #[test]
+    fn a_second_open_writes_no_company_norm() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("current.db");
+        drop(Tracker::open(&path).unwrap());
+        blank_company_norms(&path);
+        let first = company_norms(&Tracker::open(&path).unwrap());
+
+        let second = Tracker::open(&path).unwrap();
+
+        assert_eq!(company_norms(&second), first);
+        assert_eq!(
+            second.lock().total_changes(),
+            0,
+            "the second open found nothing to fill and wrote nothing"
+        );
+    }
+
+    #[test]
+    fn a_repair_that_cannot_write_does_not_stop_the_open_and_a_later_open_does_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("current.db");
+        drop(Tracker::open(&path).unwrap());
+        blank_company_norms(&path);
+        // A connection that cannot write, as a read-only file or a lock that never frees would give.
+        let mut read_only = Connection::open_with_flags(
+            &path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .unwrap();
+
+        Tracker::repair_blank_company_norms_if_possible(&mut read_only);
+
+        drop(read_only);
+        let unchanged = Connection::open(&path).unwrap();
+        let norm: String = unchanged
+            .query_row(
+                "SELECT company_norm FROM jobs WHERE key = 'blank:1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(norm, "", "nothing was written");
+        drop(unchanged);
+        let later = Tracker::open(&path).unwrap();
+        assert!(
+            company_norms(&later).contains(&("job blank:1".to_string(), "жк строй".to_string()))
+        );
     }
 
     #[test]
