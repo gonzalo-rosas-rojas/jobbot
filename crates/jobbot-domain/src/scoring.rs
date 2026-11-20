@@ -17,23 +17,29 @@ static RANGE: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
-/// The period a pay range names right after it: `per year`, `a month`, `/yr`, `annually`, with
-/// only a currency word allowed in between. A word further on (`plus an annual bonus`) is not
-/// about the pay.
+/// The period a pay range names right after it, reached through whitespace (and an opening
+/// parenthesis) only, with a currency word allowed in between: `per year`, `a month`, `/yr`,
+/// `annually`, or a bare `annual`, `yearly`, `monthly` (see `stated_period` for the last one).
+/// Anything else between the range and the word (`+ annual bonus`, `. Annual leave`) means the
+/// word is not about the pay.
 static PERIOD_AFTER: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"(?i)^[^a-z/]*(?:(?:usd|us\$|dollars?|gross|net)\W*)*(?:(?:per|a|each|/)\s?)?(year|yr|annum|annual|annually|yearly|month|mo|monthly)\b",
+        r"(?i)^\s*\(?\s*(?:(?:usd|us\$|dollars?|gross|net)\s*)*(?:(?:per|a|each|/)\s?(?P<fixed>year|yr|annum|month|mo)|(?P<adverb>annually)|(?P<bare>annual|yearly|monthly))\b",
     )
     .unwrap()
 });
 
-/// The period a pay range is introduced with: `Annual salary: $15,000 - $19,000`.
+/// The period a pay range is introduced with, right before it (whitespace or a colon between):
+/// `Annual salary: $15,000 - $19,000`.
 static PERIOD_BEFORE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"(?i)(annual|yearly|monthly)\s+(?:base\s+)?(?:salary|pay|compensation|range)\b[^0-9]*$",
+        r"(?i)(annual|yearly|monthly)\s+(?:base\s+)?(?:salary|pay|compensation|range)[\s:]*$",
     )
     .unwrap()
 });
+
+/// How many characters before a range are read for the word that introduces it.
+const PERIOD_BEFORE_CHARS: usize = 40;
 
 /// A pay period the text states.
 #[derive(Clone, Copy, PartialEq)]
@@ -53,11 +59,32 @@ fn period_named(word: &str) -> Option<Period> {
 /// The period the text says for the range that starts at `start`: the word right after it, else the one
 /// that introduces it. `None` when it says none (the size of the numbers decides then).
 fn stated_period(text: &str, start: usize, tail: &str) -> Option<Period> {
-    if let Some(word) = PERIOD_AFTER.captures(tail).and_then(|caps| caps.get(1)) {
-        return period_named(word.as_str());
+    if let Some(caps) = PERIOD_AFTER.captures(tail) {
+        let end = caps.get(0).map_or(0, |whole| whole.end());
+        let bare = caps.name("bare");
+        // A bare `annual`, `yearly` or `monthly` is the period only when nothing else follows it:
+        // `Yearly learning budget` is a perk, not the pay's period.
+        let starts_a_phrase = tail[end..]
+            .trim_start()
+            .chars()
+            .next()
+            .is_some_and(char::is_alphanumeric);
+        if bare.is_some() && starts_a_phrase {
+            return None;
+        }
+        let word = caps
+            .name("fixed")
+            .or(caps.name("adverb"))
+            .or(bare)
+            .map(|found| found.as_str());
+        return word.and_then(period_named);
     }
     let before: String = {
-        let mut chars: Vec<char> = text[..start].chars().rev().take(40).collect();
+        let mut chars: Vec<char> = text[..start]
+            .chars()
+            .rev()
+            .take(PERIOD_BEFORE_CHARS)
+            .collect();
         chars.reverse();
         chars.into_iter().collect()
     };
@@ -481,6 +508,42 @@ mod tests {
             parse_salary_monthly_usd("$4,000 - $6,000 plus an annual bonus"),
             (Some(4000.0), Some(6000.0))
         );
+    }
+
+    #[test]
+    fn a_period_word_that_is_not_about_the_pay_does_not_set_its_period() {
+        // Monthly by size: the word is not right after the range, or it starts another phrase.
+        for text in [
+            "$4,000 - $6,000 + annual bonus",
+            "$4,000 – $6,000. Annual leave",
+            "$4,000-$6,000\nYearly learning budget",
+            "$4,000 - $6,000 yearly learning budget",
+            "Annual pay review included. Salary: $4,000 - $6,000",
+        ] {
+            assert_eq!(
+                parse_salary_monthly_usd(text),
+                (Some(4000.0), Some(6000.0)),
+                "{text:?}"
+            );
+        }
+        // Yearly by size, and a month word that is not about the pay does not change it.
+        assert_eq!(
+            parse_salary_monthly_usd("$40,000 - $60,000. Monthly internet stipend"),
+            (Some(40_000.0 / 12.0), Some(5000.0))
+        );
+        // The period words right after the range, or the introduction right before it, still count.
+        let (low, high) = parse_salary_monthly_usd("$15,000 - $19,000 (per year)");
+        assert_eq!(
+            (low.unwrap().round(), high.unwrap().round()),
+            (1250.0, 1583.0)
+        );
+        let (low, high) = parse_salary_monthly_usd("$15,000 - $19,000 annual");
+        assert_eq!(
+            (low.unwrap().round(), high.unwrap().round()),
+            (1250.0, 1583.0)
+        );
+        let (low, _) = parse_salary_monthly_usd("Yearly salary:  $15,000 - $19,000");
+        assert_eq!(low.unwrap().round(), 1250.0);
     }
 
     #[test]
