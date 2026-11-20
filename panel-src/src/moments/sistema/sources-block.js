@@ -13,10 +13,10 @@ import { sync, setData, setHidden } from "../shared/util.js";
 import { setVar, pct, keyedRow } from "./parts.js";
 import { FUNNEL_BYS } from "./view.js";
 
-const SOURCE_COLUMNS = ["board", "posted", "sent", "answered", "rejected"];
+const FUNNEL_COLUMNS = ["board", "posted", "sent", "answered", "rejected"];
 
 export function createSourcesBlock() {
-  const srcHead = SOURCE_COLUMNS.map((id) => h("th", { class: id === "board" ? "col-board label" : "col-n label", scope: "col" }));
+  const srcHead = FUNNEL_COLUMNS.map((id) => h("th", { class: id === "board" ? "col-board label" : "col-n label", scope: "col" }));
   const srcBody = h("tbody");
   const srcCells = new WeakMap();       // each row of the table -> the nodes the patch writes to
   const srcTable = h("table", { class: "sources-table" }, h("thead", {}, h("tr", {}, ...srcHead)), srcBody);
@@ -32,7 +32,7 @@ export function createSourcesBlock() {
   const sourcesBlock = h("section", { class: "block sources", "data-block": "sources" }, sourcesTitle, switchBar, srcTable, srcEmpty, srcMore, srcNote);
 
   function patch(view) {
-    const s = view.sources;
+    const s = view.funnel;
     setText(sourcesLabel, s.title);
     setText(switchLabel, s.switchLabel);
     if (switchBar.getAttribute("aria-label") !== s.switchLabel) switchBar.setAttribute("aria-label", s.switchLabel);
@@ -41,7 +41,7 @@ export function createSourcesBlock() {
       const on = String(pick.on);
       if (switchButtons[i].getAttribute("aria-pressed") !== on) switchButtons[i].setAttribute("aria-pressed", on);
     });
-    SOURCE_COLUMNS.forEach((id, i) => setText(srcHead[i], i === 0 ? s.head : t("sistema.sources.head." + id)));
+    FUNNEL_COLUMNS.forEach((id, i) => setText(srcHead[i], i === 0 ? s.head : t("sistema.sources.head." + id)));
     setText(srcWeek, s.week || "");
     setHidden(srcWeek, !s.week);
     const bodyRows = s.rows.map((r) => {

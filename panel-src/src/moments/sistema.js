@@ -45,8 +45,8 @@ const overflows = (host) => host.scrollHeight > host.clientHeight + 1;
 const fitKey = (me, full) => [
   lang(),
   me.by,                                                   // each split of the funnel lists a different number of rows
-  full.sources.rows.length,
-  full.sources.moreLabel,
+  full.funnel.rows.length,
+  full.funnel.moreLabel,
   full.errors.total,
   full.account.anchor ? full.account.anchor.state : "",    // the warning of an account nothing pins down is taller
   full.account.state,
@@ -68,7 +68,7 @@ function paint(me) {
     me.view = show === max ? full : sistemaView(me.model, { ...base, show });
     me.ui.patch(me.view, { ...state, foot: show.foot });
     // the next step starts from what was really listed: a smaller number than the list has changes nothing and would only measure again
-    const next = overflows(me.host) ? shrunk({ sources: me.view.sources.rows.length, errors: me.view.errors.rows.length, foot: show.foot }) : null;
+    const next = overflows(me.host) ? shrunk({ sources: me.view.funnel.rows.length, errors: me.view.errors.rows.length, foot: show.foot }) : null;
     if (!next) break;
     show = next;
   }

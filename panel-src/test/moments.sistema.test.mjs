@@ -228,7 +228,7 @@ test("the limits and thresholds are read only, from the model, and say how to ch
 
 test("the sources of the postings: counts per board, never a rate with fewer than ten sent (A16)", () => {
   fresh();
-  const v = view(scenario("night")).sources;
+  const v = view(scenario("night")).funnel;
   assert.deepEqual(v.rows.map((r) => [r.name, r.n, r.sent, r.answered]), [["greenhouse", 20, 16, 5], ["ashby", 12, 9, 3], ["lever", 9, 6, 1]]);
   assert.equal(v.week, "7 días: respondieron 3 de 9 enviadas");
   assert.match(v.note, /Conteos, no tasas/);
@@ -236,18 +236,18 @@ test("the sources of the postings: counts per board, never a rate with fewer tha
   many.metrics.sent_week = 12;
   many.metrics.responses_week = 3;
   many.metrics.response_rate = 0.25;
-  assert.equal(view(many).sources.week, "7 días: respondieron 3 de 12 enviadas · 25%", "with ten or more the rate may be said");
-  const never = view(scenario("never")).sources;
+  assert.equal(view(many).funnel.week, "7 días: respondieron 3 de 12 enviadas · 25%", "with ten or more the rate may be said");
+  const never = view(scenario("never")).funnel;
   assert.deepEqual([never.rows.length, never.week], [0, null]);
   assert.equal(never.empty, "Todavía no hay envíos por tablón.");
   const wide = scenario("night");
   wide.funnel.by_source = Object.fromEntries(Array.from({ length: 11 }, (_, i) => [`board${String(i).padStart(2, "0")}`, { n: 20 - i, sent: 5, answered: 1, tests: 0, interviews: 0, offers: 0 }]));
-  const cut = view(wide).sources;
+  const cut = view(wide).funnel;
   assert.equal(cut.rows.length, 8);
   assert.equal(cut.moreLabel, "y 3 más");
   const odd = scenario("night");
   odd.funnel.by_source = { weird: { n: "x", sent: null }, "": {}, ok: { n: 3, sent: 2, answered: 0 } };
-  const oddView = view(odd).sources;
+  const oddView = view(odd).funnel;
   clean(oddView, "odd sources");
   assert.ok(oddView.rows.every((r) => Number.isInteger(r.n) && Number.isInteger(r.sent) && Number.isInteger(r.answered)));
 });
@@ -255,23 +255,23 @@ test("the sources of the postings: counts per board, never a rate with fewer tha
 test("the funnel table switches to origins and regions, names them in words and keeps the order by n", () => {
   fresh();
   const name = (r) => [r.name, r.n, r.sent, r.answered, r.rejected];
-  const origin = view(scenario("night"), { by: "origin" }).sources;
+  const origin = view(scenario("night"), { by: "origin" }).funnel;
   assert.deepEqual(origin.rows.map(name), [["en frío", 30, 22, 4, 2], ["referido", 4, 4, 3, 0], ["sin dato", 4, 2, 0, 0], ["reclutador", 3, 3, 2, 1]]);
   assert.deepEqual([origin.by, origin.title, origin.head], ["origin", "Origen de cada postulación", "origen"]);
   assert.match(origin.note, /corrígelo con jobbot origin/);
-  const region = view(scenario("night"), { by: "region" }).sources;
+  const region = view(scenario("night"), { by: "region" }).funnel;
   assert.deepEqual(region.rows.map((r) => r.name), ["nombra una región abierta", "no dice dónde", "otro lugar"]);
   assert.deepEqual([region.title, region.head], ["Región que nombra el aviso", "región"]);
   assert.match(region.note, /no cambia el puntaje/);
-  const boards = view(scenario("night"), { by: "source" }).sources;
+  const boards = view(scenario("night"), { by: "source" }).funnel;
   assert.deepEqual([boards.title, boards.head], ["Fuentes por tablón", "tablón"]);
   assert.equal(boards.week, origin.week, "the 7-day line is the same in every view");
   fresh("en");
-  assert.deepEqual(view(scenario("night"), { by: "origin" }).sources.rows.map((r) => r.name), ["cold", "referral", "unknown", "recruiter"]);
-  assert.equal(view(scenario("night"), { by: "origin" }).sources.title, "How each application came");
+  assert.deepEqual(view(scenario("night"), { by: "origin" }).funnel.rows.map((r) => r.name), ["cold", "referral", "unknown", "recruiter"]);
+  assert.equal(view(scenario("night"), { by: "origin" }).funnel.title, "How each application came");
   fresh();
   for (const by of ["origin", "region"]) {
-    const none = view(scenario("never"), { by }).sources;
+    const none = view(scenario("never"), { by }).funnel;
     assert.deepEqual([none.rows.length, none.week, none.note], [0, null, null], by);
     assert.match(none.empty, /Todavía no hay postulaciones por/);
     clean(none, "empty " + by);
@@ -283,27 +283,27 @@ test("an origin or a region the page does not know is shown by its cleaned name"
   const snap = scenario("night");
   snap.funnel.by_origin = { cold: { n: 1 }, friend: { n: 5, sent: 1, answered: 0 }, "": { n: 9 } };
   snap.funnel.by_region = { mars: { n: 2 } };
-  const origin = view(snap, { by: "origin" }).sources;
+  const origin = view(snap, { by: "origin" }).funnel;
   assert.deepEqual(origin.rows.map((r) => r.name), ["friend", "en frío"]);
-  assert.deepEqual(view(snap, { by: "region" }).sources.rows.map((r) => r.name), ["mars"]);
+  assert.deepEqual(view(snap, { by: "region" }).funnel.rows.map((r) => r.name), ["mars"]);
   clean(origin, "unknown origin");
 });
 
 test("rejected is a fourth number in every row and a missing one is 0", () => {
   fresh();
-  const boards = view(scenario("night")).sources.rows;
+  const boards = view(scenario("night")).funnel.rows;
   assert.deepEqual(boards.map((r) => [r.name, r.rejected]), [["greenhouse", 2], ["ashby", 1], ["lever", 0]]);
   const snap = scenario("night");
   snap.funnel.by_source = { old: { n: 3, sent: 2, answered: 1 }, odd: { n: 2, rejected: "x" }, neg: { n: 1, rejected: -4 } };
-  const rows = view(snap).sources.rows;
+  const rows = view(snap).funnel.rows;
   assert.ok(rows.every((r) => r.rejected === 0), JSON.stringify(rows));
 });
 
 test("an unknown \"by\" shows the boards", () => {
   fresh();
-  const boards = view(scenario("night")).sources;
+  const boards = view(scenario("night")).funnel;
   for (const by of ["nope", undefined, null, 7, "by_origin"]) {
-    const v = view(scenario("night"), { by }).sources;
+    const v = view(scenario("night"), { by }).funnel;
     assert.equal(v.by, "source");
     assert.deepEqual(v.rows, boards.rows);
   }
@@ -312,12 +312,12 @@ test("an unknown \"by\" shows the boards", () => {
 test("the switch says which view is on", () => {
   fresh();
   for (const by of FUNNEL_BYS) {
-    const sw = view(scenario("night"), { by }).sources.switch;
+    const sw = view(scenario("night"), { by }).funnel.switch;
     assert.deepEqual(sw.map((p) => p.id), ["source", "origin", "region"]);
     assert.deepEqual(sw.filter((p) => p.on).map((p) => p.id), [by], "exactly one is on");
   }
-  assert.deepEqual(view(scenario("night")).sources.switch.map((p) => p.label), ["tablón", "origen", "región"]);
-  assert.equal(view(scenario("night")).sources.switchLabel, "Ver por");
+  assert.deepEqual(view(scenario("night")).funnel.switch.map((p) => p.label), ["tablón", "origen", "región"]);
+  assert.equal(view(scenario("night")).funnel.switchLabel, "Ver por");
 });
 
 test("the auto-approval threshold: from the model only (null is off, a whole 1..100 is 'desde N puntos', anything else is 'sin dato'), read only, and honest that the engine does not use it yet", () => {
@@ -405,12 +405,12 @@ test("show: when the sheet has no room, fewer boards and errors are listed and t
   const wide = scenario("night");
   wide.funnel.by_source = Object.fromEntries(Array.from({ length: 6 }, (_, i) => [`board${i}`, { n: 20 - i, sent: 5, answered: 1 }]));
   const v = view(wide, { show: { sources: 3, errors: 1 } });
-  assert.deepEqual([v.sources.rows.length, v.sources.moreLabel], [3, "y 3 más"]);
+  assert.deepEqual([v.funnel.rows.length, v.funnel.moreLabel], [3, "y 3 más"]);
   assert.deepEqual([v.errors.rows.length, v.errors.total, v.errors.moreLabel], [1, 2, "y 1 más"], "the count of the title stays the whole one");
-  assert.equal(view(wide, { show: { sources: 99, errors: 99 } }).sources.rows.length, 6, "never more than the page's own cut");
+  assert.equal(view(wide, { show: { sources: 99, errors: 99 } }).funnel.rows.length, 6, "never more than the page's own cut");
   for (const odd of [null, {}, { sources: 0, errors: -1 }, { sources: "3", errors: 1.5 }, { sources: NaN }]) {
     const w = view(wide, { show: odd });
-    assert.equal(w.sources.rows.length, 6, JSON.stringify(odd));
+    assert.equal(w.funnel.rows.length, 6, JSON.stringify(odd));
     assert.equal(w.errors.rows.length, 2, JSON.stringify(odd));
   }
   clean(v, "show");

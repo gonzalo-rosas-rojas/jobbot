@@ -294,7 +294,7 @@ function groupName(by, name) {
 }
 
 /** The funnel table: the boards (the default), the origins or the regions. An unknown `by` is the boards. */
-function sourcesOf(snap, shown, by = "source") {
+function funnelOf(snap, shown, by = "source") {
   if (!FUNNEL_BYS.includes(by)) by = "source";
   const raw = isRecord(snap.funnel) && isRecord(snap.funnel["by_" + by]) ? snap.funnel["by_" + by] : {};
   const all = Object.entries(raw).filter(([name, v]) => name.trim() && isRecord(v))
@@ -310,15 +310,14 @@ function sourcesOf(snap, shown, by = "source") {
     week = tn("sistema.sources.week", sentWeek, { a: whole(metrics.responses_week) });
     if (sentWeek >= MIN_SENT_FOR_RATE && num(metrics.response_rate) != null) week += " · " + fmtPercent(metrics.response_rate);
   }
-  const own = by === "source";
   return {
     by,
-    title: t(own ? "sistema.sources.title" : "sistema.funnel.title." + by),
-    head: t(own ? "sistema.sources.head.board" : "sistema.funnel.head." + by),
+    title: t("sistema.funnel.title." + by),
+    head: t("sistema.funnel.head." + by),
     rows,
     week,
-    note: rows.length ? t(own ? "sistema.sources.note" : "sistema.funnel.note." + by) : null,
-    empty: rows.length ? null : t(own ? "sistema.sources.empty" : "sistema.funnel.empty." + by),
+    note: rows.length ? t("sistema.funnel.note." + by) : null,
+    empty: rows.length ? null : t("sistema.funnel.empty." + by),
     moreLabel: all.length > rows.length ? t("sistema.more", { n: all.length - rows.length }) : null,
     switchLabel: t("sistema.funnel.by"),
     switch: FUNNEL_BYS.map((id) => ({ id, label: t("sistema.funnel.by." + id), on: id === by })),
@@ -357,7 +356,7 @@ function errorsOf(snap, { nowMs, lastMs, runResult, shown }) {
 /**
  * sistemaView(model, { nowMs, intent, batchMin, show, by }) ->
  *   { engine, eyebrow, status, old, head: { lead, tail }, chip: { tone, text, stop }, figures[2], strip, run: { last, result, steps[4], window },
- *     task, stop, account, spend, limits, sources, errors, foot }
+ *     task, stop, account, spend, limits, funnel, errors, foot }
  * `intent` is what the person asked for before the server has answered (true: STOP on, false: STOP off, null: ask the snapshot): the page
  * shows it at once. `batchMin` is the lote's threshold from the page's settings; null when there is no setting, which the stop shows as "sin dato".
  * `show` ({ sources, errors }) says how many boards and errors to list when the sheet has no room for all: the rest is "y N más".
@@ -404,7 +403,7 @@ export function sistemaView(m, { nowMs, intent = null, batchMin = null, show = n
     account: accountOf(c.claude_account, nowMs),
     spend: spendOf(snap.claude),
     limits: limitsOf(snap, batchMin),
-    sources: sourcesOf(snap, shownSources, by),
+    funnel: funnelOf(snap, shownSources, by),
     errors: errorsOf(snap, { nowMs, lastMs, runResult: result, shown: shownErrors }),
     foot: {
       title: t("sistema.foot.prefs"),
