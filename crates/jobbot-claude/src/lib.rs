@@ -566,8 +566,9 @@ impl CliClaude {
 
     /// The environment every child gets, whatever it is asked to do: nothing that picks another
     /// account or bill (`picks_account_or_bill`), then this program's own config folder, then
-    /// `CHILD_ENV`. The four names of `CHILD_ENV_REMOVED` are removed even when they are not set:
-    /// nothing can put them there between now and the spawn.
+    /// `CHILD_ENV`. The names of `CHILD_ENV_REMOVED` and `CHILD_ENV_REMOVED_SETTINGS` are removed
+    /// even when they are not set, so a value that appears in the parent between this check and the
+    /// spawn still never reaches the child.
     fn scrub_env(
         &self,
         command: &mut Command,
