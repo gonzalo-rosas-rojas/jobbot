@@ -398,46 +398,6 @@ fn rules_excluding(company: &str) -> (Criteria, Exclusions) {
         },
     )
 }
-/// `count` queued postings of companies "Bulk Excluded 1", "Bulk Excluded 2"... and the tracker
-/// they are in.
-async fn queued_bulk(count: usize) -> (Tracker, Vec<Job>) {
-    let jobs: Vec<Job> = (1..=count)
-        .map(|n| good(&n.to_string(), &format!("Bulk Excluded {n}")))
-        .collect();
-    (stored_by_discovery(jobs.clone()).await, jobs)
-}
-#[tokio::test]
-async fn an_exclusion_withdraws_up_to_ten_applications_in_one_pass() {
-    let (tracker, jobs) = queued_bulk(MAX_EXCLUSION_WITHDRAWALS_PER_PASS).await;
-    let (criteria, exclusions) = rules_excluding("Bulk Excluded");
-
-    let report = discover(&[fake(jobs, &[])], &criteria, &exclusions, &tracker, *NOW)
-        .await
-        .unwrap();
-
-    assert_eq!(report.pruned_excluded, MAX_EXCLUSION_WITHDRAWALS_PER_PASS);
-    assert_eq!(report.excluded_held_back, 0);
-    assert_eq!(state_and_note(&tracker, "test:3").0, State::Withdrawn);
-}
-#[tokio::test]
-async fn an_exclusion_that_would_withdraw_more_than_ten_withdraws_none_and_says_so() {
-    let (tracker, jobs) = queued_bulk(MAX_EXCLUSION_WITHDRAWALS_PER_PASS + 1).await;
-    let (criteria, exclusions) = rules_excluding("Bulk Excluded");
-
-    let report = discover(&[fake(jobs, &[])], &criteria, &exclusions, &tracker, *NOW)
-        .await
-        .unwrap();
-
-    // Withdrawal is terminal: a wrong rule (a blank entry, a name that is also a word) must not
-    // empty the queue. The gate still refuses each of these at submit.
-    assert_eq!(report.pruned_excluded, 0);
-    assert_eq!(
-        report.excluded_held_back,
-        MAX_EXCLUSION_WITHDRAWALS_PER_PASS + 1
-    );
-    assert_eq!(report.excluded_held_back_rules, ["name:Bulk Excluded"]);
-    assert_eq!(state_and_note(&tracker, "test:3").0, State::Scored);
-}
 /// `count` queued excluded-company postings, the first two of which the source now dates as too
 /// old; one more discovery run with the exclusion in force. Returns the report and the tracker.
 async fn excluded_with_two_stale(count: usize) -> (DiscoveryReport, Tracker) {
@@ -469,12 +429,11 @@ async fn excluded_with_two_stale(count: usize) -> (DiscoveryReport, Tracker) {
 }
 #[tokio::test]
 async fn an_application_that_is_stale_is_withdrawn_as_stale_even_when_it_is_excluded_too() {
-    // 11 excluded, 2 of them stale: the 2 leave as stale, the other 9 are within the guard.
-    let (report, tracker) = excluded_with_two_stale(MAX_EXCLUSION_WITHDRAWALS_PER_PASS + 1).await;
+    // 11 excluded, 2 of them stale: the 2 leave as stale, the other 9 by exclusion.
+    let (report, tracker) = excluded_with_two_stale(11).await;
 
     assert_eq!(report.pruned_stale, 2);
     assert_eq!(report.pruned_excluded, 9);
-    assert_eq!(report.excluded_held_back, 0);
     assert_eq!(state_and_note(&tracker, "test:1").1.unwrap(), STALE_NOTE);
     assert!(
         state_and_note(&tracker, "test:5")
@@ -484,15 +443,42 @@ async fn an_application_that_is_stale_is_withdrawn_as_stale_even_when_it_is_excl
     );
 }
 #[tokio::test]
-async fn stale_ones_leave_first_and_the_guard_counts_only_the_rest() {
-    // 13 excluded, 2 of them stale: 2 leave as stale, the other 11 exceed the guard.
+async fn stale_ones_are_counted_as_stale_and_the_rest_as_excluded_however_many() {
     let (report, tracker) = excluded_with_two_stale(13).await;
 
     assert_eq!(report.pruned_stale, 2);
-    assert_eq!(report.pruned_excluded, 0);
-    assert_eq!(report.excluded_held_back, 11);
+    assert_eq!(report.pruned_excluded, 11);
     assert_eq!(state_and_note(&tracker, "test:2").1.unwrap(), STALE_NOTE);
-    assert_eq!(state_and_note(&tracker, "test:5").0, State::Scored);
+    assert_eq!(state_and_note(&tracker, "test:5").0, State::Withdrawn);
+}
+#[tokio::test]
+async fn an_unconfirmed_click_on_an_excluded_company_is_listed_and_kept() {
+    let first = good("1", "Later Excluded Co");
+    let tracker = stored_by_discovery(vec![first.clone()]).await;
+    tracker
+        .transition(
+            "test:1",
+            State::NeedsGonza,
+            Some("unconfirmed_submit: la página no confirmó"),
+            *NOW,
+        )
+        .unwrap();
+    tracker.record_attempt("test:1", *NOW).unwrap();
+    let (criteria, exclusions) = rules_excluding("Later Excluded Co");
+
+    let report = discover(
+        &[fake(vec![first], &[])],
+        &criteria,
+        &exclusions,
+        &tracker,
+        *NOW,
+    )
+    .await
+    .unwrap();
+
+    // The click may have gone through: it is not withdrawn, and the owner is told.
+    assert_eq!(state_and_note(&tracker, "test:1").0, State::NeedsGonza);
+    assert_eq!(report.excluded_waiting, ["test:1"]);
 }
 #[tokio::test]
 async fn an_excluded_company_already_on_the_by_hand_list_is_kept_and_reported() {
@@ -568,166 +554,6 @@ async fn rescore_does_not_queue_a_posting_of_a_company_excluded_since_it_was_sto
         RescoreReport::default()
     );
     assert!(tracker.get_application("test:1").unwrap().is_none());
-}
-/// `good` with another source's link: where the apply button goes decides if the bot can fill it.
-fn good_at(id: &str, apply_url: &str) -> Job {
-    Job {
-        apply_url: apply_url.into(),
-        url: apply_url.into(),
-        ..good(id, "Acme AI")
-    }
-}
-#[tokio::test]
-async fn a_fillable_copy_of_a_role_first_stored_from_an_aggregator_replaces_it() {
-    let listing = good_at(
-        "1",
-        "https://himalayas.app/companies/acme/jobs/senior-ai-engineer",
-    );
-    let tracker = stored_by_discovery(vec![listing]).await;
-    assert_eq!(state_and_note(&tracker, "test:1").0, State::Scored);
-    let fillable = good_at("2", "https://boards.greenhouse.io/acme/jobs/55");
-
-    let report = discover_again(&tracker, vec![fillable]).await;
-
-    assert_eq!((report.already_seen, report.queued), (0, 1));
-    assert_eq!(state_and_note(&tracker, "test:2").0, State::Scored);
-    assert_eq!(state_and_note(&tracker, "test:1").0, State::Withdrawn);
-    // A second pass over both copies changes nothing and stores nothing new.
-    let again = discover_again(
-        &tracker,
-        vec![
-            good_at(
-                "1",
-                "https://himalayas.app/companies/acme/jobs/senior-ai-engineer",
-            ),
-            good_at("2", "https://boards.greenhouse.io/acme/jobs/55"),
-        ],
-    )
-    .await;
-    assert_eq!((again.already_seen, again.queued), (2, 0));
-}
-#[tokio::test]
-async fn a_listing_only_copy_does_not_replace_a_fillable_one() {
-    let fillable = good_at("1", "https://boards.greenhouse.io/acme/jobs/55");
-    let tracker = stored_by_discovery(vec![fillable]).await;
-
-    let report = discover_again(
-        &tracker,
-        vec![good_at(
-            "2",
-            "https://himalayas.app/companies/acme/jobs/senior-ai-engineer",
-        )],
-    )
-    .await;
-
-    assert_eq!((report.already_seen, report.queued), (1, 0));
-    assert_eq!(state_and_note(&tracker, "test:1").0, State::Scored);
-}
-#[tokio::test]
-async fn the_same_role_in_two_different_places_is_two_postings() {
-    let latam = Job {
-        location: "Remote - Latin America".into(),
-        ..good_at("1", "https://boards.greenhouse.io/acme/jobs/1")
-    };
-    let tracker = stored_by_discovery(vec![latam]).await;
-    let chile = Job {
-        location: "Remote - Chile".into(),
-        ..good_at("2", "https://boards.greenhouse.io/acme/jobs/2")
-    };
-    // The same place written another way is still the same posting.
-    let anywhere = Job {
-        location: "Remote".into(),
-        ..good_at("3", "https://boards.greenhouse.io/acme/jobs/3")
-    };
-
-    let report = discover_again(&tracker, vec![chile, anywhere]).await;
-
-    assert_eq!(
-        report.already_seen, 1,
-        "only the copy that says just Remote is a duplicate"
-    );
-    assert!(tracker.get_job("test:2").unwrap().is_some());
-    assert!(tracker.get_job("test:3").unwrap().is_none());
-}
-/// `good_at` as another source reports it, with its own place written its own way.
-fn good_from(source: &str, id: &str, apply_url: &str, location: &str) -> Job {
-    Job {
-        source: source.into(),
-        location: location.into(),
-        ..good_at(id, apply_url)
-    }
-}
-const LISTING_URL: &str = "https://himalayas.app/companies/acme/jobs/senior-ai-engineer";
-const FILLABLE_URL: &str = "https://boards.greenhouse.io/acme/jobs/55";
-#[tokio::test]
-async fn a_fillable_copy_is_not_queued_when_the_listing_copy_already_waits_for_gonza() {
-    let listing = good_from("himalayas", "1", LISTING_URL, "Remote - Latin America");
-    let tracker = stored_by_discovery(vec![listing]).await;
-    tracker
-        .transition(
-            "himalayas:1",
-            State::NeedsGonza,
-            Some("listing_only: envíalo tú"),
-            *NOW,
-        )
-        .unwrap();
-
-    let report = discover_again(
-        &tracker,
-        vec![good_from(
-            "ashby",
-            "2",
-            FILLABLE_URL,
-            "Remote - Latin America",
-        )],
-    )
-    .await;
-
-    // He may be sending the first one by hand: applying twice is worse than missing a copy.
-    assert_eq!((report.already_seen, report.queued), (1, 0));
-    assert!(tracker.get_job("ashby:2").unwrap().is_none());
-    assert_eq!(state_and_note(&tracker, "himalayas:1").0, State::NeedsGonza);
-}
-#[tokio::test]
-async fn a_listing_copy_that_arrives_after_the_fillable_one_was_submitted_is_not_queued() {
-    let fillable = good_from("ashby", "1", FILLABLE_URL, "Remote - Latin America");
-    let tracker = stored_by_discovery(vec![fillable]).await;
-    for state in [State::Prepared, State::Submitted] {
-        tracker.transition("ashby:1", state, None, *NOW).unwrap();
-    }
-
-    let report = discover_again(
-        &tracker,
-        vec![good_from(
-            "himalayas",
-            "2",
-            LISTING_URL,
-            "Remote - Latin America",
-        )],
-    )
-    .await;
-
-    assert_eq!((report.already_seen, report.queued), (1, 0));
-    assert!(tracker.get_job("himalayas:2").unwrap().is_none());
-}
-#[tokio::test]
-async fn the_same_role_from_two_sources_is_one_posting_however_each_writes_the_place() {
-    let first = good_from("ashby", "1", FILLABLE_URL, "Remote (LATAM)");
-    let tracker = stored_by_discovery(vec![first]).await;
-
-    let report = discover_again(
-        &tracker,
-        vec![good_from(
-            "greenhouse",
-            "2",
-            "https://boards.greenhouse.io/acme/jobs/56",
-            "Remote - Latin America",
-        )],
-    )
-    .await;
-
-    assert_eq!((report.already_seen, report.queued), (1, 0));
-    assert!(tracker.get_job("greenhouse:2").unwrap().is_none());
 }
 #[tokio::test]
 async fn a_stored_posting_that_the_source_now_dates_as_too_old_is_withdrawn() {

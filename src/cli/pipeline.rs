@@ -55,14 +55,6 @@ fn format_report(r: &DiscoveryReport) -> String {
             r.excluded_waiting.join(", ")
         ));
     }
-    if r.excluded_held_back > 0 {
-        text.push_str(&format!(
-            "\n  {} postulaciones de empresas excluidas no se retiraron: son más de {} en una pasada (reglas: {}); el envío las rechaza igual",
-            r.excluded_held_back,
-            crate::discovery::MAX_EXCLUSION_WITHDRAWALS_PER_PASS,
-            r.excluded_held_back_rules.join(", ")
-        ));
-    }
     if r.rate_limited > 0 {
         text.push_str(&format!(
             "\n  {} consultas en pausa: el sitio pidió esperar y se retoman en otra corrida",
@@ -197,18 +189,29 @@ pub(super) async fn cmd_prepare_refresh(
         report.refreshed.len()
     )?;
     for failure in &report.copy_failures {
-        writeln!(out, "{}", copy_failure_line(failure))?;
+        writeln!(out, "{}", copy_failure_line(failure, &paths.data_dir))?;
     }
     Ok(EXIT_OK)
 }
 
-/// One line for a readable CV copy that could not be refreshed: it still holds the old CV.
-fn copy_failure_line(failure: &CopyFailure) -> String {
+/// One line for a readable CV copy that could not be refreshed: it still holds the old CV. The
+/// path is shown relative to the data folder, with `/`, never as an absolute path.
+fn copy_failure_line(failure: &CopyFailure, data_dir: &std::path::Path) -> String {
+    let shown = failure
+        .file
+        .strip_prefix(data_dir)
+        .ok()
+        .or_else(|| failure.file.file_name().map(std::path::Path::new))
+        .map(|path| {
+            path.components()
+                .map(|part| part.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/")
+        })
+        .unwrap_or_default();
     format!(
-        "No se pudo actualizar la copia {} de {}: {}; todavía tiene el CV anterior, no la adjuntes",
-        failure.file.display(),
-        failure.job_key,
-        failure.reason
+        "No se pudo actualizar la copia {shown} de {}: {}; todavía tiene el CV anterior, no la adjuntes",
+        failure.job_key, failure.reason
     )
 }
 
@@ -296,8 +299,6 @@ mod tests {
             already_seen: 7,
             refreshed: 8,
             pruned_excluded: 0,
-            excluded_held_back: 0,
-            excluded_held_back_rules: vec![],
             excluded_waiting: vec![],
             pruned_stale: 9,
             pruned_region: 11,
@@ -326,28 +327,19 @@ mod tests {
     }
 
     #[test]
-    fn format_report_warns_about_excluded_applications_waiting_for_gonza_and_about_a_held_back_pass()
-     {
+    fn format_report_warns_about_excluded_applications_waiting_for_gonza_by_key_only() {
         let quiet = format_report(&DiscoveryReport::default());
-        assert!(!quiet.contains("ATENCIÓN") && !quiet.contains("no se retiraron"));
+        assert!(!quiet.contains("ATENCIÓN"));
         let report = DiscoveryReport {
             excluded_waiting: vec!["a:1".into(), "b:2".into()],
-            excluded_held_back: 11,
-            excluded_held_back_rules: vec!["name:Blocked".into(), "domain:x.example".into()],
             ..DiscoveryReport::default()
         };
         let text = format_report(&report);
+        // Only the job keys: the text of an exclusion rule can name a former client.
         assert!(
-            text.contains(
+            text.ends_with(
                 "\n  ATENCIÓN: 2 postulaciones que te esperan son de una empresa o dominio \
                  excluido y no deben enviarse: a:1, b:2"
-            ),
-            "{text}"
-        );
-        assert!(
-            text.contains(
-                "\n  11 postulaciones de empresas excluidas no se retiraron: son más de 10 en \
-                 una pasada (reglas: name:Blocked, domain:x.example); el envío las rechaza igual"
             ),
             "{text}"
         );
@@ -355,15 +347,32 @@ mod tests {
 
     #[test]
     fn a_copy_that_could_not_be_refreshed_gets_a_line_that_says_not_to_attach_it() {
-        let line = copy_failure_line(&CopyFailure {
+        let data = std::path::Path::new("home").join("someone").join("data");
+        let failure = CopyFailure {
             job_key: "ashby:7".into(),
-            file: std::path::PathBuf::from("data/cv/adjuntos/ashby_7/cv_ana_gomez_Engineer.pdf"),
+            file: data
+                .join("cv")
+                .join("adjuntos")
+                .join("ashby_7")
+                .join("cv_ana_gomez_Engineer.pdf"),
             reason: "access denied".into(),
-        });
+        };
+        let line = copy_failure_line(&failure, &data);
         assert_eq!(
             line,
-            "No se pudo actualizar la copia data/cv/adjuntos/ashby_7/cv_ana_gomez_Engineer.pdf de \
+            "No se pudo actualizar la copia cv/adjuntos/ashby_7/cv_ana_gomez_Engineer.pdf de \
              ashby:7: access denied; todavía tiene el CV anterior, no la adjuntes"
+        );
+        assert!(!line.contains("someone"), "{line}");
+        // A copy outside the data folder shows its file name only.
+        let outside = CopyFailure {
+            file: std::path::Path::new("elsewhere").join("x.pdf"),
+            ..failure
+        };
+        assert!(
+            copy_failure_line(&outside, &data).contains("copia x.pdf de"),
+            "{}",
+            copy_failure_line(&outside, &data)
         );
     }
 

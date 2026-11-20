@@ -1,10 +1,10 @@
 //! Discovery: fetch every source, drop what must not be applied to, score the rest and queue it.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, HashSet};
 
 use chrono::{DateTime, TimeDelta, Utc};
 use jobbot_domain::exclusion::check_exclusion;
-use jobbot_domain::gate::{is_listing_only, is_manual_only_posting, is_stale, stale_note};
+use jobbot_domain::gate::{is_stale, stale_note};
 use jobbot_domain::handoff::is_sent_by_hand;
 use jobbot_domain::models::{FetchError, Job};
 use jobbot_domain::rules::{Criteria, Exclusions};
@@ -45,10 +45,6 @@ pub struct DiscoveryReport {
     /// Applications withdrawn after the loop because their company or domain is excluded now
     /// (it was added to the exclusions after the posting was queued).
     pub pruned_excluded: usize,
-    /// Matched by an exclusion but kept because one pass would have withdrawn too many (see
-    /// `MAX_EXCLUSION_WITHDRAWALS_PER_PASS`), and the rules that matched.
-    pub excluded_held_back: usize,
-    pub excluded_held_back_rules: Vec<String>,
     /// Keys of applications already waiting for Gonza, or possibly clicked, whose company is
     /// excluded now: kept, and reported so he does not send them.
     pub excluded_waiting: Vec<String>,
@@ -105,10 +101,7 @@ pub async fn discover(
         for job in result.jobs {
             report.fetched += 1;
             // The same role posted again once the old posting is stale is a new posting.
-            // A role first stored from an aggregator that only links to it is not a duplicate of
-            // the same role found on the company's own form: this copy can be filled.
-            let listing_copy = listing_only_copy_of(&job, tracker)?;
-            if listing_copy.is_none() && tracker.has_posting_since(&job, repost_cutoff)? {
+            if tracker.has_posting_since(&job, repost_cutoff)? {
                 report.already_seen += 1;
                 if tracker.refresh_posting(&job)? {
                     report.refreshed += 1;
@@ -132,13 +125,7 @@ pub async fn discover(
             }
             let scored = score_job(&job, criteria);
             tracker.add_job(&job, scored.total, &detail_with_floor(&scored), now)?;
-            let placement = place(&job, &scored, criteria, tracker, now)?;
-            if let Some(old_key) = &listing_copy
-                && !matches!(placement, Placement::BelowThreshold)
-            {
-                withdraw_replaced_copy(tracker, old_key, &job.key(), now)?;
-            }
-            match placement {
+            match place(&job, &scored, criteria, tracker, now)? {
                 Placement::BelowThreshold => report.below_threshold += 1,
                 Placement::Flagged => report.below_floor_flagged += 1,
                 Placement::Queued => report.queued += 1,
@@ -147,8 +134,6 @@ pub async fn discover(
     }
     let pruned = prune_ineligible(criteria, exclusions, tracker, &refreshed_keys, now)?;
     report.pruned_excluded = pruned.excluded;
-    report.excluded_held_back = pruned.excluded_held_back;
-    report.excluded_held_back_rules = pruned.excluded_held_back_rules;
     report.excluded_waiting = pruned.excluded_waiting;
     report.pruned_stale = pruned.stale;
     report.pruned_region = pruned.out_of_region;
@@ -161,68 +146,10 @@ pub async fn discover(
     Ok(report)
 }
 
-/// The key of the stored posting `job` would be taken for (same company and title in a compatible
-/// place) when that one only links to the role (`is_listing_only`) and `job` can be filled by the
-/// bot. `None` for a job that is itself listing-only or manual-only, for the same posting seen
-/// again (same key) and when nothing like it is stored.
-fn listing_only_copy_of(job: &Job, tracker: &dyn Store) -> anyhow::Result<Option<String>> {
-    if is_listing_only(&job.apply_url) || is_manual_only_posting(job) {
-        return Ok(None);
-    }
-    let Some(key) = tracker.find_job_key(job)?.filter(|key| *key != job.key()) else {
-        return Ok(None);
-    };
-    let Some(stored) = tracker.get_job(&key)? else {
-        return Ok(None);
-    };
-    if !is_listing_only(&stored.apply_url) {
-        return Ok(None);
-    }
-    // Only a copy nobody has acted on may be replaced. One waiting for Gonza, sent or answered
-    // may already have gone out by hand: the plain "already seen" rule must then keep this copy
-    // out, because applying twice to the same role is worse than missing a copy.
-    let untouched = match tracker.get_application(&key)? {
-        None => true,
-        Some(app) => matches!(app.state, State::Scored | State::Prepared),
-    };
-    Ok(untouched.then_some(key))
-}
-
-/// Withdraws the application of the listing-only copy that a fillable one replaces, when it is
-/// still `scored` or `prepared`. One waiting for Gonza stays: he may be sending that form by hand.
-fn withdraw_replaced_copy(
-    tracker: &dyn Store,
-    old_key: &str,
-    new_key: &str,
-    now: DateTime<Utc>,
-) -> anyhow::Result<()> {
-    let Some(old) = tracker.get_application(old_key)? else {
-        return Ok(());
-    };
-    if !matches!(old.state, State::Scored | State::Prepared) {
-        return Ok(());
-    }
-    let note = format!("duplicado: el mismo aviso con formulario rellenable es {new_key}");
-    match tracker.transition(old_key, State::Withdrawn, Some(&note), now) {
-        Ok(()) | Err(StoreError::IllegalTransition { .. }) => Ok(()),
-        Err(other) => Err(other.into()),
-    }
-}
-
-/// The most applications one prune pass withdraws by exclusion. Withdrawal is terminal, so a pass
-/// that would withdraw more (a blank or too-wide rule, a name that is also an ordinary word)
-/// withdraws none of them and reports instead. The gate still refuses each one at submit.
-pub const MAX_EXCLUSION_WITHDRAWALS_PER_PASS: usize = 10;
-
 /// What a prune pass withdrew, counted by the rule that decided each application.
 #[derive(Debug, Default, PartialEq)]
 pub struct PruneReport {
     pub excluded: usize,
-    /// Applications an exclusion matched but that were not withdrawn because the pass would have
-    /// withdrawn more than `MAX_EXCLUSION_WITHDRAWALS_PER_PASS` of them, and the rules that
-    /// matched (each once, sorted).
-    pub excluded_held_back: usize,
-    pub excluded_held_back_rules: Vec<String>,
     /// Keys of applications waiting for Gonza (by hand, or with a click that may have gone
     /// through) whose company or domain is excluded now: kept, because they may be sent already.
     pub excluded_waiting: Vec<String>,
@@ -269,13 +196,11 @@ fn may_have_been_sent(reason: &str) -> bool {
 /// * A posting whose company, domain or category is excluded now (`check_exclusion`: the rule was
 ///   added after the posting was queued) is withdrawn with the gate's own `excluded:<rule>` note,
 ///   after the two reasons below (an application that is stale or out of region is withdrawn for
-///   that reason even if it is excluded too, and does not count toward the guard). The
-///   submission gate would withdraw it too, but only once the
-///   application reached `prepared` and a run looked at it. Two limits, because withdrawal is
-///   terminal: an application that may have gone out already (waiting for Gonza by hand, or with
-///   an open click) is kept and listed in `excluded_waiting`, and when one pass would withdraw
-///   more than `MAX_EXCLUSION_WITHDRAWALS_PER_PASS` of them it withdraws none and reports the
-///   count and the rules instead.
+///   that reason even if it is excluded too). The submission gate would withdraw it too, but only
+///   once the application reached `prepared` and a run looked at it. One limit, because
+///   withdrawal is terminal: an application that may have gone out already (waiting for Gonza by
+///   hand, or with a click the page did not confirm, or an open submit intent) is kept and its
+///   key listed in `excluded_waiting`, so he does not send it.
 /// * A stale posting (the gate's `is_stale_stored`: the posting's date, or for a source that
 ///   publishes none, the day it was first seen) is withdrawn with `stale_posting`. The date needs
 ///   no fresh fetch: the submission gate would withdraw the same row anyway.
@@ -287,7 +212,7 @@ fn may_have_been_sent(reason: &str) -> bool {
 ///   Gonza for another reason (missing answers, below the pay floor) is withdrawn too.
 ///
 /// A second pass finds nothing new: withdrawn applications are not looked at again.
-#[tracing::instrument(skip_all, fields(excluded = Empty, excluded_held_back = Empty, stale = Empty, out_of_region = Empty))]
+#[tracing::instrument(skip_all, fields(excluded = Empty, stale = Empty, out_of_region = Empty))]
 pub fn prune_ineligible(
     criteria: &Criteria,
     exclusions: &Exclusions,
@@ -304,8 +229,6 @@ pub fn prune_ineligible(
         .into_iter()
         .map(|intent| intent.job_key)
         .collect();
-    // Applications an exclusion would withdraw, decided after the loop (see the bulk guard).
-    let mut by_exclusion: Vec<(String, String)> = Vec::new();
     for row in tracker.unsent_applications()? {
         let may_be_sent = clicking.contains(&row.job_key)
             || (row.state == State::NeedsGonza
@@ -321,17 +244,17 @@ pub fn prune_ineligible(
             }
             continue;
         }
-        // Age and region first, whether or not the company is also excluded: those reasons need
-        // no judgement about a rule and must not wait behind the exclusion guard. Only what
-        // survives them is judged by exclusion, and only that counts toward the guard.
+        // Age and region first, whether or not the company is also excluded: the reason that
+        // needs no rule is the one that goes on record.
         let (note, counter) = if is_stale_stored(&job, tracker, criteria, now)? {
             (stale_note(criteria), &mut report.stale)
         } else if refreshed.contains(&row.job_key) && !region_ok_for(&job, criteria) {
             (OUT_OF_REGION_NOTE.to_string(), &mut report.out_of_region)
         } else if exclusion.excluded {
-            let rule = exclusion.reason.unwrap_or_default();
-            by_exclusion.push((row.job_key, rule));
-            continue;
+            (
+                format!("excluded:{}", exclusion.reason.unwrap_or_default()),
+                &mut report.excluded,
+            )
         } else {
             continue;
         };
@@ -342,27 +265,23 @@ pub fn prune_ineligible(
             Err(other) => return Err(other.into()),
         }
     }
-    if by_exclusion.len() > MAX_EXCLUSION_WITHDRAWALS_PER_PASS {
-        report.excluded_held_back = by_exclusion.len();
-        report.excluded_held_back_rules = by_exclusion
-            .iter()
-            .map(|(_, rule)| rule.clone())
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect();
-    } else {
-        for (key, rule) in by_exclusion {
-            let note = format!("excluded:{rule}");
-            match tracker.transition(&key, State::Withdrawn, Some(&note), now) {
-                Ok(()) => report.excluded += 1,
-                Err(StoreError::IllegalTransition { .. }) => {}
-                Err(other) => return Err(other.into()),
-            }
+    // A click the page did not confirm leaves the application out of `unsent_applications` (it
+    // may have gone through), and it is the waiting application most likely to be sent already:
+    // it is listed too when its company is excluded now.
+    for row in tracker.list_by_state(State::NeedsGonza)? {
+        let unconfirmed = row.needs_reason.as_deref().is_some_and(may_have_been_sent);
+        if !unconfirmed || report.excluded_waiting.contains(&row.job_key) {
+            continue;
+        }
+        let excluded = tracker
+            .get_job(&row.job_key)?
+            .is_some_and(|job| check_exclusion(&job, exclusions).excluded);
+        if excluded {
+            report.excluded_waiting.push(row.job_key);
         }
     }
     crate::record_counts(&[
         ("excluded", report.excluded),
-        ("excluded_held_back", report.excluded_held_back),
         ("stale", report.stale),
         ("out_of_region", report.out_of_region),
     ]);

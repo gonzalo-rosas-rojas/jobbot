@@ -17,16 +17,6 @@ fn posting_identity(job: &Job) -> (String, String) {
     (normalize(&job.company), job.title.trim().to_lowercase())
 }
 
-/// The one rule for "the same role", as a SQL condition over `jobs` rows, used by `posting_known`
-/// (has this been seen?) and by `find_job_key` (which copy is it?) so they cannot disagree.
-/// Parameters: `?2` company, `?3` title (both as `posting_identity`), `?5` the new posting's
-/// place, lowercased, `?6` its source. Same company and title is the same role, except that two
-/// rows of one source whose places differ are two openings (a company's own board listing Berlin
-/// and Lisbon). Across sources the place is not compared: each writes it in its own words.
-const SAME_ROLE: &str = "(?2 <> '' AND ?3 <> '' AND company_norm = ?2 AND title_lc = ?3 \
-     AND (source <> ?6 OR ?5 = '' OR location = '' OR instr(lower(location), ?5) > 0 \
-          OR instr(?5, lower(location)) > 0))";
-
 const JOB_SELECT: &str = "SELECT key, source, company, title, url, apply_url, location, remote, \
      description, salary_min, salary_max, posted_at FROM jobs";
 
@@ -143,24 +133,11 @@ impl Tracker {
         if company_norm.is_empty() || title_lc.is_empty() {
             return Ok(None);
         }
-        // The newest copy wins; among copies first seen at the same moment, one whose application
-        // is not withdrawn (or has none) comes first, then the key, so the answer never depends
-        // on the order the rows were stored in.
         Ok(conn
             .query_row(
-                &format!(
-                    "SELECT key FROM jobs WHERE {SAME_ROLE} ORDER BY first_seen DESC, \
-                     COALESCE((SELECT a.state = 'withdrawn' FROM applications a \
-                               WHERE a.job_key = jobs.key), 0), key LIMIT 1"
-                ),
-                params![
-                    "",
-                    company_norm,
-                    title_lc,
-                    "",
-                    job.location.trim().to_lowercase(),
-                    job.source
-                ],
+                "SELECT key FROM jobs WHERE company_norm = ?1 AND title_lc = ?2 \
+                 ORDER BY first_seen DESC LIMIT 1",
+                params![company_norm, title_lc],
                 |row| row.get(0),
             )
             .optional()?)
@@ -174,31 +151,18 @@ impl Tracker {
         self.posting_known(job, Some(repost_cutoff))
     }
 
-    /// The question behind `has_posting` and `has_posting_since`: the same key, or the same role
-    /// (`SAME_ROLE`; when `live_since` is given, one dated or first seen at or after it). The
-    /// same title at the same company is one role across sources, whatever place each writes
-    /// (`Remote (LATAM)` and `Remote - Latin America` are one posting). Only inside one source do
-    /// the places tell openings apart (a company's own `Berlin` and `Lisbon`), by containment.
-    /// Trade-off: the same role from one source in places written in unrelated words
-    /// (`Worldwide`, `Anywhere`) is stored twice, and a role that several sources list for
-    /// different cities is stored once. Both are cheaper than applying twice to the same role.
+    /// The question behind `has_posting` and `has_posting_since`: the same key, or the same title
+    /// at the same company (only when `live_since` is given, one dated or first seen at or after
+    /// it).
     fn posting_known(&self, job: &Job, live_since: Option<DateTime<Utc>>) -> Result<bool> {
         let (company_norm, title_lc) = posting_identity(job);
         let conn = self.lock();
         let found = conn
             .query_row(
-                &format!(
-                    "SELECT 1 FROM jobs WHERE key = ?1 OR ({SAME_ROLE} \
-                     AND (?4 IS NULL OR COALESCE(posted_at, first_seen) >= ?4)) LIMIT 1"
-                ),
-                params![
-                    job.key(),
-                    company_norm,
-                    title_lc,
-                    live_since.map(to_text),
-                    job.location.trim().to_lowercase(),
-                    job.source
-                ],
+                "SELECT 1 FROM jobs WHERE key = ?1 \
+                 OR (?2 <> '' AND ?3 <> '' AND company_norm = ?2 AND title_lc = ?3 \
+                     AND (?4 IS NULL OR COALESCE(posted_at, first_seen) >= ?4)) LIMIT 1",
+                params![job.key(), company_norm, title_lc, live_since.map(to_text)],
                 |_| Ok(()),
             )
             .optional()?;
@@ -739,64 +703,6 @@ mod tests {
         t.add_job(&undated, 70.0, &BTreeMap::new(), *NOW - TimeDelta::days(5))
             .unwrap();
         assert!(t.has_posting_since(&repost, cutoff).unwrap());
-    }
-
-    #[test]
-    fn find_job_key_prefers_a_copy_whose_application_is_not_withdrawn_when_first_seen_ties() {
-        for (withdrawn, live) in [("1", "2"), ("2", "1")] {
-            let t = Tracker::in_memory().unwrap();
-            for id in [withdrawn, live] {
-                let copy = make_job_with(|j| {
-                    j.external_id = id.into();
-                    j.url = format!("https://jobs.example.com/{id}");
-                    j.apply_url = j.url.clone();
-                });
-                t.add_job(&copy, 70.0, &BTreeMap::new(), *NOW).unwrap();
-                t.create_application(&copy.key(), *NOW).unwrap();
-            }
-            t.transition(&format!("test:{withdrawn}"), State::Withdrawn, None, *NOW)
-                .unwrap();
-            let third = make_job_with(|j| {
-                j.external_id = "3".into();
-                j.url = "https://jobs.example.com/3".into();
-                j.apply_url = j.url.clone();
-            });
-
-            assert_eq!(
-                t.find_job_key(&third).unwrap(),
-                Some(format!("test:{live}")),
-                "withdrawn copy is test:{withdrawn}"
-            );
-        }
-    }
-
-    #[test]
-    fn the_place_tells_two_openings_apart_only_inside_one_source() {
-        let t = Tracker::in_memory().unwrap();
-        let at = |source: &str, id: &str, place: &str| {
-            make_job_with(|j| {
-                j.source = source.into();
-                j.external_id = id.into();
-                j.url = format!("https://jobs.example.com/{source}/{id}");
-                j.apply_url = j.url.clone();
-                j.location = place.into();
-            })
-        };
-        t.add_job(&at("ashby", "1", "Berlin"), 70.0, &BTreeMap::new(), *NOW)
-            .unwrap();
-        // Same source, another place: a second opening. Another source: the same role, whatever
-        // words it uses for the place.
-        assert!(!t.has_posting(&at("ashby", "2", "Lisbon")).unwrap());
-        assert!(t.has_posting(&at("himalayas", "3", "Lisbon")).unwrap());
-        assert_eq!(
-            t.find_job_key(&at("ashby", "2", "Lisbon")).unwrap(),
-            None,
-            "the lookup agrees with has_posting"
-        );
-        assert_eq!(
-            t.find_job_key(&at("himalayas", "3", "Lisbon")).unwrap(),
-            Some("ashby:1".to_string())
-        );
     }
 
     #[test]
