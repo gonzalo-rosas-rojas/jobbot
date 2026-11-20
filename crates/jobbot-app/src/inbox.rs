@@ -9,7 +9,7 @@ use chrono::{DateTime, TimeDelta, Utc};
 use jobbot_domain::handoff::may_have_been_sent;
 use jobbot_domain::outbound::{clean, plain_line};
 use jobbot_domain::state::State;
-use jobbot_domain::text::normalize;
+use jobbot_domain::text::company_identity;
 use serde_json::{Map, Value};
 
 use crate::actions;
@@ -289,7 +289,7 @@ fn resolve_job(tracker: &dyn Store, item: &Item) -> Result<Link> {
             why.unwrap_or_else(|| "sin job_key ni empresa".to_string()),
         ));
     };
-    let company_norm = normalize(company);
+    let company_norm = company_identity(company);
     let mut keys = tracker.job_keys_of_company(&company_norm, &LIVE_STATES)?;
     // A waiting application whose form may already have gone out (sent by hand, or a click the
     // page did not confirm) is a candidate too: an email of the company may be about it, and

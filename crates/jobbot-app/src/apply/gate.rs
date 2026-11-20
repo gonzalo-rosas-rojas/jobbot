@@ -8,7 +8,7 @@ use jobbot_domain::exclusion::{check_exclusion, exclusion_note};
 use jobbot_domain::models::Job;
 use jobbot_domain::region::region_ok_with;
 use jobbot_domain::rules::{Criteria, Exclusions};
-use jobbot_domain::text::normalize;
+use jobbot_domain::text::company_identity;
 
 use crate::ports::store::{ApplicationRow, Store};
 
@@ -37,11 +37,11 @@ fn in_warmup_hold(
     criteria: &Criteria,
     now: DateTime<Utc>,
 ) -> anyhow::Result<bool> {
-    let company = normalize(&job.company);
+    let company = company_identity(&job.company);
     if !criteria
         .priority_companies
         .iter()
-        .any(|name| normalize(name) == company)
+        .any(|name| company_identity(name) == company)
     {
         return Ok(false);
     }
@@ -138,7 +138,7 @@ fn decide(
         return Ok(GateDecision::block("daily_cap"));
     }
     if tracker.company_in_cooldown(
-        &normalize(&job.company),
+        &company_identity(&job.company),
         criteria.company_cooldown_days,
         now,
     )? {

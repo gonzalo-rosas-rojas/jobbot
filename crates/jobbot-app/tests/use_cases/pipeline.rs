@@ -2371,11 +2371,11 @@ async fn the_company_is_its_normalized_name_as_for_the_cooldown() {
     let calls: Vec<String> = filler.calls().into_iter().map(|(key, _)| key).collect();
     assert_eq!(calls, vec!["test:1", "test:2", "test:4"]);
 }
-#[tokio::test]
-async fn a_company_whose_name_normalizes_to_nothing_is_never_capped() {
+async fn calls_for(companies: &[&str]) -> Vec<String> {
     let env = Env::new();
-    for n in 1..=3 {
-        env.prepared(&at("LLC", n), 100.0 - f64::from(n));
+    for (n, company) in companies.iter().enumerate() {
+        let n = n as u32 + 1;
+        env.prepared(&at(company, n), 100.0 - f64::from(n));
     }
     let filler = FakeFiller::new();
     let crit = Criteria {
@@ -2383,7 +2383,39 @@ async fn a_company_whose_name_normalizes_to_nothing_is_never_capped() {
         ..criteria()
     };
     env.run(&filler, &crit, SubmitMode::DryRun).await;
-    assert_eq!(filler.calls().len(), 3);
+    filler.calls().into_iter().map(|(key, _)| key).collect()
+}
+#[tokio::test]
+async fn a_company_in_a_script_normalize_cannot_read_is_still_one_company_for_the_cap() {
+    let same = ["株式会社メルカリ"; 3];
+    assert_eq!(
+        calls_for(&same).await,
+        vec!["test:1", "test:2"],
+        "the third hits the cap"
+    );
+}
+#[tokio::test]
+async fn two_different_non_latin_companies_do_not_share_a_cap() {
+    let calls = calls_for(&[
+        "株式会社メルカリ",
+        "株式会社メルカリ",
+        "株式会社サイバー",
+        "株式会社サイバー",
+    ])
+    .await;
+    assert_eq!(calls, vec!["test:1", "test:2", "test:3", "test:4"]);
+}
+#[tokio::test]
+async fn a_name_that_is_only_a_legal_suffix_behaves_as_its_own_company() {
+    assert_eq!(
+        calls_for(&["LLC", "LLC", "LLC"]).await,
+        vec!["test:1", "test:2"]
+    );
+    assert_eq!(
+        calls_for(&["LLC", "LLC", "Acme", "Acme"]).await.len(),
+        4,
+        "and it does not share a place with another company"
+    );
 }
 #[tokio::test]
 async fn prepare_counts_suffix_variants_of_a_company_as_one() {

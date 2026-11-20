@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
 use jobbot_domain::models::Job;
-use jobbot_domain::text::{link_base, normalize};
+use jobbot_domain::text::{company_identity, link_base};
 use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params, params_from_iter};
 
 use super::{
@@ -14,7 +14,10 @@ use super::{
 /// What makes two postings the same role: the normalized company and the lowercased, trimmed
 /// title, as stored in `jobs.company_norm` and `jobs.title_lc`.
 fn posting_identity(job: &Job) -> (String, String) {
-    (normalize(&job.company), job.title.trim().to_lowercase())
+    (
+        company_identity(&job.company),
+        job.title.trim().to_lowercase(),
+    )
 }
 
 const JOB_SELECT: &str = "SELECT key, source, company, title, url, apply_url, location, remote, \
