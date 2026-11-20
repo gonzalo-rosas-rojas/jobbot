@@ -6,7 +6,8 @@ use std::sync::Mutex;
 
 use jobbot_domain::handoff::MANUAL_RECORD_PREFIX;
 use jobbot_domain::models::MANUAL_SOURCE;
-use rusqlite::{Connection, TransactionBehavior};
+use jobbot_domain::text::company_identity;
+use rusqlite::{Connection, TransactionBehavior, params};
 
 use super::{Result, Tracker, TrackerError, db_at, io};
 use crate::pragmas::{BUSY_TIMEOUT, use_wal};
@@ -241,8 +242,42 @@ impl Tracker {
                      OR job_key IN (SELECT job_key FROM events
                                      WHERE substr(note, 1, length('{prefix}')) = '{prefix}');"
             ))?;
+            Self::give_blank_company_norms_their_identity(&tx)?;
         }
         tx.commit()?;
+        Ok(())
+    }
+
+    /// Rows stored before `company_identity` existed kept `company_norm = ''` when `normalize` could not fold the
+    /// name (another script, or only a legal suffix), so such a company was nobody's and the cap, the cooldown and
+    /// the e-mail match never saw it. Those rows, and only those, get the identity now. A row that already has a
+    /// norm keeps it, and a company with no name stays blank, so a second run finds nothing to do. It runs inside
+    /// the transaction of `add_origin_column`, so a cut leaves both undone.
+    fn give_blank_company_norms_their_identity(tx: &Connection) -> Result<()> {
+        for (table, key_column, company_of) in [
+            ("jobs", "key", "company"),
+            (
+                "applications",
+                "job_key",
+                "(SELECT company FROM jobs WHERE jobs.key = applications.job_key)",
+            ),
+        ] {
+            let mut blank = tx.prepare(&format!(
+                "SELECT {key_column}, {company_of} FROM {table} WHERE company_norm = ''"
+            ))?;
+            let rows: Vec<(String, Option<String>)> = blank
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect::<rusqlite::Result<_>>()?;
+            for (key, company) in rows {
+                let identity = company_identity(&company.unwrap_or_default());
+                if !identity.is_empty() {
+                    tx.execute(
+                        &format!("UPDATE {table} SET company_norm = ?1 WHERE {key_column} = ?2"),
+                        params![identity, key],
+                    )?;
+                }
+            }
+        }
         Ok(())
     }
 
@@ -778,6 +813,86 @@ mod tests {
         assert_eq!(t.origin_of(manual).unwrap(), Some(Origin::Unknown));
         assert_eq!(t.origin_of(recorded).unwrap(), Some(Origin::Unknown));
         assert_eq!(t.origin_of(orphan).unwrap(), Some(Origin::Cold));
+    }
+
+    /// Adds to a version 4 database what `normalize` alone left blank: a company in a script it cannot fold to ASCII
+    /// (job and application both blank), and a company with no name at all (blank for good).
+    fn blank_company_norms(path: &Path) {
+        let conn = Connection::open(path).unwrap();
+        for (key, company) in [("blank:1", "ЖК Строй"), ("blank:2", "")] {
+            conn.execute(
+                "INSERT INTO jobs (key, source, company, company_norm, title, title_lc, url, apply_url,
+                                   location, remote, description, score, score_detail, first_seen)
+                 VALUES (?1, 'lever', ?2, '', 'Engineer', 'engineer', 'u', 'u', '', 1, '', 50, '{}',
+                         '2026-10-01T12:00:00Z')",
+                [key, company],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO applications (job_key, company_norm, state, updated_at)
+                 VALUES (?1, '', 'scored', '2026-10-01T12:00:00Z')",
+                [key],
+            )
+            .unwrap();
+        }
+    }
+
+    /// Every stored `company_norm`, jobs then applications, by key.
+    fn company_norms(t: &Tracker) -> Vec<(String, String)> {
+        let conn = t.lock();
+        let mut stmt = conn
+            .prepare(
+                "SELECT 'job ' || key, company_norm FROM jobs
+                 UNION ALL SELECT 'application ' || job_key, company_norm FROM applications
+                 ORDER BY 1",
+            )
+            .unwrap();
+        stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn the_migration_gives_a_blank_company_norm_its_identity_and_only_those() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.db");
+        version_4_database(&path);
+        blank_company_norms(&path);
+
+        let t = Tracker::open(&path).unwrap();
+
+        let norms = company_norms(&t);
+        let norm_of = |what: &str| {
+            norms
+                .iter()
+                .find(|(name, _)| name == what)
+                .map(|(_, norm)| norm.as_str())
+                .unwrap()
+        };
+        assert_eq!(norm_of("job blank:1"), "жк строй");
+        assert_eq!(norm_of("application blank:1"), "жк строй");
+        assert_eq!(norm_of("job blank:2"), "", "no name, no identity");
+        assert_eq!(norm_of("application blank:2"), "");
+        assert_eq!(
+            norm_of("job board:1"),
+            "acme",
+            "a filled one is left as it is"
+        );
+        assert_eq!(norm_of("application board:1"), "acme");
+    }
+
+    #[test]
+    fn opening_a_migrated_database_again_changes_no_company_norm() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.db");
+        version_4_database(&path);
+        blank_company_norms(&path);
+        let first = company_norms(&Tracker::open(&path).unwrap());
+
+        let second = company_norms(&Tracker::open(&path).unwrap());
+
+        assert_eq!(second, first);
     }
 
     #[test]
