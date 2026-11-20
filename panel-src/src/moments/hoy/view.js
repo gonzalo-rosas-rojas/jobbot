@@ -8,7 +8,7 @@ import { candidates, turnCount, nightFigures, PERMANENT_ACTIONS } from "../../co
 import { ago, daysSince, kindLabel, stateLabel, windowLabel, spendLabel, scoreText, pointsOf } from "../../core/format.js";
 import { dayOf, serverDay, HOUR_MS } from "../../core/time.js";
 import { mailId } from "../../core/diff.js";
-import { keyShown } from "../../ui/keys.js";
+import { keyShownIfAny } from "../../ui/keys.js";
 import { safeHref, clean } from "../shared/util.js";
 import { askOf } from "../shared/stops.js";
 import { indexCards } from "../shared/cards.js";
@@ -38,8 +38,8 @@ const SAYS_NOTHING = /\b(?:null|undefined|NaN)\b/;
 const sane = (text) => (SAYS_NOTHING.test(text) ? "" : text);
 const whole = (x) => Math.max(0, Math.trunc(Number(x) || 0));
 
-// The key of an action as HOY draws it (ui/keys.js, which also names this room in its error).
-const keyOf = (id) => keyShown(id, { room: "hoy" });
+// The key of an action as HOY draws it (ui/keys.js); an action with no key, such as "send anyway", is drawn with none.
+const keyOf = (id) => keyShownIfAny(id, { room: "hoy" });
 
 /** The ids of what can be done to a candidate, in the order the keys are listed. */
 function actionIds(c, card) {

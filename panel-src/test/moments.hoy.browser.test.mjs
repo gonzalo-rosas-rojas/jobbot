@@ -260,3 +260,27 @@ test("hostile text from outside stays text on the page: no foreign element, no l
     assert.deepEqual(t.page.problems(), [], "and the CSP saw no inline handler, script or frame");
   } finally { await t.close(); }
 });
+
+test("a card parked outside the region is drawn with its Enviar igual button and the page logs no error", async () => {
+  const t = await open();
+  try {
+    await load(t, "empty");
+    await ev(t, `window.__lab.refresh((s) => {
+      const card = { key: "fx:region", company: "Region Co", title: "Backend Engineer", score: 80, state: "needs_gonza", source: "greenhouse",
+        url: "https://example.com/jobs/region", reason: "fuera_de_region: no se puede hacer desde Chile", reason_kind: "out_of_region",
+        reason_short: "Fuera de la región con las reglas de hoy: revísala antes de enviar.", note: null, approved: false, has_screenshot: false,
+        has_cv: true, has_dossier: false, has_handoff: false, updated_at: s.generated_at, actions: ["send_anyway", "confirm"], marks: [],
+        posted_at: s.generated_at, first_seen: s.generated_at, salary_min: null, salary_max: null, days_in_state: 0, snoozed_until: null,
+        waiting_since: s.generated_at, age_days: 1, prune_in_days: 10 };
+      s.needs_gonza = { total: 1, cards: [card] };
+      const column = s.board.find((c) => c.state === "needs_gonza");
+      column.cards = [card];
+      column.total = 1;
+    })`);
+    const v = await ev(t, `(() => { const row = document.querySelector('[data-card="fx:region"]'); const button = document.querySelector('.hoy button[data-action="send_anyway"]');
+      return { row: !!row, label: button && button.textContent.replace(/\s+/g, " ").trim(), visible: !!button && button.getBoundingClientRect().width > 0, hasKey: !!(button && button.querySelector(".kbd, kbd")) }; })()`);
+    assert.equal(v.row, true, "the region card is on HOY");
+    assert.ok(v.visible && v.label.startsWith("Enviar igual"), `its button is drawn (${v.label})`);
+    assert.deepEqual(t.page.problems(), [], "and drawing it threw nothing");
+  } finally { await t.close(); }
+});

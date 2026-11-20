@@ -9,7 +9,7 @@ import { ago, factorBars, factorName, pointsOf, reasonShort, scoreText, FACTOR_W
 import { serverDay, DAY_MS } from "../../core/time.js";
 import { nightFigures } from "../../core/model.js";
 import { DEFAULT_BATCH_MIN } from "../../core/settings.js";
-import { keyShown } from "../../ui/keys.js";
+import { keyShownIfAny } from "../../ui/keys.js";
 import { safeHref, clean, isTime } from "../shared/util.js";
 import { askOf } from "../shared/stops.js";
 
@@ -28,8 +28,8 @@ const SQUARES_MAX = 12;
 export const ANSWER_KEY = "4";                   // APRENDER is where the missing answers are written (the `go` key of spec §3.4)
 const DAY_AT_NOON_UTC = "T12:00:00Z";    // a date at noon UTC keeps its day in every timezone, so the day alone can be formatted without drifting a day
 
-/** The key of an action as COLA draws it: the shifted batch key as ⇧A (ui/keys.js, which also names this room in its error). */
-const keyOf = (id) => keyShown(id, { room: "cola", shiftGlyph: true });
+/** The key of an action as COLA draws it: the shifted batch key as ⇧A (ui/keys.js); an action with no key is drawn with none. */
+const keyOf = (id) => keyShownIfAny(id, { room: "cola", shiftGlyph: true });
 
 const whole = (x) => Math.max(0, Math.trunc(Number(x) || 0));
 // Last line of defence, not a repair: every source is guarded where it enters (`clean`, `whole`), and a phrase that still would say "null" or

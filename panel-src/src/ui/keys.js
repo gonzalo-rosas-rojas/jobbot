@@ -52,6 +52,14 @@ export function keyShown(id, { room = "keys", shiftGlyph = false } = {}) {
   return (shiftGlyph ? SHOWN_SHIFTED : SHOWN_ALWAYS)[entry.display] || entry.display;
 }
 
+/**
+ * `keyShown` for a button that may have no key on purpose (an act that is deliberate, such as "send anyway"): "" when the id is not in the
+ * table, so the button is drawn without one. A typo in an id is not caught here; the tests that walk the action lists are what tie them to the table.
+ */
+export function keyShownIfAny(id, opts) {
+  return KEYS.some((k) => k.id === id) ? keyShown(id, opts) : "";
+}
+
 export const isSequence = (key) => key.trim().includes(" ");
 const norm = (key) => key.trim().toLowerCase();
 const firstPress = (key) => norm(key).split(" ")[0];
