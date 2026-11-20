@@ -404,11 +404,11 @@ test("show: when the sheet has no room, fewer boards and errors are listed and t
   fresh();
   const wide = scenario("night");
   wide.funnel.by_source = Object.fromEntries(Array.from({ length: 6 }, (_, i) => [`board${i}`, { n: 20 - i, sent: 5, answered: 1 }]));
-  const v = view(wide, { show: { sources: 3, errors: 1 } });
+  const v = view(wide, { show: { funnel: 3, errors: 1 } });
   assert.deepEqual([v.funnel.rows.length, v.funnel.moreLabel], [3, "y 3 más"]);
   assert.deepEqual([v.errors.rows.length, v.errors.total, v.errors.moreLabel], [1, 2, "y 1 más"], "the count of the title stays the whole one");
-  assert.equal(view(wide, { show: { sources: 99, errors: 99 } }).funnel.rows.length, 6, "never more than the page's own cut");
-  for (const odd of [null, {}, { sources: 0, errors: -1 }, { sources: "3", errors: 1.5 }, { sources: NaN }]) {
+  assert.equal(view(wide, { show: { funnel: 99, errors: 99 } }).funnel.rows.length, 6, "never more than the page's own cut");
+  for (const odd of [null, {}, { funnel: 0, errors: -1 }, { funnel: "3", errors: 1.5 }, { funnel: NaN }]) {
     const w = view(wide, { show: odd });
     assert.equal(w.funnel.rows.length, 6, JSON.stringify(odd));
     assert.equal(w.errors.rows.length, 2, JSON.stringify(odd));

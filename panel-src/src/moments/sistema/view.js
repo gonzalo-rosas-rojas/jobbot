@@ -21,7 +21,7 @@ import { askOf } from "../shared/stops.js";
 export const ENGINE_STALE_HOURS = 36;
 export const STEP_IDS = ["discover", "prepare", "submit", "dossiers"];
 export const ERRORS_SHOWN = 4;
-export const SOURCES_SHOWN = 8;
+export const FUNNEL_SHOWN = 8;
 /** What the funnel table can be split by: the board the posting came from, how the application came about, the region the posting names. */
 export const FUNNEL_BYS = ["source", "origin", "region"];
 /** A snapshot older than this (a poll is every 30 s) says how old it is (spec §9.4). */
@@ -307,7 +307,7 @@ function funnelOf(snap, shown, by = "source") {
   const sentWeek = whole(metrics.sent_week);
   let week = null;
   if (sentWeek > 0) {
-    week = tn("sistema.sources.week", sentWeek, { a: whole(metrics.responses_week) });
+    week = tn("sistema.funnel.week", sentWeek, { a: whole(metrics.responses_week) });
     if (sentWeek >= MIN_SENT_FOR_RATE && num(metrics.response_rate) != null) week += " · " + fmtPercent(metrics.response_rate);
   }
   return {
@@ -359,11 +359,11 @@ function errorsOf(snap, { nowMs, lastMs, runResult, shown }) {
  *     task, stop, account, spend, limits, funnel, errors, foot }
  * `intent` is what the person asked for before the server has answered (true: STOP on, false: STOP off, null: ask the snapshot): the page
  * shows it at once. `batchMin` is the lote's threshold from the page's settings; null when there is no setting, which the stop shows as "sin dato".
- * `show` ({ sources, errors }) says how many boards and errors to list when the sheet has no room for all: the rest is "y N más".
+ * `show` ({ funnel, errors }) says how many funnel rows and errors to list when the sheet has no room for all: the rest is "y N más".
  * `by` is which split of the funnel the table shows, one of FUNNEL_BYS ("source" when it is anything else).
  */
 export function sistemaView(m, { nowMs, intent = null, batchMin = null, show = null, by = "source" } = {}) {
-  const shownSources = show && Number.isInteger(show.sources) && show.sources >= 1 ? Math.min(show.sources, SOURCES_SHOWN) : SOURCES_SHOWN;
+  const shownFunnel = show && Number.isInteger(show.funnel) && show.funnel >= 1 ? Math.min(show.funnel, FUNNEL_SHOWN) : FUNNEL_SHOWN;
   const shownErrors = show && Number.isInteger(show.errors) && show.errors >= 1 ? Math.min(show.errors, ERRORS_SHOWN) : ERRORS_SHOWN;
   const snap = m.snap;
   const c = isRecord(snap.controls) ? snap.controls : {};
@@ -403,7 +403,7 @@ export function sistemaView(m, { nowMs, intent = null, batchMin = null, show = n
     account: accountOf(c.claude_account, nowMs),
     spend: spendOf(snap.claude),
     limits: limitsOf(snap, batchMin),
-    funnel: funnelOf(snap, shownSources, by),
+    funnel: funnelOf(snap, shownFunnel, by),
     errors: errorsOf(snap, { nowMs, lastMs, runResult: result, shown: shownErrors }),
     foot: {
       title: t("sistema.foot.prefs"),

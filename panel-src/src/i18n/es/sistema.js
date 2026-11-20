@@ -129,12 +129,12 @@ export default {
   "sistema.limit.auto.sub": "se cambia con jobbot auto-approve; aún no la usa el motor",
 
   // ---- the boards the postings came from
-  "sistema.sources.head.posted": "postulaciones",
-  "sistema.sources.head.sent": "enviadas",
-  "sistema.sources.head.answered": "respondieron",
-  "sistema.sources.head.rejected": "rechazos",
-  "sistema.sources.week.one": "7 días: respondieron {a} de {n} enviada",
-  "sistema.sources.week.other": "7 días: respondieron {a} de {n} enviadas",
+  "sistema.funnel.head.posted": "postulaciones",
+  "sistema.funnel.head.sent": "enviadas",
+  "sistema.funnel.head.answered": "respondieron",
+  "sistema.funnel.head.rejected": "rechazos",
+  "sistema.funnel.week.one": "7 días: respondieron {a} de {n} enviada",
+  "sistema.funnel.week.other": "7 días: respondieron {a} de {n} enviadas",
   "sistema.funnel.title.source": "Fuentes por tablón",
   "sistema.funnel.head.source": "tablón",
   "sistema.funnel.empty.source": "Todavía no hay envíos por tablón.",

@@ -13,7 +13,7 @@
 // (the batch threshold; null when the page has no such setting, and the stop then says "sin dato").
 
 import { t, lang } from "../i18n/index.js";
-import { sistemaView, SOURCES_SHOWN, ERRORS_SHOWN, FUNNEL_BYS } from "./sistema/view.js";
+import { sistemaView, FUNNEL_SHOWN, ERRORS_SHOWN, FUNNEL_BYS } from "./sistema/view.js";
 import { createActions } from "./sistema/actions.js";
 import { createSistema } from "./sistema/render.js";
 
@@ -25,13 +25,13 @@ const batchOf = (ctx) => (ctx.settings && typeof ctx.settings.get === "function"
 // errors; when the page does not fit, they give way, one row at a time, and the rest is said as "y N más". Boards first, down to three, then
 // errors down to two, then the keys of the foot (they are also in the palette), then both lists to the floor. The count in the title of the
 // errors stays the whole one.
-const FLOOR = { sources: 2, errors: 1 };
-const STEP_TO = { sources: 3, errors: 2 };       // the first cuts go down to these; only then does the foot go, and then the lists to FLOOR
+const FLOOR = { funnel: 2, errors: 1 };
+const STEP_TO = { funnel: 3, errors: 2 };       // the first cuts go down to these; only then does the foot go, and then the lists to FLOOR
 function shrunk(shown) {
-  if (shown.sources > STEP_TO.sources) return { ...shown, sources: shown.sources - 1 };
+  if (shown.funnel > STEP_TO.funnel) return { ...shown, funnel: shown.funnel - 1 };
   if (shown.errors > STEP_TO.errors) return { ...shown, errors: shown.errors - 1 };
   if (shown.foot) return { ...shown, foot: false };
-  if (shown.sources > FLOOR.sources) return { ...shown, sources: shown.sources - 1 };
+  if (shown.funnel > FLOOR.funnel) return { ...shown, funnel: shown.funnel - 1 };
   if (shown.errors > FLOOR.errors) return { ...shown, errors: shown.errors - 1 };
   return null;
 }
@@ -60,7 +60,7 @@ function paint(me) {
   if (!me.model) return;
   const state = me.actions.state();
   const base = { nowMs: me.ctx.now(), intent: state.intent, batchMin: batchOf(me.ctx), by: me.by };
-  const max = { sources: SOURCES_SHOWN, errors: ERRORS_SHOWN, foot: true };
+  const max = { funnel: FUNNEL_SHOWN, errors: ERRORS_SHOWN, foot: true };
   const full = sistemaView(me.model, { ...base, show: max });
   const key = fitKey(me, full);
   let show = me.fit && me.fit.key === key ? me.fit.show : max;
@@ -68,7 +68,7 @@ function paint(me) {
     me.view = show === max ? full : sistemaView(me.model, { ...base, show });
     me.ui.patch(me.view, { ...state, foot: show.foot });
     // the next step starts from what was really listed: a smaller number than the list has changes nothing and would only measure again
-    const next = overflows(me.host) ? shrunk({ sources: me.view.funnel.rows.length, errors: me.view.errors.rows.length, foot: show.foot }) : null;
+    const next = overflows(me.host) ? shrunk({ funnel: me.view.funnel.rows.length, errors: me.view.errors.rows.length, foot: show.foot }) : null;
     if (!next) break;
     show = next;
   }

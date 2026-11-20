@@ -128,12 +128,12 @@ export default {
   "sistema.limit.auto.sub": "changed with jobbot auto-approve; not used by the engine yet",
 
   // ---- the boards the postings came from
-  "sistema.sources.head.posted": "applications",
-  "sistema.sources.head.sent": "sent",
-  "sistema.sources.head.answered": "answered",
-  "sistema.sources.head.rejected": "rejected",
-  "sistema.sources.week.one": "7 days: {a} of {n} sent got an answer",
-  "sistema.sources.week.other": "7 days: {a} of {n} sent got an answer",
+  "sistema.funnel.head.posted": "applications",
+  "sistema.funnel.head.sent": "sent",
+  "sistema.funnel.head.answered": "answered",
+  "sistema.funnel.head.rejected": "rejected",
+  "sistema.funnel.week.one": "7 days: {a} of {n} sent got an answer",
+  "sistema.funnel.week.other": "7 days: {a} of {n} sent got an answer",
   "sistema.funnel.title.source": "Sources by board",
   "sistema.funnel.head.source": "board",
   "sistema.funnel.empty.source": "No sends by board yet.",

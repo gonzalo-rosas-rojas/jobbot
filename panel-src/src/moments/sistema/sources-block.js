@@ -41,7 +41,7 @@ export function createSourcesBlock() {
       const on = String(pick.on);
       if (switchButtons[i].getAttribute("aria-pressed") !== on) switchButtons[i].setAttribute("aria-pressed", on);
     });
-    FUNNEL_COLUMNS.forEach((id, i) => setText(srcHead[i], i === 0 ? s.head : t("sistema.sources.head." + id)));
+    FUNNEL_COLUMNS.forEach((id, i) => setText(srcHead[i], i === 0 ? s.head : t("sistema.funnel.head." + id)));
     setText(srcWeek, s.week || "");
     setHidden(srcWeek, !s.week);
     const bodyRows = s.rows.map((r) => {
@@ -54,7 +54,7 @@ export function createSourcesBlock() {
       // the label of each number, for the narrow page, where the table turns into rows of four numbers under their names (CSS: attr(data-label))
       [["posted", r.n], ["sent", r.sent], ["answered", r.answered], ["rejected", r.rejected]].forEach(([id, n], i) => {
         setText(cells.numbers[i], String(n));
-        setData(cells.numbers[i], "label", t("sistema.sources.head." + id));
+        setData(cells.numbers[i], "label", t("sistema.funnel.head." + id));
       });
       return tr;
     });
