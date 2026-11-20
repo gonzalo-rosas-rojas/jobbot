@@ -84,6 +84,19 @@ pub fn region_override_note(location: &str, remote: bool) -> String {
     format!("{REGION_OVERRIDE_PREFIX} {seen}")
 }
 
+/// What a person reads where the note of an application that was sent on past the region check would be shown: the
+/// note itself is machine-readable (`region_override_note`) and never goes on a card.
+pub const SENT_ANYWAY_SENTENCE: &str = "Decidiste enviarla aunque queda fuera de la región.";
+
+/// `note` as a person should read it: the sentence in place of a region override note, any other note unchanged.
+pub fn readable_note(note: &str) -> &str {
+    if note.starts_with(REGION_OVERRIDE_PREFIX) {
+        SENT_ANYWAY_SENTENCE
+    } else {
+        note
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct GateDecision {
     pub allowed: bool,

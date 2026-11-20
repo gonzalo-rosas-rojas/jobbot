@@ -226,7 +226,9 @@ pub fn build_job_detail(panel: &Panel, key: &str) -> Result<Option<JobDetail>> {
             at: iso(e.at),
             from: e.from_state.map(|s| s.as_str()),
             to: e.to_state.as_str(),
-            note: e.note,
+            note: e
+                .note
+                .map(|note| jobbot_domain::gate::readable_note(&note).to_string()),
         })
         .collect();
     // A dossier that does not exist is the normal case; one that exists and cannot be read

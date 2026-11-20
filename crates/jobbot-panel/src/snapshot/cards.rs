@@ -263,7 +263,10 @@ pub(crate) fn card(row: &ApplicationRow, ctx: &CardContext) -> Card {
         reason,
         reason_kind: kind.map(|(kind, _)| kind),
         reason_short: kind.map(|(_, short)| short),
-        note: row.note.clone(),
+        note: row
+            .note
+            .as_deref()
+            .map(|note| jobbot_domain::gate::readable_note(note).to_string()),
         approved: row.approved,
         has_screenshot,
         has_cv: file_on_disk(row.cv_path.as_deref()),
@@ -405,6 +408,47 @@ mod tests {
             card["reason_short"],
             "Fuera de la región con las reglas de hoy: revísala antes de enviar."
         );
+    }
+
+    #[test]
+    fn an_application_sent_anyway_shows_a_sentence_and_never_the_machine_note() {
+        let (panel, _dir) = panel();
+        let t = &panel.tracker;
+        let job = make_job_with(|j| j.external_id = "anyway".into());
+        t.add_job(&job, 80.0, &BTreeMap::new(), *NOW).unwrap();
+        t.start_application(&job.key(), jobbot_domain::origin::Origin::Cold, *NOW)
+            .unwrap();
+        t.transition(
+            &job.key(),
+            State::NeedsGonza,
+            Some(jobbot_domain::gate::OUT_OF_REGION_NOTE),
+            *NOW,
+        )
+        .unwrap();
+        jobbot_app::actions::resolve(
+            &**t,
+            &job.key(),
+            *NOW,
+            jobbot_app::actions::ResolveIntent::SendOutsideRegion,
+        )
+        .unwrap();
+
+        let snap = build_snapshot(&panel).unwrap();
+        let detail = crate::snapshot::build_job_detail(&panel, &job.key())
+            .unwrap()
+            .unwrap();
+
+        let everything = format!(
+            "{}{}",
+            serde_json::to_string(&snap).unwrap(),
+            serde_json::to_string(&detail).unwrap()
+        );
+        assert!(!everything.contains("region_override"), "{everything}");
+        assert_eq!(
+            card_of(&snap, &job.key())["note"],
+            "Decidiste enviarla aunque queda fuera de la región."
+        );
+        assert!(everything.contains("Decidiste enviarla aunque queda fuera de la región."));
     }
 
     #[test]
