@@ -151,8 +151,11 @@ pub enum ResolveIntent {
 
 /// The refusal of a plain resolve of a card parked for its region.
 pub const SEND_ANYWAY_REFUSAL: &str = "Esta postulación está fuera de la región con las reglas de hoy: usa «Enviar igual» en su tarjeta, o retírala.";
-/// What the card answers when it was sent back with the region check cleared.
+/// What the card answers when it was sent back to the queue (`prepared`) with the region check cleared.
 const SEND_ANYWAY_DONE: &str = "Vuelve a la cola: se enviará sin la revisión de región.";
+/// The same when it has no CV and went back to `scored`, where `prepare` makes the PDF.
+const SEND_ANYWAY_DONE_WITHOUT_CV: &str =
+    "Vuelve a preparación: prepare le hará el PDF y se enviará sin la revisión de región.";
 
 /// Takes an application out of `needs_gonza`: to `prepared` when it has its CV, otherwise to
 /// `scored`, where `prepare` makes the PDF. An application that never got its PDF sent to
@@ -161,6 +164,9 @@ const SEND_ANYWAY_DONE: &str = "Vuelve a la cola: se enviará sin la revisión d
 /// A card parked for its region is different: sending it back to the queue means skipping the region check for
 /// good, so it is never done by a plain resolve (a bulk request, an unattended `jobbot resolve`, a stale page). Only
 /// `ResolveIntent::SendOutsideRegion` does it; a plain resolve of such a card is refused and writes nothing.
+///
+/// Known limit: the override is tied to what the posting says when the request arrives, not to what the page showed
+/// when he pressed. If a refresh changed the location in between, the override records the new one.
 #[tracing::instrument(skip_all, fields(ok = Empty))]
 pub fn resolve(
     tracker: &dyn Store,
@@ -189,9 +195,10 @@ pub fn resolve(
     // "I looked at it, send it anyway": the move's own event carries what he saw (`region_override_note`), so the
     // next run does not park it again while the posting still says the same.
     let note = if region_card {
-        let Some(job) = tracker.get_job(&row.job_key)? else {
-            return Ok(not_found(key));
-        };
+        // An application always has its posting: a missing row is a broken database, not an unknown key.
+        let job = tracker
+            .get_job(&row.job_key)?
+            .ok_or_else(|| anyhow::anyhow!("the posting {} of {key} is not stored", row.job_key))?;
         Some(region_override_note(&job.location, job.remote))
     } else {
         None
@@ -202,7 +209,12 @@ pub fn resolve(
             // screenshot, and an earlier unconfirmed click no longer holds the company.
             tracker.clear_for_retry(key)?;
             if region_card {
-                return Ok(Outcome::done(SEND_ANYWAY_DONE.to_string()));
+                let said = if target == State::Prepared {
+                    SEND_ANYWAY_DONE
+                } else {
+                    SEND_ANYWAY_DONE_WITHOUT_CV
+                };
+                return Ok(Outcome::done(said.to_string()));
             }
             Ok(Outcome::done(format!("{message}: {key}")))
         }

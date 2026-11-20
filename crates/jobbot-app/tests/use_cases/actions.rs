@@ -325,7 +325,7 @@ fn send_outside_region_clears_the_region_check_and_says_so() {
     assert!(outcome.ok, "{outcome:?}");
     assert_eq!(
         outcome.message,
-        "Vuelve a la cola: se enviará sin la revisión de región."
+        "Vuelve a preparación: prepare le hará el PDF y se enviará sin la revisión de región."
     );
     assert_eq!(
         t.get_application(&key).unwrap().unwrap().state,
@@ -336,6 +336,23 @@ fn send_outside_region_clears_the_region_check_and_says_so() {
     t.transition(&key, State::NeedsGonza, Some("captcha"), *NOW)
         .unwrap();
     assert!(t.region_override(&key).unwrap());
+}
+#[test]
+fn send_outside_region_with_a_cv_goes_back_to_the_queue_and_says_so() {
+    let (t, key) = parked_for_region();
+    t.set_cv_path(&key, std::path::Path::new("cv.pdf")).unwrap();
+
+    let outcome = resolve(&t, &key, *NOW, ResolveIntent::SendOutsideRegion).unwrap();
+
+    assert!(outcome.ok, "{outcome:?}");
+    assert_eq!(
+        outcome.message,
+        "Vuelve a la cola: se enviará sin la revisión de región."
+    );
+    assert_eq!(
+        t.get_application(&key).unwrap().unwrap().state,
+        State::Prepared
+    );
 }
 #[test]
 fn the_override_applies_only_while_the_posting_says_what_gonza_saw() {

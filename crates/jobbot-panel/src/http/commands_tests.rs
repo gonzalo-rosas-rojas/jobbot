@@ -490,7 +490,7 @@ fn send_anyway_takes_one_region_card_back_with_its_override_and_never_a_batch() 
     assert_eq!(one.status, 200, "{}", text(&one));
     assert_eq!(
         json_of(&one)["message"],
-        "Vuelve a la cola: se enviará sin la revisión de región."
+        "Vuelve a preparación: prepare le hará el PDF y se enviará sin la revisión de región."
     );
     assert!(p.tracker.region_override(&region).unwrap());
     assert!(!p.tracker.region_override(&other).unwrap());

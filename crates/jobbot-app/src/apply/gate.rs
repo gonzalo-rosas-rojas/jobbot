@@ -110,8 +110,9 @@ fn decide(
     // the region note) instead of withdrawing it: withdrawal is terminal and this check runs before the approval
     // check, so a false positive of a rule that is still being tuned would destroy an approved application.
     // Placed before the by-hand checks so that a posting he cannot take is not offered as a form to send by hand.
-    // Unless Gonza already looked at this one and said to send it anyway (`resolve` on its parked card): that clears
-    // this check and no other.
+    // Unless Gonza already looked at this one and said to send it anyway ("Send anyway" on its parked card, or
+    // `jobbot resolve KEY --send-outside-region`): that clears this check and no other, while the posting still says
+    // what he saw.
     if !region_ok_with(job, &criteria.extra_open_places)
         && !tracker.region_override(&app.job_key)?
     {
