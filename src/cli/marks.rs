@@ -86,6 +86,20 @@ pub(super) fn cmd_unmark(
     Ok(if outcome.ok { EXIT_OK } else { EXIT_ERROR })
 }
 
+/// Changes how a stored application came about. It writes only the tracker, so like `mark` it ignores STOP and the
+/// window.
+pub(super) fn cmd_origin(
+    paths: &Paths,
+    key: &str,
+    origin: &str,
+    out: &mut dyn Write,
+) -> Result<i32> {
+    let tracker = open_tracker(paths)?;
+    let outcome = actions::set_origin(&tracker, key, origin)?;
+    writeln!(out, "{}", outcome.message)?;
+    Ok(if outcome.ok { EXIT_OK } else { EXIT_ERROR })
+}
+
 /// Records an application that went out outside jobbot. Like `mark` and `confirm` it writes only
 /// the tracker, so it ignores STOP and the execution window: refusing to write down a form that
 /// was already sent would only leave the tracker wrong.
@@ -120,7 +134,7 @@ pub(super) fn cmd_record(
         salary_min_monthly_usd: args.salary_min,
         salary_max_monthly_usd: args.salary_max,
         note: args.note,
-        origin: None,
+        origin: args.origin,
     };
     let tracker = open_tracker(paths)?;
     let outcome = actions::record(&tracker, &spec, at)?;
@@ -133,6 +147,7 @@ mod tests {
     use std::path::Path;
 
     use chrono::{TimeZone, Utc};
+    use jobbot_domain::origin::Origin;
 
     use crate::cli::test_support::{
         busy_now, cli, fake_deps, open_now, plain, seed, seed_prepared, temp_root, tracker_of,
@@ -414,6 +429,62 @@ mod tests {
                 .await
                 .1
                 .contains("submitted")
+        );
+    }
+
+    #[tokio::test]
+    async fn record_takes_an_origin_and_refuses_one_it_does_not_know() {
+        let root = temp_root();
+        let record = |origin: &'static str| {
+            [
+                "record",
+                "--company",
+                "Toku",
+                "--title",
+                "Senior Software Engineer",
+                "--url",
+                "https://jobs.ashbyhq.com/toku/abc",
+                "--origin",
+                origin,
+            ]
+        };
+        let (code, out) = plain(root.path(), open_now(), &record("amigo")).await;
+        assert_eq!(code, 1, "{out}");
+        assert!(out.contains("Origen no válido: amigo"), "{out}");
+        assert!(tracker_of(root.path()).counts().unwrap().is_empty());
+
+        let (code, out) = plain(root.path(), open_now(), &record("referral")).await;
+        assert_eq!(code, 0, "{out}");
+        assert_eq!(
+            tracker_of(root.path())
+                .origin_of("manual:jobs.ashbyhq.com_toku_abc")
+                .unwrap(),
+            Some(Origin::Referral)
+        );
+    }
+
+    #[tokio::test]
+    async fn origin_corrects_a_stored_application_and_exits_1_when_refused() {
+        let root = temp_root();
+        seed(root.path(), &make_job(), &[]);
+        let (code, out) = plain(root.path(), open_now(), &["origin", "test:1", "recruiter"]).await;
+        assert_eq!(code, 0, "{out}");
+        assert!(out.contains("Origen de test:1: cold → recruiter"), "{out}");
+        let (code, out) = plain(root.path(), open_now(), &["origin", "nope:1", "cold"]).await;
+        assert_eq!(code, 1, "{out}");
+        assert!(out.contains("No existe la postulación nope:1"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn origin_ignores_stop() {
+        let root = temp_root();
+        seed(root.path(), &make_job(), &[]);
+        assert_eq!(plain(root.path(), open_now(), &["stop"]).await.0, 0);
+        let (code, out) = plain(root.path(), open_now(), &["origin", "test:1", "agency"]).await;
+        assert_eq!(code, 0, "correcting a fact is not blocked by STOP: {out}");
+        assert_eq!(
+            tracker_of(root.path()).origin_of("test:1").unwrap(),
+            Some(Origin::Agency)
         );
     }
 
