@@ -262,14 +262,12 @@ async fn refresh_reports_each_readable_copy_it_could_not_refresh_and_not_a_missi
     std::fs::create_dir_all(&copies).unwrap();
     // A file where the folder should be: it cannot be read as a folder.
     std::fs::write(copies.join(safe_key(&jobs[0].key())), b"in the way").unwrap();
-    // A copy that refuses to be overwritten.
-    let readonly_dir = copies.join(safe_key(&jobs[1].key()));
-    std::fs::create_dir_all(&readonly_dir).unwrap();
-    let stuck = readonly_dir.join("cv_name_Title.pdf");
-    std::fs::write(&stuck, b"%PDF-before").unwrap();
-    let mut permissions = std::fs::metadata(&stuck).unwrap().permissions();
-    permissions.set_readonly(true);
-    std::fs::set_permissions(&stuck, permissions).unwrap();
+    // A "copy" that is a folder named like a PDF: it cannot be kept or overwritten as a file, on
+    // any platform.
+    let stuck = copies
+        .join(safe_key(&jobs[1].key()))
+        .join("cv_name_Title.pdf");
+    std::fs::create_dir_all(&stuck).unwrap();
     // jobs[2] never had a copy: no folder at all.
 
     let report = refresh_cvs(
@@ -299,8 +297,8 @@ async fn refresh_reports_each_readable_copy_it_could_not_refresh_and_not_a_missi
             .iter()
             .all(|failure| !failure.reason.is_empty())
     );
-    // The stale copy is still there, and now it is on record.
-    assert_eq!(std::fs::read(&stuck).unwrap(), b"%PDF-before");
+    // Nothing was replaced, and the failure is on record.
+    assert!(stuck.is_dir());
 }
 #[tokio::test]
 async fn refresh_renders_waiting_cvs_again_keeps_the_old_ones_and_never_touches_sent_ones() {
