@@ -182,7 +182,13 @@ pub fn confirm(tracker: &dyn Store, key: &str, now: DateTime<Utc>) -> Result<Out
     let Some(row) = tracker.get_application(key)? else {
         return Ok(not_found(key));
     };
-    let sent_by_hand = row.needs_reason.as_deref().is_some_and(is_sent_by_hand);
+    // A card parked for its region was never filled by the bot either. `is_sent_by_hand` stays about forms that
+    // may really have gone out (`may_have_been_sent`, the prune and the digest read it); this is only about what
+    // confirming counts as.
+    let sent_by_hand = row
+        .needs_reason
+        .as_deref()
+        .is_some_and(|reason| is_sent_by_hand(reason) || is_out_of_region_reason(reason));
     match tracker.transition(key, State::Submitted, Some("confirmada por Gonza"), now) {
         Ok(()) => {
             // A bot click that Gonza checked is a reviewed submission. A form he sent himself
