@@ -424,6 +424,7 @@ fn confirming_a_form_the_bot_never_filled_does_not_count_as_a_review() {
         "handoff: envía tú este formulario. Hoja de respuestas: data/handoff/x.md",
         "listing_only: postular a mano desde el enlace del aviso",
         "manual_only_platform: postular a mano desde el enlace del aviso",
+        OUT_OF_REGION_NOTE,
     ] {
         let t = Tracker::in_memory().unwrap();
         let job = make_job();
@@ -442,24 +443,6 @@ fn confirming_a_form_the_bot_never_filled_does_not_count_as_a_review() {
         assert!(!app.approved, "{reason}: sent by hand is not a bot review");
         assert_eq!(t.approved_submitted_total().unwrap(), 0, "{reason}");
     }
-}
-#[test]
-fn confirming_a_card_parked_for_its_region_counts_as_sent_by_hand_not_as_a_review() {
-    // The bot never filled that form: Gonza sent it himself, so it proves nothing about the filler.
-    let (t, key) = tracker_with(&[State::Prepared]);
-    t.transition(&key, State::NeedsGonza, Some(OUT_OF_REGION_NOTE), *NOW)
-        .unwrap();
-
-    let outcome = confirm(&t, &key, *NOW).unwrap();
-
-    assert!(outcome.ok, "{outcome:?}");
-    let app = t.get_application(&key).unwrap().unwrap();
-    assert_eq!(app.state, State::Submitted);
-    assert!(
-        !app.approved,
-        "not approved: the review counter is unchanged"
-    );
-    assert_eq!(t.approved_submitted_total().unwrap(), 0);
 }
 #[test]
 fn confirming_a_bot_click_gonza_checked_still_counts_as_reviewed() {
