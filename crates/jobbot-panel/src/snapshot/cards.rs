@@ -14,7 +14,7 @@ use jobbot_app::actions::{UNDO_WINDOW, marks_from};
 use jobbot_app::discovery::MAY_HAVE_BEEN_SENT;
 use jobbot_app::learn::dossier::dossier_path;
 use jobbot_app::ports::store::{ApplicationRow, UndoableMark};
-use jobbot_domain::gate::REASON_LISTING_ONLY;
+use jobbot_domain::gate::{REASON_LISTING_ONLY, REASON_OUT_OF_REGION};
 use jobbot_domain::handoff::sheet_path;
 use jobbot_domain::rules::Criteria;
 use jobbot_domain::state::State;
@@ -155,6 +155,13 @@ fn reason_kind(reason: &str) -> (&'static str, &'static str) {
         )
     } else if reason.starts_with("page_error") {
         ("error", "La página falló al llenarla: hay que mirarla")
+    // The submission gate parked it: outside the region by the rules of today. Not a form to send by hand
+    // without this warning. Its kind is "other" until the page knows a kind of its own.
+    } else if reason.starts_with(REASON_OUT_OF_REGION) {
+        (
+            "other",
+            "Fuera de la región con las reglas de hoy: revísala antes de enviar.",
+        )
     } else {
         ("other", "Necesita una mirada tuya")
     }
@@ -358,6 +365,16 @@ mod tests {
         );
         assert!(card.actions.is_empty());
         assert_eq!(card.note.as_deref(), Some("falta email"));
+    }
+
+    #[test]
+    fn an_application_parked_for_its_region_says_so_in_its_card() {
+        let (kind, short) = reason_kind(jobbot_domain::gate::OUT_OF_REGION_NOTE);
+        assert_eq!(kind, "other");
+        assert_eq!(
+            short,
+            "Fuera de la región con las reglas de hoy: revísala antes de enviar."
+        );
     }
 
     #[test]

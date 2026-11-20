@@ -1363,34 +1363,48 @@ async fn stale_posting_is_withdrawn() {
     assert_eq!(outcomes[0].reason.as_deref(), Some("stale_posting"));
     assert_eq!(env.state("test:1"), State::Withdrawn);
 }
-#[tokio::test]
-async fn a_prepared_posting_outside_the_region_is_withdrawn_with_the_prune_note() {
+/// A prepared posting outside the region by today's rules, approved or not.
+async fn parked_for_region(approved: bool) {
     let env = Env::new();
     let job = make_job_with(|j| {
         j.location = "San Francisco, CA".into();
         j.remote = true;
     });
     env.prepared(&job, 90.0);
+    if approved {
+        env.tracker.approve("test:1").unwrap();
+    }
     let filler = FakeFiller::new();
     let crit = Criteria {
         first_n_reviewed: 0,
         ..criteria()
     };
     let outcomes = env.run(&filler, &crit, SubmitMode::Live).await;
-    assert!(filler.calls().is_empty());
+    assert!(filler.calls().is_empty(), "nothing is sent");
     assert_eq!(outcomes[0].status, "blocked");
     assert_eq!(outcomes[0].reason.as_deref(), Some("fuera_de_region"));
-    assert_eq!(env.state("test:1"), State::Withdrawn);
-    let events = env.tracker.events_for("test:1").unwrap();
     assert_eq!(
-        events.last().unwrap().note.as_deref(),
-        Some(OUT_OF_REGION_NOTE)
+        env.state("test:1"),
+        State::NeedsGonza,
+        "parked with Gonza, not withdrawn: a withdrawal cannot be undone"
     );
+    let row = env.tracker.get_application("test:1").unwrap().unwrap();
+    assert_eq!(row.needs_reason.as_deref(), Some(OUT_OF_REGION_NOTE));
+    assert_eq!(row.approved, approved);
 }
 #[tokio::test]
-async fn a_hand_recorded_posting_back_in_the_queue_with_no_location_passes_the_region_check() {
-    // `record` writes the posting remote, with the location as typed (maybe none): a silent location
-    // passes, a closed one does not.
+async fn a_prepared_posting_outside_the_region_is_parked_with_gonza_and_not_sent() {
+    parked_for_region(false).await;
+}
+#[tokio::test]
+async fn an_approved_posting_outside_the_region_is_parked_too_not_withdrawn() {
+    parked_for_region(true).await;
+}
+#[tokio::test]
+async fn a_hand_recorded_posting_with_no_location_passes_the_region_check() {
+    // Why this exists: `record` stores its posting remote with the location as typed (maybe none). Such a row
+    // reaches the gate only if `record` was cut between its two moves and Gonza resolved it back to the queue, but
+    // then a location that names no place must not be read as a closed region, while a closed one is parked.
     let env = Env::new();
     let silent = make_job_with(|j| {
         j.source = MANUAL_SOURCE.into();
@@ -1417,7 +1431,7 @@ async fn a_hand_recorded_posting_back_in_the_queue_with_no_location_passes_the_r
 
     let called: Vec<String> = filler.calls().into_iter().map(|(key, _)| key).collect();
     assert_eq!(called, vec![silent.key()]);
-    assert_eq!(env.state(&closed.key()), State::Withdrawn);
+    assert_eq!(env.state(&closed.key()), State::NeedsGonza);
 }
 /// Answers each posting with what the test says (open when it says nothing) and remembers who
 /// it was asked about.

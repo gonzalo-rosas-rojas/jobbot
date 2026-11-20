@@ -6,10 +6,10 @@ use std::path::Path;
 use chrono::{DateTime, TimeDelta, Utc};
 use jobbot_domain::exclusion::{check_exclusion, exclusion_note};
 use jobbot_domain::models::Job;
+use jobbot_domain::region::region_ok_with;
 use jobbot_domain::rules::{Criteria, Exclusions};
 use jobbot_domain::text::normalize;
 
-use crate::discovery::region_ok_for;
 use crate::ports::store::{ApplicationRow, Store};
 
 pub use jobbot_domain::gate::*;
@@ -106,9 +106,11 @@ fn decide(
     if exclusion.excluded {
         return Ok(GateDecision::block(exclusion_note(&exclusion)));
     }
-    // Outside the region: withdrawn, never handed to Gonza as a form to send by hand. The prune withdraws the same
-    // application only when a source returned it in that run; the gate is the last look before a click.
-    if !region_ok_for(job, criteria) {
+    // Outside the region by today's rules: not sent. The submission flow parks it with Gonza (`needs_gonza`, with
+    // the region note) instead of withdrawing it: withdrawal is terminal and this check runs before the approval
+    // check, so a false positive of a rule that is still being tuned would destroy an approved application.
+    // Placed before the by-hand checks so that a posting he cannot take is not offered as a form to send by hand.
+    if !region_ok_with(job, &criteria.extra_open_places) {
         return Ok(GateDecision::block(REASON_OUT_OF_REGION));
     }
     if is_manual_only_posting(job) {

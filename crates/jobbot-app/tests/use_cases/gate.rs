@@ -390,7 +390,9 @@ fn a_posting_in_an_extra_place_passes_the_region_check() {
         ..criteria()
     };
     let decision = decide(&tracker, &job, &crit, &stop, *NOW);
-    assert_ne!(decision.reason.as_deref(), Some("fuera_de_region"));
+    // The prepared application is approved, so nothing else blocks it: the gate lets it through.
+    assert!(decision.allowed, "{decision:?}");
+    assert_eq!(decision.reason, None);
 }
 #[test]
 fn an_excluded_posting_outside_the_region_is_blocked_as_excluded() {
@@ -405,9 +407,9 @@ fn an_excluded_posting_outside_the_region_is_blocked_as_excluded() {
     assert_eq!(decision.reason.as_deref(), Some("excluded:name"));
 }
 #[test]
-fn a_listing_only_posting_outside_the_region_is_withdrawn_not_handed_to_gonza() {
-    // `listing_only` would send the posting to Gonza as a form to fill by hand; a posting he cannot
-    // take from Chile must not become that card.
+fn a_listing_only_posting_outside_the_region_is_blocked_for_the_region_not_handed_over() {
+    // `listing_only` would send the posting to Gonza as a form to fill by hand with no warning; the region
+    // reason comes first so the card he gets says the posting is outside the region.
     let (_dir, stop) = no_stop_file();
     let tracker = Tracker::in_memory().unwrap();
     let job = make_job_with(|j| {

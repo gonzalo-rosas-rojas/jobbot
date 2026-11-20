@@ -196,13 +196,11 @@ pub use jobbot_domain::handoff::MAY_HAVE_BEEN_SENT;
 ///   flag are what the source says now. A row the sources no longer return keeps the location it
 ///   was stored with, which an older version of a source may have read badly. The submission gate
 ///   checks the region of every `prepared` application before a click, on the stored fields
-///   (`gate::decide`), and withdraws it with the same note, so this limit only decides what the
-///   prune itself closes. The trade is deliberate: a posting that reaches the gate and fails the
-///   region rule either was refreshed in the same run (then this pass withdrew it first) or is no
-///   longer returned by its source, which in practice means it closed (the open check right after
-///   the gate would withdraw it as `posting_closed`). What is left is a stricter rule applied to
-///   text an older parser stored, where sending an application to a closed region is worse than
-///   withdrawing one that was really open.
+///   (`gate::decide`), but it does not withdraw: it parks the application in `needs_gonza` with the
+///   same note (`fuera_de_region`) and sends nothing. Withdrawal is terminal and has no undo, the
+///   gate runs before the approval check, and the region rules are still being tuned: a false
+///   positive on stored text must not destroy an approved application for good. Only a fresh fetch
+///   (this pass) withdraws.
 /// * Eligibility beats the reason an application waits: a `NeedsGonza` application that waits for
 ///   Gonza for another reason (missing answers, below the pay floor) is withdrawn too.
 ///
@@ -306,8 +304,7 @@ fn detail_with_floor(scored: &ScoreResult) -> BTreeMap<String, f64> {
 }
 
 /// True when `job` is in a region Gonza takes: his own, or one of the criteria's extra places.
-/// The submission gate uses it too (`apply::gate`), so the two cannot read the region differently.
-pub(crate) fn region_ok_for(job: &Job, criteria: &Criteria) -> bool {
+fn region_ok_for(job: &Job, criteria: &Criteria) -> bool {
     region_ok_with(job, &criteria.extra_open_places)
 }
 

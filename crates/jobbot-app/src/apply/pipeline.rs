@@ -477,8 +477,10 @@ fn outcome(job_key: &str, status: &str, reason: Option<&str>) -> SubmitOutcome {
 ///
 /// * A STOP file returns immediately. `stop_file` and `daily_cap` from the gate end the run.
 /// * `manual_only_platform` and `listing_only` move the application to `needs_gonza`; an
-///   `excluded:*` company, a posting outside the region (`fuera_de_region`) and a `stale_posting`
-///   move it to `withdrawn`; `company_cooldown` and
+///   `excluded:*` company and a `stale_posting` move it to `withdrawn`; a posting outside the region
+///   (`fuera_de_region`) moves it to `needs_gonza` with the region note, never to `withdrawn`: the rule
+///   reads the stored location with today's lists, a false positive must not destroy an approved
+///   application for good, and the gate runs before the approval check; `company_cooldown` and
 ///   `warmup_hold` leave it as it is. All of them are reported with status `blocked`.
 /// * The mode is decided per application: `Assist` stays `Assist` (Gonza's click is the review,
 ///   so a submission also approves the application); `DryRun` stays `DryRun`; `Live` becomes
@@ -609,9 +611,11 @@ pub async fn submit_all_while(
                 continue;
             }
             Some(REASON_OUT_OF_REGION) => {
+                // Not withdrawn: the rule reads stored text and is being tuned, and a withdrawal is terminal
+                // with no undo. Gonza looks at it (the note is the card's reason) and decides.
                 tracker.transition(
                     &row.job_key,
-                    State::Withdrawn,
+                    State::NeedsGonza,
                     Some(OUT_OF_REGION_NOTE),
                     now,
                 )?;
