@@ -23,7 +23,7 @@ import { createSender } from "../shared/send.js";
 export const DEFAULT_SNOOZE = "1d";
 const ASKS = new Set(["snooze", "withdraw", "register"]);
 // The sound of each verb when the server says yes (the cues of src/sound/cues.js). The two presses have their own: "arm" and "confirm".
-const CUE = { done: "done", approve: "approve", confirm: "sent", resolve: "undo", snooze: "snooze", unsnooze: "undo", withdraw: "withdraw", register: "register" };
+const CUE = { done: "done", approve: "approve", confirm: "sent", resolve: "undo", send_anyway: "undo", snooze: "snooze", unsnooze: "undo", withdraw: "withdraw", register: "register" };
 // The way back of a verb, and the sentence its toast falls back to when the server's answer has none.
 const UNDO = {
   snooze: { path: "/api/unsnooze", words: "hoy.undo.snooze" },
@@ -48,6 +48,7 @@ export function requestOf(actionId, row, extra = {}) {
     case "approve":
     case "confirm":
     case "resolve":
+    case "send_anyway":
     case "unsnooze": return card ? { path: "/api/" + actionId, body: { key: card } } : null;
     case "snooze": return card ? { path: "/api/snooze", body: { key: card, until: extra.until || DEFAULT_SNOOZE } } : null;
     case "withdraw": return card ? { path: "/api/mark", body: { key: card, state: "withdrawn", note: extra.note || null } } : null;

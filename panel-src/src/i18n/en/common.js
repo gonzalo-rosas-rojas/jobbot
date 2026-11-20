@@ -14,6 +14,8 @@ export default {
   "act.approve.hint": "I checked the capture and it looks right: the next run sends it.",
   "act.resolve": "Return to the queue",
   "act.resolve.hint": "I fixed what stopped it; put it back in the queue.",
+  "act.send_anyway": "Send anyway",
+  "act.send_anyway.hint": "I reviewed it and want to apply although it is outside the region.",
   "act.confirm": "I sent it",
   "act.confirm.hint": "I sent it myself, or it did go through: mark it as sent.",
   "act.done": "Done",

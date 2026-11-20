@@ -25,7 +25,7 @@ const GATE = LAYERS.indexOf("compuerta");
 export const STALE_DAYS = 10;
 // Actions and marks that cannot be undone: the button needs a second, deliberate click (see twoStep in dom.js). `resolve` is here because the server has no way
 // back from it: it clears the capture and the unconfirmed click before the next run fills the form again.
-export const PERMANENT_ACTIONS = ["approve", "confirm", "resolve"];
+export const PERMANENT_ACTIONS = ["approve", "confirm", "resolve", "send_anyway"];
 export const PERMANENT_MARKS = ["withdrawn", "rejected", "accepted"];
 
 // What each id of a candidate's `kindId` is (the label is T16's, by i18n): a task, a task that came from a technical-test or

@@ -27,7 +27,7 @@ export const DEFAULT_SNOOZE = "1d";
 export const BATCH_MAX_MS = 30000;
 export const MAX_BATCH = 200;                       // the server takes at most this many keys in one request (crates/jobbot-panel/src/http/commands.rs)
 // The sound of each verb when the server says yes (the cues of src/sound/cues.js). The two presses have their own: "arm" and "confirm".
-const CUE = { approve: "approve", batch: "approve", confirm: "sent", resolve: "undo", snooze: "snooze", unsnooze: "undo" };
+const CUE = { approve: "approve", batch: "approve", confirm: "sent", resolve: "undo", send_anyway: "undo", snooze: "snooze", unsnooze: "undo" };
 
 /** The request of a verb on a row, or null when the row cannot take it: { path, body }. `extra` is what `ask` answered. */
 export function requestOf(actionId, row, extra = {}) {
@@ -35,6 +35,7 @@ export function requestOf(actionId, row, extra = {}) {
   switch (actionId) {
     case "approve":
     case "resolve":
+    case "send_anyway":
     case "confirm":
     case "unsnooze": return card ? { path: "/api/" + actionId, body: { key: card } } : null;
     case "snooze": return card ? { path: "/api/snooze", body: { key: card, until: extra.until || DEFAULT_SNOOZE } } : null;

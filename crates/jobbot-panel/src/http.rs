@@ -78,7 +78,7 @@ pub fn body_limit(target: &str) -> usize {
 const POST_ROUTES: [&str; 16] = [
     "approve",
     "resolve",
-    "send-anyway",
+    "send_anyway",
     "confirm",
     "mark",
     "mark/undo",

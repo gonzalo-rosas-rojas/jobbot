@@ -15,6 +15,8 @@ export default {
   "act.approve.hint": "Revisé la captura y está bien: la próxima corrida la envía.",
   "act.resolve": "Devolver a la cola",
   "act.resolve.hint": "Arreglé lo que la detuvo; que vuelva a la cola.",
+  "act.send_anyway": "Enviar igual",
+  "act.send_anyway.hint": "La revisé y quiero postular aunque quede fuera de la región.",
   "act.confirm": "Ya la envié",
   "act.confirm.hint": "La envié yo o sí llegó; márcala como enviada.",
   "act.done": "Hecha",

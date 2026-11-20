@@ -340,7 +340,7 @@ pub(super) fn post(panel: &Panel, api: &str, req: &Request) -> Result<Reply> {
         }),
         // The one act that clears the region check of a card (`ResolveIntent::SendOutsideRegion`): a single key,
         // never a batch, and no other route sends the intent.
-        "send-anyway" => {
+        "send_anyway" => {
             let body: KeysBody = match parse(req) {
                 Ok(body) => body,
                 Err(reply) => return Ok(reply),

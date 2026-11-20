@@ -480,13 +480,13 @@ fn send_anyway_takes_one_region_card_back_with_its_override_and_never_a_batch() 
 
     let batch = post_value(
         &p,
-        "/api/send-anyway",
+        "/api/send_anyway",
         serde_json::json!({ "keys": [region, other] }),
     );
     assert_eq!(batch.status, 400, "{}", text(&batch));
     assert!(!p.tracker.region_override(&region).unwrap());
 
-    let one = post_value(&p, "/api/send-anyway", serde_json::json!({ "key": region }));
+    let one = post_value(&p, "/api/send_anyway", serde_json::json!({ "key": region }));
     assert_eq!(one.status, 200, "{}", text(&one));
     assert_eq!(
         json_of(&one)["message"],
@@ -501,7 +501,7 @@ fn send_anyway_on_a_card_with_another_reason_is_a_plain_resolve() {
     let (p, _d) = panel();
     let c = add(&p, "c", 60.0, &[State::Prepared, State::NeedsGonza]);
 
-    let reply = post_value(&p, "/api/send-anyway", serde_json::json!({ "key": c }));
+    let reply = post_value(&p, "/api/send_anyway", serde_json::json!({ "key": c }));
 
     assert_eq!(reply.status, 200, "{}", text(&reply));
     assert_eq!(

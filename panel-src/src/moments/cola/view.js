@@ -213,6 +213,7 @@ function blockedRow(card) {
     actions: [
       verb("answer", t("cola.act.answer"), { primary: true, key: ANSWER_KEY }),
       ...((card.actions || []).includes("resolve") ? [verb("resolve", t("act.resolve"), { visible: false, permanent: true })] : []),
+      ...((card.actions || []).includes("send_anyway") ? [verb("send_anyway", t("act.send_anyway"), { visible: false, permanent: true })] : []),
       verb("open", t("cola.act.open"), { visible: false }),
     ],
   });
