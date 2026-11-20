@@ -731,10 +731,26 @@ const FIELD_NEVER: &[&str] = &[
     "licence no",
 ];
 
+/// "as on your national ID", "as shown on your passport", "in your identity card", on a normalized
+/// label: the document a name must match.
+static NAMED_DOCUMENT: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"\b(?:on|in|per|from)\s+(?:your|the|my)\s+(?:national\s+id|national\s+identity\s+card|identity\s+card|id\s+card|passport|dni|cedula(?:\s+de\s+identidad)?)\b",
+    )
+    .expect("NAMED_DOCUMENT is a valid regex")
+});
+
 /// True when `label` names a field on `FIELD_NEVER` (see `AnswerBank::lookup`). Accents are folded
 /// first (`normalize` alone would turn "cédula" into "c dula") and a lone `#` reads as "number".
 fn is_never_filled(label: &str) -> bool {
     let text = normalize(&fold_look_alikes(&label.replace('#', " number ")));
+    // "Full name (as on your national ID)" asks for a name that matches a document, not for the
+    // document's number: the reference is taken out of a name label before the list reads it.
+    let text = if contains_phrase(&text, "name") {
+        NAMED_DOCUMENT.replace_all(&text, " ").into_owned()
+    } else {
+        text
+    };
     FIELD_NEVER
         .iter()
         .any(|phrase| contains_phrase(&text, &normalize(phrase)))
@@ -883,6 +899,10 @@ mod tests {
         "Number of years",
         "Phone number",
         "What drives you?",
+        // A name field only says which document the name must match: it asks for no number.
+        "Full Name (as on your national ID)",
+        "Legal name as shown on your passport",
+        "Name as in your identity card",
     ];
 
     fn loose_and_exact_bank(label: &str) -> AnswerBank {
