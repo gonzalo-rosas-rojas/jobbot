@@ -8,6 +8,7 @@ use std::path::Path;
 use chrono::{DateTime, NaiveDate, Utc};
 use jobbot_app::ports::store::*;
 use jobbot_domain::models::Job;
+use jobbot_domain::origin::Origin;
 use jobbot_domain::prep::Question;
 use jobbot_domain::state::State;
 
@@ -126,6 +127,12 @@ impl ApplicationRepo for Tracker {
     }
     fn set_snoozed_until(&self, job_key: &str, until: Option<DateTime<Utc>>) -> StoreResult<()> {
         Tracker::set_snoozed_until(self, job_key, until).map_err(StoreError::from)
+    }
+    fn origin_of(&self, job_key: &str) -> StoreResult<Option<Origin>> {
+        Tracker::origin_of(self, job_key).map_err(StoreError::from)
+    }
+    fn set_origin(&self, job_key: &str, origin: Origin) -> StoreResult<bool> {
+        Tracker::set_origin(self, job_key, origin).map_err(StoreError::from)
     }
     fn approve(&self, job_key: &str) -> StoreResult<()> {
         Tracker::approve(self, job_key).map_err(StoreError::from)

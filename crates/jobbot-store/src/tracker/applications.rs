@@ -6,9 +6,11 @@ use chrono::{DateTime, TimeDelta, Utc};
 use rusqlite::types::Value;
 use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params, params_from_iter};
 
+use jobbot_domain::origin::Origin;
+
 use super::{
     ApplicationRow, Result, State, Tracker, TrackerError, from_text, optional_from_text,
-    placeholders, state_from_text, to_text,
+    origin_from_text, placeholders, state_from_text, to_text,
 };
 
 /// The states of an application that is not finished and was never sent: the ones
@@ -169,6 +171,30 @@ impl Tracker {
         self.update_column("snoozed_until", until.map(to_text), job_key)
     }
 
+    /// How the application came about, or `None` when there is no application for `job_key`.
+    pub fn origin_of(&self, job_key: &str) -> Result<Option<Origin>> {
+        let conn = self.lock();
+        Ok(conn
+            .query_row(
+                "SELECT origin FROM applications WHERE job_key = ?1",
+                [job_key],
+                |row| origin_from_text(0, &row.get::<_, String>(0)?),
+            )
+            .optional()?)
+    }
+
+    /// Sets how the application came about. False when there is no application for `job_key` (nothing written).
+    /// Nothing else of the row changes: not `updated_at`, not the state, no event. The origin is a fact about how
+    /// the application began, not a move, and the board orders by `updated_at`.
+    pub fn set_origin(&self, job_key: &str, origin: Origin) -> Result<bool> {
+        let conn = self.lock();
+        let changed = conn.execute(
+            "UPDATE applications SET origin = ?1 WHERE job_key = ?2",
+            params![origin.as_str(), job_key],
+        )?;
+        Ok(changed > 0)
+    }
+
     /// Marks an application as reviewed and approved by Gonza.
     pub fn approve(&self, job_key: &str) -> Result<()> {
         self.update_application("approved = 1", &[], job_key)
@@ -281,6 +307,36 @@ mod tests {
     use crate::tracker::test_support::{state_of, submit, three_scored};
 
     use super::*;
+
+    #[test]
+    fn set_origin_changes_only_that_row_and_writes_no_event() {
+        let t = Tracker::in_memory().unwrap();
+        let a = make_job_with(|j| j.external_id = "a".into());
+        let b = make_job_with(|j| j.external_id = "b".into());
+        for job in [&a, &b] {
+            t.add_job(job, 70.0, &BTreeMap::new(), *NOW).unwrap();
+            t.create_application(&job.key(), *NOW).unwrap();
+        }
+        let events_before = t.events_for(&a.key()).unwrap().len();
+        let updated_before = t.get_application(&a.key()).unwrap().unwrap().updated_at;
+
+        assert!(t.set_origin(&a.key(), Origin::Recruiter).unwrap());
+
+        assert_eq!(t.origin_of(&a.key()).unwrap(), Some(Origin::Recruiter));
+        assert_eq!(t.origin_of(&b.key()).unwrap(), Some(Origin::Cold));
+        assert_eq!(t.events_for(&a.key()).unwrap().len(), events_before);
+        assert_eq!(
+            t.get_application(&a.key()).unwrap().unwrap().updated_at,
+            updated_before
+        );
+    }
+
+    #[test]
+    fn set_origin_of_an_unknown_key_is_false_and_writes_nothing() {
+        let t = Tracker::in_memory().unwrap();
+        assert!(!t.set_origin("nope:1", Origin::Agency).unwrap());
+        assert_eq!(t.origin_of("nope:1").unwrap(), None);
+    }
 
     #[test]
     fn job_and_application_lifecycle() {

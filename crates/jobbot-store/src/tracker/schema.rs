@@ -4,14 +4,16 @@
 use std::path::Path;
 use std::sync::Mutex;
 
-use rusqlite::Connection;
+use jobbot_domain::handoff::MANUAL_RECORD_PREFIX;
+use jobbot_domain::models::MANUAL_SOURCE;
+use rusqlite::{Connection, TransactionBehavior};
 
 use super::{Result, Tracker, TrackerError, db_at, io};
 use crate::pragmas::{BUSY_TIMEOUT, use_wal};
 
 /// Version of the database layout this build writes (`PRAGMA user_version`). Raise it when a
 /// migration is added: `Tracker::open` copies an older database with data before it moves it up.
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 
 /// Indexes on columns `add_missing_columns` may have just added, so they run after it. The marks
 /// the panel can still undo are asked on every poll; only a hand mark keeps an `undo`.
@@ -30,7 +32,9 @@ CREATE TABLE IF NOT EXISTS applications (
   job_key TEXT PRIMARY KEY REFERENCES jobs(key), company_norm TEXT NOT NULL, state TEXT NOT NULL,
   note TEXT, needs_reason TEXT, cv_path TEXT, screenshot_path TEXT,
   approved INTEGER NOT NULL DEFAULT 0, submitted_at TEXT, updated_at TEXT NOT NULL,
-  attempted_at TEXT, snoozed_until TEXT
+  attempted_at TEXT, snoozed_until TEXT,
+  -- Version 5: how the application came about (`jobbot_domain::origin::Origin`, by its stored name).
+  origin TEXT NOT NULL DEFAULT 'cold'
 );
 CREATE TABLE IF NOT EXISTS events (
   id INTEGER PRIMARY KEY AUTOINCREMENT, job_key TEXT NOT NULL, at TEXT NOT NULL,
@@ -182,11 +186,12 @@ impl Tracker {
         Self::from_connection(Connection::open_in_memory()?)
     }
 
-    fn from_connection(conn: Connection) -> Result<Tracker> {
+    fn from_connection(mut conn: Connection) -> Result<Tracker> {
         conn.busy_timeout(BUSY_TIMEOUT)?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         conn.execute_batch(SCHEMA)?;
         Self::add_missing_columns(&conn)?;
+        Self::add_origin_column(&mut conn)?;
         conn.execute_batch(INDEXES_ON_ADDED_COLUMNS)?;
         Ok(Tracker {
             conn: Mutex::new(conn),
@@ -208,6 +213,31 @@ impl Tracker {
                 Self::tolerate_lost_race(conn, table, column, added)?;
             }
         }
+        Ok(())
+    }
+
+    /// Version 5: how each application came about (`applications.origin`). The column and the values of the
+    /// applications already stored are written in one IMMEDIATE transaction, so another process opening the same
+    /// file waits and then finds the column, and a cut between the two cannot leave a column without its values.
+    /// Everything stored is `cold` except what Gonza recorded by hand, which is `unknown`: a posting whose source
+    /// is `manual`, or an application that went through `record`'s `manual_record:` step (a hand-sent
+    /// application on a posting a board found). Nobody knows how those came about, and `cold` would claim jobbot
+    /// found them and applied without contact. `substr` and not `LIKE`: in `LIKE` the `_` of `manual_record`
+    /// matches any character. The statements are built with `format!` from constants, as `add_missing_columns`
+    /// builds its `ALTER`.
+    fn add_origin_column(conn: &mut Connection) -> Result<()> {
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if !Self::has_column(&tx, "applications", "origin")? {
+            let prefix = MANUAL_RECORD_PREFIX;
+            tx.execute_batch(&format!(
+                "ALTER TABLE applications ADD COLUMN origin TEXT NOT NULL DEFAULT 'cold';
+                 UPDATE applications SET origin = 'unknown'
+                  WHERE job_key IN (SELECT key FROM jobs WHERE source = '{MANUAL_SOURCE}')
+                     OR job_key IN (SELECT job_key FROM events
+                                     WHERE substr(note, 1, length('{prefix}')) = '{prefix}');"
+            ))?;
+        }
+        tx.commit()?;
         Ok(())
     }
 
@@ -241,6 +271,7 @@ mod tests {
 
     use chrono::{DateTime, TimeDelta, Utc};
     use jobbot_domain::fixtures::{NOW, make_job};
+    use jobbot_domain::origin::Origin;
 
     use crate::tracker::test_support::{new_email, new_task, state_of, stored_at};
     use crate::tracker::{EmailAdded, EmailKind, INTENT_SUBMIT, NewTask, State, TaskAdded};
@@ -667,6 +698,117 @@ mod tests {
         );
         drop(t);
         assert!(Tracker::open(&path).is_ok());
+    }
+
+    /// A version 4 database: a job from a board with its application, a posting recorded by hand with its
+    /// application, an application recorded by hand on a board's posting (`manual_record:` event), and an
+    /// application whose posting row is missing. Returns the four job keys in that order.
+    fn version_4_database(path: &Path) -> [&'static str; 4] {
+        let conn = Connection::open(path).unwrap();
+        // The orphan below is only possible with foreign keys off, as in old files.
+        conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
+        conn.execute_batch(&format!(
+            "{}
+             CREATE TABLE events (
+               id INTEGER PRIMARY KEY AUTOINCREMENT, job_key TEXT NOT NULL, at TEXT NOT NULL,
+               from_state TEXT, to_state TEXT NOT NULL, note TEXT, undo TEXT
+             );
+             PRAGMA user_version = 4;",
+            old_schema("attempted_at TEXT, snoozed_until TEXT")
+        ))
+        .unwrap();
+        for (key, source) in [
+            ("board:1", "greenhouse"),
+            ("manual:1", "manual"),
+            ("board:2", "lever"),
+        ] {
+            conn.execute(
+                "INSERT INTO jobs (key, source, company, company_norm, title, title_lc, url, apply_url,
+                                   location, remote, description, score, score_detail, first_seen)
+                 VALUES (?1, ?2, 'Acme', 'acme', 'Engineer', 'engineer', 'u', 'u', '', 1, '', 50, '{}',
+                         '2026-10-01T12:00:00Z')",
+                [key, source],
+            )
+            .unwrap();
+        }
+        for key in ["board:1", "manual:1", "board:2", "gone:1"] {
+            conn.execute(
+                "INSERT INTO applications (job_key, company_norm, state, updated_at)
+                 VALUES (?1, 'acme', 'scored', '2026-10-01T12:00:00Z')",
+                [key],
+            )
+            .unwrap();
+        }
+        conn.execute(
+            "INSERT INTO events (job_key, at, from_state, to_state, note)
+             VALUES ('board:2', '2026-10-01T12:00:00Z', 'scored', 'needs_gonza', ?1)",
+            [format!(
+                "{MANUAL_RECORD_PREFIX} enviada a mano, registrándola"
+            )],
+        )
+        .unwrap();
+        ["board:1", "manual:1", "board:2", "gone:1"]
+    }
+
+    #[test]
+    fn a_version_4_database_is_copied_and_gains_origin_cold_except_what_was_recorded_by_hand() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.db");
+        let [board, manual, recorded, orphan] = version_4_database(&path);
+
+        let t = Tracker::open(&path).unwrap();
+
+        assert!(
+            dir.path()
+                .join("backups")
+                .join("jobbot-before-v5.db")
+                .is_file()
+        );
+        let version: i64 = t
+            .lock()
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 5);
+        assert_eq!(t.origin_of(board).unwrap(), Some(Origin::Cold));
+        assert_eq!(t.origin_of(manual).unwrap(), Some(Origin::Unknown));
+        assert_eq!(t.origin_of(recorded).unwrap(), Some(Origin::Unknown));
+        assert_eq!(t.origin_of(orphan).unwrap(), Some(Origin::Cold));
+    }
+
+    #[test]
+    fn reopening_a_migrated_database_keeps_a_corrected_origin() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.db");
+        let [_, manual, _, _] = version_4_database(&path);
+        let t = Tracker::open(&path).unwrap();
+        assert!(t.set_origin(manual, Origin::Referral).unwrap());
+        drop(t);
+
+        let again = Tracker::open(&path).unwrap();
+
+        assert_eq!(again.origin_of(manual).unwrap(), Some(Origin::Referral));
+    }
+
+    #[test]
+    fn a_fresh_database_starts_every_application_cold() {
+        let t = Tracker::in_memory().unwrap();
+        let job = make_job();
+        t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
+        t.create_application(&job.key(), *NOW).unwrap();
+        assert_eq!(t.origin_of(&job.key()).unwrap(), Some(Origin::Cold));
+    }
+
+    #[test]
+    fn an_unknown_stored_origin_is_an_error_not_a_guess() {
+        let t = Tracker::in_memory().unwrap();
+        let job = make_job();
+        t.add_job(&job, 70.0, &BTreeMap::new(), *NOW).unwrap();
+        t.create_application(&job.key(), *NOW).unwrap();
+        t.lock()
+            .execute("UPDATE applications SET origin = 'friend'", [])
+            .unwrap();
+        let error = t.origin_of(&job.key()).unwrap_err().to_string();
+        assert!(error.contains("unknown origin \"friend\""), "{error}");
     }
 
     #[test]

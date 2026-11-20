@@ -9,6 +9,7 @@ use std::path::Path;
 
 use chrono::{DateTime, NaiveDate, Utc};
 use jobbot_domain::models::Job;
+use jobbot_domain::origin::Origin;
 use jobbot_domain::prep::Question;
 use jobbot_domain::privacy::Pii;
 use jobbot_domain::state::State;
@@ -426,6 +427,11 @@ pub trait ApplicationRepo {
     /// Puts an application off until `until` (`None` brings it back). The row keeps its state:
     /// only the panel's queues look at this.
     fn set_snoozed_until(&self, job_key: &str, until: Option<DateTime<Utc>>) -> StoreResult<()>;
+    /// How the application came about, or `None` when there is no application for `job_key`.
+    fn origin_of(&self, job_key: &str) -> StoreResult<Option<Origin>>;
+    /// Sets how the application came about. False when there is no application for `job_key` (nothing written).
+    /// Nothing else of the row changes: not `updated_at`, not the state, no event.
+    fn set_origin(&self, job_key: &str, origin: Origin) -> StoreResult<bool>;
     /// Marks an application as reviewed and approved by Gonza.
     fn approve(&self, job_key: &str) -> StoreResult<()>;
     /// Applications in `state`, best score first.

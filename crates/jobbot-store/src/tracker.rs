@@ -26,6 +26,7 @@ use rusqlite::Connection;
 use rusqlite::types::Type;
 
 // The state machine lives in the pure domain crate; the tracker stores the states.
+use jobbot_domain::origin::Origin;
 pub use jobbot_domain::state::{SUBMITTED_STATES, State};
 
 // The records the tracker reads and writes are the application's port types.
@@ -132,6 +133,10 @@ fn parse_column<T>(
 
 fn state_from_text(column: usize, text: &str) -> rusqlite::Result<State> {
     parse_column(column, text, "state", State::parse)
+}
+
+fn origin_from_text(column: usize, text: &str) -> rusqlite::Result<Origin> {
+    parse_column(column, text, "origin", Origin::parse)
 }
 
 fn email_kind_from_text(column: usize, text: &str) -> rusqlite::Result<EmailKind> {
