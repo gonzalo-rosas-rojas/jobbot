@@ -219,13 +219,18 @@ impl Tracker {
     /// Version 5: how each application came about (`applications.origin`). The column and the values of the
     /// applications already stored are written in one IMMEDIATE transaction, so another process opening the same
     /// file waits and then finds the column, and a cut between the two cannot leave a column without its values.
+    /// The column is looked for first without a lock, so every later open (the common case) never takes the write
+    /// lock; the transaction looks again, because another process may have added it in between.
     /// Everything stored is `cold` except what Gonza recorded by hand, which is `unknown`: a posting whose source
-    /// is `manual`, or an application that went through `record`'s `manual_record:` step (a hand-sent
-    /// application on a posting a board found). Nobody knows how those came about, and `cold` would claim jobbot
-    /// found them and applied without contact. `substr` and not `LIKE`: in `LIKE` the `_` of `manual_record`
-    /// matches any character. The statements are built with `format!` from constants, as `add_missing_columns`
-    /// builds its `ALTER`.
+    /// is `manual`, or an application that went through `record`'s `manual_record:` step, which `record` writes
+    /// only when the application was still `scored` (`record` sets `unknown` under the same rule for new
+    /// applications). Nobody knows how those came about, and `cold` would claim jobbot found them and applied
+    /// without contact. `substr` and not `LIKE`: in `LIKE` the `_` of `manual_record` matches any character. The
+    /// statements are built with `format!` from constants, as `add_missing_columns` builds its `ALTER`.
     fn add_origin_column(conn: &mut Connection) -> Result<()> {
+        if Self::has_column(conn, "applications", "origin")? {
+            return Ok(());
+        }
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if !Self::has_column(&tx, "applications", "origin")? {
             let prefix = MANUAL_RECORD_PREFIX;
@@ -773,6 +778,51 @@ mod tests {
         assert_eq!(t.origin_of(manual).unwrap(), Some(Origin::Unknown));
         assert_eq!(t.origin_of(recorded).unwrap(), Some(Origin::Unknown));
         assert_eq!(t.origin_of(orphan).unwrap(), Some(Origin::Cold));
+    }
+
+    #[test]
+    fn the_backup_is_the_version_4_state_without_the_origin_column() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.db");
+        version_4_database(&path);
+        drop(Tracker::open(&path).unwrap());
+
+        let copy =
+            Connection::open(dir.path().join("backups").join("jobbot-before-v5.db")).unwrap();
+
+        let version: i64 = copy
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 4);
+        assert!(!Tracker::has_column(&copy, "applications", "origin").unwrap());
+    }
+
+    #[test]
+    fn a_database_with_the_column_that_still_says_version_4_finishes_without_a_second_backup_or_backfill()
+     {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.db");
+        let [_, manual, _, _] = version_4_database(&path);
+        let t = Tracker::open(&path).unwrap();
+        t.set_origin(manual, Origin::Referral).unwrap();
+        t.lock().pragma_update(None, "user_version", 4).unwrap();
+        drop(t);
+        let backup = dir.path().join("backups").join("jobbot-before-v5.db");
+        let backup_before = std::fs::read(&backup).unwrap();
+
+        let again = Tracker::open(&path).unwrap();
+
+        let version: i64 = again
+            .lock()
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 5, "the migration is finished");
+        assert_eq!(
+            again.origin_of(manual).unwrap(),
+            Some(Origin::Referral),
+            "the backfill did not run again"
+        );
+        assert_eq!(std::fs::read(&backup).unwrap(), backup_before);
     }
 
     #[test]

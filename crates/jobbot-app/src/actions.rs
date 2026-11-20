@@ -409,6 +409,12 @@ pub fn set_origin(tracker: &dyn Store, key: &str, origin_text: &str) -> Result<O
 /// all know about it. It stays unapproved: a form nobody filled with the bot proves nothing about
 /// the filler. An application already submitted (or later) or withdrawn is refused, and nothing
 /// changes.
+///
+/// How it came about (`RecordSpec::origin`): an invalid origin is refused before anything is written. A given
+/// origin is stored. Without one, an application that was still `scored` when it is recorded (the `scored` to
+/// `needs_gonza` step: new, or queued by discovery but never prepared by jobbot) becomes `unknown`, since nobody
+/// knows the channel; one recorded from `prepared` or `needs_gonza` keeps what it has. This is the migration's
+/// backfill rule too (`add_origin_column`).
 #[tracing::instrument(skip_all, fields(ok = Empty))]
 pub fn record(tracker: &dyn Store, spec: &RecordSpec, now: DateTime<Utc>) -> Result<Outcome> {
     // Parsed before anything is written: a refused origin must leave no posting and no application behind.
@@ -473,8 +479,7 @@ pub fn record(tracker: &dyn Store, spec: &RecordSpec, now: DateTime<Utc>) -> Res
             }
         }
     };
-    let is_new = tracker.get_application(&key)?.is_none();
-    tracker.create_application(&key, now)?;
+    tracker.start_application(&key, typed.unwrap_or(Origin::Unknown), now)?;
     let Some(row) = tracker.get_application(&key)? else {
         return Ok(not_found(&key));
     };
@@ -491,13 +496,15 @@ pub fn record(tracker: &dyn Store, spec: &RecordSpec, now: DateTime<Utc>) -> Res
             )));
         }
     }
-    // After the state check, so a refused record changes nothing. Given: it wins. Not given: a new application
-    // is `unknown` (nobody wrote down how it came about); one discovery queued keeps the origin it has.
+    // After the state check, so a refused record changes nothing. Given: it wins. Not given: an application
+    // that is still `scored` (new, or queued by discovery but never prepared) is `unknown`, because jobbot had
+    // not prepared it and nobody wrote down how it came about; one that was already `prepared` or waiting
+    // (`needs_gonza`) keeps the origin it has. The same rule as the migration's backfill.
     match typed {
         Some(origin) => {
             tracker.set_origin(&key, origin)?;
         }
-        None if is_new => {
+        None if row.state == State::Scored => {
             tracker.set_origin(&key, Origin::Unknown)?;
         }
         None => {}

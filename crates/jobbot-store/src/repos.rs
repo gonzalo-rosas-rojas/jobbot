@@ -79,8 +79,13 @@ impl JobRepo for Tracker {
 }
 
 impl ApplicationRepo for Tracker {
-    fn create_application(&self, job_key: &str, now: DateTime<Utc>) -> StoreResult<()> {
-        Tracker::create_application(self, job_key, now).map_err(StoreError::from)
+    fn start_application(
+        &self,
+        job_key: &str,
+        origin: Origin,
+        now: DateTime<Utc>,
+    ) -> StoreResult<()> {
+        Tracker::create_application_as(self, job_key, origin, now).map_err(StoreError::from)
     }
     fn get_application(&self, job_key: &str) -> StoreResult<Option<ApplicationRow>> {
         Tracker::get_application(self, job_key).map_err(StoreError::from)

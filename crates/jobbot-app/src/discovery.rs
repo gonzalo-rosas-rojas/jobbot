@@ -7,6 +7,7 @@ use jobbot_domain::exclusion::{check_exclusion, exclusion_note};
 use jobbot_domain::gate::{OUT_OF_REGION_NOTE, is_stale, stale_note};
 use jobbot_domain::handoff::{form_may_have_gone_out, may_have_been_sent};
 use jobbot_domain::models::{FetchError, Job};
+use jobbot_domain::origin::Origin;
 use jobbot_domain::rules::{Criteria, Exclusions};
 use jobbot_domain::scoring::{ScoreResult, score_job};
 use jobbot_domain::state::State;
@@ -331,7 +332,8 @@ fn place(
     if scored.total < threshold {
         return Ok(Placement::BelowThreshold);
     }
-    tracker.create_application(&job.key(), now)?;
+    // jobbot found it and applies without contact: the channel is `cold`.
+    tracker.start_application(&job.key(), Origin::Cold, now)?;
     if scored.below_floor && !extra_eligible {
         tracker.transition(&job.key(), State::NeedsGonza, Some(BELOW_FLOOR_NOTE), now)?;
         Ok(Placement::Flagged)

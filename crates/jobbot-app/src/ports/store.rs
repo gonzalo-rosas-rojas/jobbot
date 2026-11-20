@@ -383,8 +383,19 @@ pub trait JobRepo {
 
 /// The applications and their state machine (`applications`, `events`).
 pub trait ApplicationRepo {
-    /// Starts an application at `Scored`. Does nothing if one already exists.
-    fn create_application(&self, job_key: &str, now: DateTime<Utc>) -> StoreResult<()>;
+    /// Starts an application at `Scored` with how it came about. Does nothing if one already exists (it keeps the
+    /// origin it has).
+    fn start_application(
+        &self,
+        job_key: &str,
+        origin: Origin,
+        now: DateTime<Utc>,
+    ) -> StoreResult<()>;
+    /// `start_application` as `Cold`, for fixtures and tests that do not care how it came about. The code that
+    /// opens real applications (discovery, `record`) names the origin with `start_application`.
+    fn create_application(&self, job_key: &str, now: DateTime<Utc>) -> StoreResult<()> {
+        self.start_application(job_key, Origin::Cold, now)
+    }
     fn get_application(&self, job_key: &str) -> StoreResult<Option<ApplicationRow>>;
     /// Moves an application along the state machine and records the event. Moving to
     /// `NeedsGonza` stores `note` as the reason; leaving it clears the reason; moving to

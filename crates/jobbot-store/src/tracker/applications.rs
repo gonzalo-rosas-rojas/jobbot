@@ -71,6 +71,18 @@ fn query_applications(
 impl Tracker {
     /// Starts an application at `Scored`. Does nothing if one already exists.
     pub fn create_application(&self, job_key: &str, now: DateTime<Utc>) -> Result<()> {
+        self.create_application_as(job_key, Origin::Cold, now)
+    }
+
+    /// `create_application` with the origin the new application starts with. Discovery passes `Cold`; `record`
+    /// passes what it decided. An application that already exists keeps the origin it has. The column's default
+    /// stays `'cold'` so a running older process, whose INSERT names no origin, still inserts.
+    pub fn create_application_as(
+        &self,
+        job_key: &str,
+        origin: Origin,
+        now: DateTime<Utc>,
+    ) -> Result<()> {
         let mut conn = self.lock();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let exists: bool = tx.query_row(
@@ -93,8 +105,14 @@ impl Tracker {
         };
         let at = to_text(now);
         tx.execute(
-            "INSERT INTO applications (job_key, company_norm, state, updated_at) VALUES (?1, ?2, ?3, ?4)",
-            params![job_key, company_norm, State::Scored.as_str(), at],
+            "INSERT INTO applications (job_key, company_norm, state, updated_at, origin) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                job_key,
+                company_norm,
+                State::Scored.as_str(),
+                at,
+                origin.as_str()
+            ],
         )?;
         tx.execute(
             "INSERT INTO events (job_key, at, from_state, to_state, note) VALUES (?1, ?2, NULL, ?3, NULL)",

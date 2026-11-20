@@ -800,16 +800,22 @@ fn record_without_an_origin_stores_unknown_on_a_new_application() {
     assert_eq!(t.origin_of(&key).unwrap(), Some(Origin::Unknown));
 }
 #[test]
-fn record_of_a_queued_posting_without_an_origin_keeps_cold() {
-    let (t, key) = tracker_with(&[]);
-    let spec = RecordSpec {
-        key: Some(key.clone()),
-        ..RecordSpec::default()
-    };
+fn record_of_a_scored_posting_without_an_origin_is_unknown_and_of_a_prepared_one_keeps_cold() {
+    // Scored: jobbot had not prepared it, so nobody knows the channel. Prepared: jobbot's own, it stays cold.
+    for (states, expected) in [
+        (vec![], Origin::Unknown),
+        (vec![State::Prepared], Origin::Cold),
+    ] {
+        let (t, key) = tracker_with(&states);
+        let spec = RecordSpec {
+            key: Some(key.clone()),
+            ..RecordSpec::default()
+        };
 
-    assert!(record(&t, &spec, *NOW).unwrap().ok);
+        assert!(record(&t, &spec, *NOW).unwrap().ok);
 
-    assert_eq!(t.origin_of(&key).unwrap(), Some(Origin::Cold));
+        assert_eq!(t.origin_of(&key).unwrap(), Some(expected), "{states:?}");
+    }
 }
 #[test]
 fn record_of_a_queued_posting_with_an_origin_replaces_cold() {
