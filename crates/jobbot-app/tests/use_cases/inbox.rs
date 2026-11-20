@@ -8,6 +8,7 @@ use chrono::{TimeDelta, TimeZone};
 use serde_json::Value;
 use serde_json::json;
 
+use jobbot_app::actions;
 use jobbot_app::inbox::*;
 use jobbot_app::ports::store::EmailKind;
 use jobbot_domain::models::Job;
@@ -800,6 +801,48 @@ fn an_email_from_before_the_application_was_sent_is_kept_but_moves_nothing() {
         json!({ "job_key": key, "received_at": "2026-09-28T12:00:00Z" }),
     );
     assert_eq!(run(&t, &[same]).state_changes, 1);
+}
+/// An application prepared and sent by hand: `confirm` ran a day ago, long after the form went out.
+fn confirmed_late(t: &Tracker, id: &str) -> String {
+    let key = app(t, id, "Acme AI", &[State::Prepared, State::NeedsGonza]);
+    actions::confirm(t, &key, *NOW - TimeDelta::days(1)).unwrap();
+    key
+}
+#[test]
+fn a_reply_that_came_before_the_late_confirm_still_moves_the_application() {
+    let t = Tracker::in_memory().unwrap();
+    // Sent on day -3 (prepared), confirmed on day -1; the recruiter answered on day -2.
+    let key = confirmed_late(&t, "1");
+    let reply = with(
+        msg("m1", "recruiter"),
+        json!({ "job_key": key, "received_at": (*NOW - TimeDelta::days(2)).to_rfc3339() }),
+    );
+
+    let report = run(&t, &[reply]);
+
+    assert_eq!(report.state_changes, 1, "{:?}", report.lines);
+    assert_eq!(state_of(&t, &key), State::Replied);
+}
+#[test]
+fn a_reply_imported_before_the_confirm_moves_the_application_when_it_is_seen_again() {
+    let t = Tracker::in_memory().unwrap();
+    let key = app(&t, "1", "Acme AI", &[State::Prepared, State::NeedsGonza]);
+    let reply = with(
+        msg("m1", "recruiter"),
+        json!({ "job_key": key, "received_at": (*NOW - TimeDelta::days(2)).to_rfc3339() }),
+    );
+    // The first import finds the application waiting for Gonza: the move is refused.
+    assert_eq!(run(&t, &[reply.clone()]).state_changes, 0);
+    assert_eq!(state_of(&t, &key), State::NeedsGonza);
+    actions::confirm(&t, &key, *NOW - TimeDelta::days(1)).unwrap();
+
+    let again = run(&t, &[reply.clone()]);
+
+    assert_eq!(again.state_changes, 1, "{:?}", again.lines);
+    assert_eq!(state_of(&t, &key), State::Replied);
+    // Once moved, a third import changes nothing.
+    assert_eq!(run(&t, &[reply]).state_changes, 0);
+    assert_eq!(state_of(&t, &key), State::Replied);
 }
 #[test]
 fn a_late_answer_after_silence_is_matched_by_job_key_and_by_company() {

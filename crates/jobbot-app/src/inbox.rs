@@ -406,9 +406,13 @@ fn move_state(
     let Some(target) = target_state(mail.kind) else {
         return Ok(());
     };
-    if let Some(app) = tracker.get_application(key)?
-        && let Some(sent_at) = app.submitted_at
-        && mail.received_at < sent_at
+    // `submitted_at` is when `confirm` or `record` ran, which for a form Gonza sent by hand is
+    // later than the send itself, so a reply that came in between would look "earlier". The
+    // application exists from its first history entry: only mail from before that answers an
+    // earlier process.
+    let events = tracker.events_for(key)?;
+    if let Some(started) = events.first().map(|event| event.at)
+        && mail.received_at < started
     {
         notes.push("anterior a la postulación, sin cambio de estado".to_string());
         return Ok(());
@@ -419,8 +423,13 @@ fn move_state(
         mail.subject
     };
     let note = clean(&format!("correo: {subject}"), NOTE_MAX);
-    // The history records when the email arrived, not when it was imported.
-    let at = mail.received_at.min(now);
+    // The history records when the email arrived, not when it was imported, but never before the
+    // application's own `submitted` entry (a late `confirm` stamps that one at command time).
+    let sent_at = tracker
+        .get_application(key)?
+        .and_then(|app| app.submitted_at)
+        .unwrap_or(mail.received_at);
+    let at = mail.received_at.min(now).max(sent_at);
     let outcome = actions::mark_from_email(tracker, key, target.as_str(), Some(&note), at)?;
     if outcome.ok {
         report.state_changes += 1;
@@ -462,6 +471,9 @@ fn revisit_known(
 ) -> Result<()> {
     let key = match (&known.job_key, resolve_job(tracker, item)?) {
         (None, Link::Found(key)) => key,
+        (Some(key), _) if still_unanswered(tracker, key)? => {
+            return retry_move(tracker, position, item, known, key, now, report);
+        }
         _ => {
             report.skipped += 1;
             report.lines.push(skipped_line(position, &item.message_id));
@@ -487,6 +499,53 @@ fn revisit_known(
         item.message_id,
         notes.join(" · ")
     )));
+    Ok(())
+}
+
+/// True when the application is `submitted` and nothing has happened to it since: no answer was
+/// ever applied. A message linked to it then has not moved it yet, either because the move was
+/// refused (the reply came while the application still waited for Gonza's `confirm`) or because
+/// the message says nothing to move for.
+fn still_unanswered(tracker: &dyn Store, key: &str) -> Result<bool> {
+    let in_submitted = tracker
+        .get_application(key)?
+        .is_some_and(|app| app.state == State::Submitted);
+    Ok(in_submitted
+        && tracker
+            .events_for(key)?
+            .last()
+            .is_some_and(|event| event.to_state == State::Submitted))
+}
+
+/// A message already linked whose application is still `submitted` with nothing after it: its
+/// state move is tried again (see `still_unanswered`). Nothing else about the message changes.
+fn retry_move(
+    tracker: &dyn Store,
+    position: usize,
+    item: &Item,
+    known: &EmailRow,
+    key: &str,
+    now: DateTime<Utc>,
+    report: &mut ImportReport,
+) -> Result<()> {
+    let mail = Mail {
+        kind: known.kind,
+        subject: &known.subject,
+        received_at: known.received_at,
+    };
+    let mut notes = Vec::new();
+    let before = report.state_changes;
+    move_state(tracker, key, &mail, now, &mut notes, report)?;
+    if report.state_changes == before {
+        report.skipped += 1;
+        report.lines.push(skipped_line(position, &item.message_id));
+    } else {
+        report.lines.push(plain_line(&format!(
+            "elemento {position} reaplicado: ya estaba importado ({}) · {}",
+            item.message_id,
+            notes.join(" · ")
+        )));
+    }
     Ok(())
 }
 
