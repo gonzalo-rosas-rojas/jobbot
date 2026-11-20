@@ -6,7 +6,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 use serde::Deserialize;
 
-use crate::text::normalize;
+use crate::text::{fold_look_alikes, normalize};
 
 /// One bank entry: every pattern is a normalized phrase; `value: None` means "ask Gonza";
 /// `alternatives` are other option texts to try when the field is a drop-down and `value` is not
@@ -416,7 +416,14 @@ impl AnswerBank {
     /// the country you reside in?" but not "... reside in and in the US?"). A term that starts
     /// with `!` must NOT match (`visa&!reside` takes "Do you need a visa?" but not "... a visa in
     /// the country you reside in?"); a pattern needs at least one term without the `!`.
+    ///
+    /// A label on the never-filled list (`FIELD_NEVER`: government identity numbers and banking)
+    /// gets no entry at all, whatever the bank says, loose or `=` pattern alike: the field is
+    /// reported as unanswered and goes to Gonza. Every fill path goes through this method.
     pub fn lookup(&self, label: &str) -> Option<&AnswerEntry> {
+        if is_never_filled(label) {
+            return None;
+        }
         // `normalize` drops "co" as a company suffix, which would turn "Co-applicant name" into
         // "applicant name": gluing a "co-" prefix first keeps it one word.
         let text = normalize(&label.to_lowercase().replace("co-", "co"));
@@ -659,6 +666,80 @@ const CONSENT_NEVER: &[&str] = &[
     "retention",
 ];
 
+/// Phrases that mark a field the program never fills: government identity numbers and banking.
+/// Gonza's fixed rule, so it lives here and not in the editable answers file: a loose bank pattern
+/// ("number", "country") must not be able to put a passport or tax number, or an account, into a
+/// form that nobody reviewed. Matched like `CONSENT_NEVER` (normalized, whole words, optional
+/// plural `s`), in English and Spanish. Phrases are specific on purpose: "LinkedIn ID", "valid
+/// passport?", "Swift" the language or "banking" experience are ordinary fields and stay answerable.
+const FIELD_NEVER: &[&str] = &[
+    // Government identity numbers.
+    "national id",
+    "national identity",
+    "national identification",
+    "identity card number",
+    "identity number",
+    "identification number",
+    "id number",
+    "cedula",
+    "rut",
+    "numero de run",
+    "dni",
+    "cpf",
+    "curp",
+    "social security",
+    "ssn",
+    "social insurance number",
+    "national insurance number",
+    "passport number",
+    "passport no",
+    "numero de pasaporte",
+    // Tax numbers.
+    "tax id",
+    "tax identification",
+    "tin number",
+    "taxpayer",
+    "tax payer",
+    "vat number",
+    "numero de contribuyente",
+    // Banking and cards.
+    "bank account",
+    "bank details",
+    "account number",
+    "iban",
+    "routing number",
+    "sort code",
+    "swift code",
+    "bic code",
+    "cuenta bancaria",
+    "numero de cuenta",
+    "credit card number",
+    "debit card number",
+    "card number",
+    "cvv",
+    "cvc",
+    // Driver's licence numbers.
+    "driver s license number",
+    "drivers license number",
+    "driver license number",
+    "driver s licence number",
+    "drivers licence number",
+    "driver licence number",
+    "license number",
+    "licence number",
+    "license no",
+    "licence no",
+];
+
+/// True when `label` names a field on `FIELD_NEVER` (see `AnswerBank::lookup`). Accents are folded
+/// first (`normalize` alone would turn "cédula" into "c dula") and a lone `#` reads as "number".
+fn is_never_filled(label: &str) -> bool {
+    let text = normalize(&fold_look_alikes(&label.replace('#', " number ")));
+    FIELD_NEVER
+        .iter()
+        .any(|phrase| contains_phrase(&text, &normalize(phrase)))
+}
+
 /// Whether one bank pattern matches an already normalized label (see `AnswerBank::lookup`). A
 /// term that is empty after normalizing never matches, so a stray `&` or `|` can only make a
 /// pattern narrower, never wider.
@@ -737,6 +818,125 @@ pub fn parse_answers(text: &str) -> Result<AnswerBank, toml::de::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Labels of the fields the program never fills: identity numbers and banking.
+    const NEVER_FILLED_LABELS: &[&str] = &[
+        "National ID",
+        "National identity number",
+        "Identity card number",
+        "ID number",
+        "ID #",
+        "Cédula de identidad",
+        "Cedula",
+        "RUT",
+        "Número de RUN",
+        "DNI",
+        "CPF",
+        "CURP",
+        "Social security number",
+        "SSN",
+        "Social insurance number",
+        "National insurance number",
+        "Passport number",
+        "Passport no.",
+        "Passport #",
+        "Número de pasaporte",
+        "Tax ID",
+        "Tax identification number",
+        "TIN number",
+        "Taxpayer",
+        "VAT number",
+        "Número de contribuyente",
+        "Bank account",
+        "Account number",
+        "IBAN",
+        "Routing number",
+        "Sort code",
+        "SWIFT code",
+        "BIC code",
+        "Cuenta bancaria",
+        "Número de cuenta",
+        "Credit card number",
+        "Debit card number",
+        "CVV",
+        "Driver's license number",
+        "Driver’s licence number",
+        "Licence no",
+    ];
+
+    /// Labels that only look like the ones above: none of them may be held back.
+    const ORDINARY_LABELS: &[&str] = &[
+        "LinkedIn ID",
+        "Requisition ID",
+        "Job ID",
+        "Do you have a valid passport?",
+        "Years of experience with Swift",
+        "Swift",
+        "How long did you run the project",
+        "Have you run a team?",
+        "Sin experiencia",
+        "Are you comfortable with a contractor arrangement where you handle your own taxes?",
+        "Accounting experience",
+        "Account manager",
+        "GitHub account",
+        "Experience in banking",
+        "Number of years",
+        "Phone number",
+        "What drives you?",
+    ];
+
+    fn loose_and_exact_bank(label: &str) -> AnswerBank {
+        // The loose entry is made of the label's own words, so it matches the label for sure.
+        let loose = normalize(label).replace(' ', "|");
+        let exact = format!("={label}");
+        AnswerBank {
+            entries: vec![
+                AnswerEntry::new(&[exact.as_str()], Some("exact")),
+                AnswerEntry::new(&[loose.as_str()], Some("loose")),
+            ],
+            consent_phrases: vec![],
+        }
+    }
+
+    #[test]
+    fn no_bank_entry_answers_an_identity_number_or_a_bank_field() {
+        for label in NEVER_FILLED_LABELS {
+            for shown in [
+                label.to_string(),
+                label.to_uppercase(),
+                label.to_lowercase(),
+                format!("Please enter your {label} *"),
+                format!("{label} (required)"),
+            ] {
+                let bank = loose_and_exact_bank(&shown);
+                assert!(
+                    bank.lookup(&shown).is_none(),
+                    "a bank entry answered {shown:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_bank_still_answers_a_label_that_only_looks_like_a_never_filled_one() {
+        for label in ORDINARY_LABELS {
+            let bank = loose_and_exact_bank(label);
+            assert!(
+                bank.lookup(label).is_some(),
+                "{label:?} was held back by the never-filled list"
+            );
+        }
+    }
+
+    #[test]
+    fn a_catch_all_pattern_does_not_fill_a_passport_number() {
+        let bank = AnswerBank {
+            entries: vec![AnswerEntry::new(&["number|country"], Some("1234"))],
+            consent_phrases: vec![],
+        };
+        assert!(bank.lookup("Passport number").is_none());
+        assert!(bank.lookup("Phone number").is_some());
+    }
 
     #[test]
     fn a_consent_phrase_matches_only_its_own_words_and_their_plural() {
