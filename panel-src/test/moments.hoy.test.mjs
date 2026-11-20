@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { setLang, setTimeZone } from "../src/i18n/index.js";
 import esHoy from "../src/i18n/es/hoy.js";
 import enHoy from "../src/i18n/en/hoy.js";
-import { model, candidates, turnCount, nightFigures } from "../src/core/model.js";
+import { model, candidates, turnCount, nightFigures, KIND_IDS } from "../src/core/model.js";
 import { hoyView, turnWord, NEXT_ROWS, SINCE_ROWS, SPELLED_UP_TO, ACTION_LABEL } from "../src/moments/hoy/view.js";
 import { keyShown } from "../src/ui/keys.js";
 import { clean, safeHref } from "../src/moments/shared/util.js";
@@ -243,7 +243,7 @@ test("both languages: every key the view asks for exists, and no string shows a 
       const ok = dict[key] !== undefined || (m[1] === "n" && (dict[key + ".one"] !== undefined && dict[key + ".other"] !== undefined));
       assert.ok(ok, `missing ${key}`);
     }
-    for (const kind of ["task", "test", "interview", "offer", "approve", "handoff", "missing_answers", "blocked", "may_have_sent", "error", "manual_apply", "other", "followup"]) assert.ok(dict["hoy.kind." + kind], kind);
+    for (const kind of KIND_IDS) assert.ok(dict["hoy.kind." + kind], kind);
   }
   for (const lang of ["es", "en"]) {
     fresh(lang);
