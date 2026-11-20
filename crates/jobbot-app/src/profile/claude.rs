@@ -46,7 +46,13 @@ pub struct ClaudeConfig {
     /// The `subscriptionType` values accepted (`pro`, `max` by default).
     #[serde(default = "default_allowed_subscriptions")]
     pub allowed_subscriptions: Vec<String>,
+    /// Passed to `--effort` (one of `EFFORT_LEVELS`). Absent means: no flag, the CLI's own default.
+    #[serde(default)]
+    pub effort: Option<String>,
 }
+
+/// The values `claude --effort` takes.
+const EFFORT_LEVELS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 
 fn default_model() -> String {
     "claude-sonnet-5-5".to_string()
@@ -83,6 +89,7 @@ impl Default for ClaudeConfig {
             expected_email: Pii::default(),
             expected_org_id: String::new(),
             allowed_subscriptions: default_allowed_subscriptions(),
+            effort: None,
         }
     }
 }
@@ -165,6 +172,13 @@ pub fn parse_claude_config(text: &str) -> Result<ClaudeConfig, ConfigError> {
     rule(
         !config.allowed_subscriptions.is_empty(),
         "allowed_subscriptions must name at least one plan",
+    )?;
+    rule(
+        config
+            .effort
+            .as_deref()
+            .is_none_or(|level| EFFORT_LEVELS.contains(&level)),
+        "effort must be one of low, medium, high, xhigh, max", // kept in step with EFFORT_LEVELS
     )?;
     Ok(config)
 }
@@ -291,6 +305,21 @@ mod tests {
         ] {
             let err = parse_claude_config(text).unwrap_err().to_string();
             assert!(err.contains(mentions), "{text}: {err}");
+        }
+    }
+
+    #[test]
+    fn effort_is_optional_and_only_the_five_levels_are_accepted() {
+        assert_eq!(parse_claude_config("").unwrap().effort, None);
+        for level in ["low", "medium", "high", "xhigh", "max"] {
+            let c = parse_claude_config(&format!("effort = \"{level}\"\n")).unwrap();
+            assert_eq!(c.effort.as_deref(), Some(level));
+        }
+        for bad in ["", "ultra", "High", "  high"] {
+            let err = parse_claude_config(&format!("effort = \"{bad}\"\n"))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("effort must be one of"), "{bad:?}: {err}");
         }
     }
 

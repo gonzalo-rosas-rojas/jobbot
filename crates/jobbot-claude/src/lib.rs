@@ -69,6 +69,13 @@ const CHILD_ENV_REMOVED_ALSO: [&str; 4] = [
     "CLOUD_ML_REGION",
 ];
 
+/// Variables that would silently override a setting this program passes as a flag. Per the CLI's
+/// documentation `CLAUDE_CODE_EFFORT_LEVEL` outranks `--effort`, so a value in the parent's
+/// environment would decide the child's reasoning effort whatever `claude.toml` says. An explicit
+/// list on purpose, not a `CLAUDE_CODE_` prefix: the CLI reads others at start-up on Windows (for
+/// example `CLAUDE_CODE_GIT_BASH_PATH`). Removed even when not set.
+const CHILD_ENV_REMOVED_SETTINGS: [&str; 1] = ["CLAUDE_CODE_EFFORT_LEVEL"];
+
 /// True for a variable the child must not inherit (see the three constants above).
 fn picks_account_or_bill(name: &str) -> bool {
     let upper = name.to_ascii_uppercase();
@@ -342,6 +349,10 @@ pub fn build_args(config: &ClaudeConfig, req: &ClaudeRequest) -> Vec<String> {
         "--system-prompt".to_string(),
         req.system.clone(),
     ]);
+    if let Some(effort) = &config.effort {
+        args.push("--effort".to_string());
+        args.push(effort.clone());
+    }
     if let Some(schema) = &req.schema {
         args.push("--json-schema".to_string());
         args.push(schema.to_string());
@@ -560,6 +571,9 @@ impl CliClaude {
         env_names: impl IntoIterator<Item = std::ffi::OsString>,
     ) {
         for key in CHILD_ENV_REMOVED {
+            command.env_remove(key);
+        }
+        for key in CHILD_ENV_REMOVED_SETTINGS {
             command.env_remove(key);
         }
         for name in env_names {
@@ -1220,6 +1234,50 @@ mod tests {
             !args.iter().any(|a| a.contains("SECRET PROMPT TEXT")),
             "the prompt travels through stdin, never on the command line"
         );
+    }
+
+    #[test]
+    fn effort_is_passed_only_when_the_config_sets_it() {
+        let flag_value = |config: &ClaudeConfig| {
+            let args = build_args(config, &request());
+            args.windows(2)
+                .find(|w| w[0] == "--effort")
+                .map(|w| w[1].clone())
+        };
+        assert_eq!(flag_value(&ClaudeConfig::default()), None);
+        let config = ClaudeConfig {
+            effort: Some("high".to_string()),
+            ..ClaudeConfig::default()
+        };
+        assert_eq!(flag_value(&config).as_deref(), Some("high"));
+    }
+
+    #[test]
+    fn the_child_never_inherits_the_effort_variable_which_outranks_the_flag() {
+        let dir = tempfile::tempdir().unwrap();
+        let runner = CliClaude::with_program(
+            ClaudeConfig::default(),
+            std::path::PathBuf::from("claude"),
+            Vec::new(),
+            dir.path().to_path_buf(),
+            dir.path().join("claude-config"),
+        );
+        // Removed whether or not the parent has it; its sibling variables are left alone.
+        for present in [
+            vec![],
+            vec!["CLAUDE_CODE_EFFORT_LEVEL", "CLAUDE_CODE_GIT_BASH_PATH"],
+        ] {
+            let command = runner.prepare_command_in(
+                &request(),
+                present.into_iter().map(std::ffi::OsString::from),
+            );
+            let envs = envs_of(&command);
+            assert_eq!(envs.get("CLAUDE_CODE_EFFORT_LEVEL"), Some(&None));
+            assert!(
+                !envs.contains_key("CLAUDE_CODE_GIT_BASH_PATH"),
+                "the CLI reads this one at start-up on Windows"
+            );
+        }
     }
 
     #[test]
