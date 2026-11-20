@@ -17,29 +17,30 @@ static RANGE: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
-/// The period a pay range names right after it, reached through whitespace (and an opening
-/// parenthesis) only, with a currency word allowed in between: `per year`, `a month`, `/yr`,
-/// `annually`, or a bare `annual`, `yearly`, `monthly` (see `stated_period` for the last one).
-/// Anything else between the range and the word (`+ annual bonus`, `. Annual leave`) means the
-/// word is not about the pay.
+/// The period a pay range names right after it. Between the range and the word only separators
+/// that are not letters, digits, `/`, `+`, `.` or `;` may stand (spaces, commas, brackets, a line
+/// break), and a currency word, itself followed by such separators: `, per year`, `(USD) per
+/// year`. The word is `per year`, `a month`, `/yr`, `annually`, `p.a.`, or a bare `annual`,
+/// `yearly`, `monthly` (see `period_after` for the last one). Anything else in between (`+ annual
+/// bonus`, `. Annual leave`) means the word is not about the pay.
 static PERIOD_AFTER: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"(?i)^\s*\(?\s*(?:(?:usd|us\$|dollars?|gross|net)\s*)*(?:(?:per|a|each|/)\s?(?P<fixed>year|yr|annum|month|mo)|(?P<adverb>annually)|(?P<bare>annual|yearly|monthly))\b",
+        r"(?i)^[^\p{L}\p{N}/+.;]*(?:(?:usd|us\$|dollars?|gross|net)[^\p{L}\p{N}/+.;]*)*(?:(?:per|a|each|/)\s?(?P<fixed>year|yr|annum|month|mo)\b|(?P<adverb>annually\b|p\.a\.?)|(?P<bare>annual|yearly|monthly)\b)",
     )
     .unwrap()
 });
 
-/// The period a pay range is introduced with, right before it (whitespace or a colon between):
-/// `Annual salary: $15,000 - $19,000`.
+/// The period a pay range is introduced with, right before it: `Annual salary: $15,000 - $19,000`,
+/// `Yearly base pay range (USD) is US$15,000 - $19,000`.
 static PERIOD_BEFORE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"(?i)(annual|yearly|monthly)\s+(?:base\s+)?(?:salary|pay|compensation|range)[\s:]*$",
+        r"(?i)(annual|yearly|monthly)\s+(?:base\s+)?(?:salary|pay|compensation)(?:\s+range)?(?:\s*\([^)]{0,20}\))?(?:\s+(?:is|of|between))?[\s:]*(?:(?:usd|us)\s*)?$",
     )
     .unwrap()
 });
 
 /// How many characters before a range are read for the word that introduces it.
-const PERIOD_BEFORE_CHARS: usize = 40;
+const PERIOD_BEFORE_CHARS: usize = 60;
 
 /// A pay period the text states.
 #[derive(Clone, Copy, PartialEq)]
@@ -50,34 +51,45 @@ enum Period {
 
 fn period_named(word: &str) -> Option<Period> {
     match word.to_lowercase().as_str() {
-        "year" | "yr" | "annum" | "annual" | "annually" | "yearly" => Some(Period::Yearly),
+        "year" | "yr" | "annum" | "annual" | "annually" | "yearly" | "p.a" | "p.a." => {
+            Some(Period::Yearly)
+        }
         "month" | "mo" | "monthly" => Some(Period::Monthly),
         _ => None,
     }
 }
 
-/// The period the text says for the range that starts at `start`: the word right after it, else the one
-/// that introduces it. `None` when it says none (the size of the numbers decides then).
+/// The period the word right after a range (`tail` is the text after it) names, or `None` when
+/// there is none or it is not about the pay: a period word followed by a hyphen (`/ year-end
+/// bonus`), or a bare `annual`/`yearly`/`monthly` that starts another phrase on the same line
+/// (`Yearly learning budget`; one at the end of its line, `yearly` then `Requirements`, is the
+/// period).
+fn period_after(tail: &str) -> Option<Period> {
+    let caps = PERIOD_AFTER.captures(tail)?;
+    let end = caps.get(0).map_or(0, |whole| whole.end());
+    let rest = &tail[end..];
+    if rest.starts_with(['-', '\u{2010}', '\u{2013}', '\u{2014}']) {
+        return None;
+    }
+    let bare = caps.name("bare");
+    let same_line = rest.split(['\n', '\r']).next().unwrap_or_default();
+    if bare.is_some() && same_line.trim_start().starts_with(char::is_alphanumeric) {
+        return None;
+    }
+    let word = caps
+        .name("fixed")
+        .or(caps.name("adverb"))
+        .or(bare)
+        .map(|found| found.as_str());
+    word.and_then(period_named)
+}
+
+/// The period the text says for the range that starts at `start`: the word right after it, else
+/// the one that introduces it. `None` when it says none, or the word after is not about the pay
+/// and nothing introduces the range (the size of the numbers decides then, as before).
 fn stated_period(text: &str, start: usize, tail: &str) -> Option<Period> {
-    if let Some(caps) = PERIOD_AFTER.captures(tail) {
-        let end = caps.get(0).map_or(0, |whole| whole.end());
-        let bare = caps.name("bare");
-        // A bare `annual`, `yearly` or `monthly` is the period only when nothing else follows it:
-        // `Yearly learning budget` is a perk, not the pay's period.
-        let starts_a_phrase = tail[end..]
-            .trim_start()
-            .chars()
-            .next()
-            .is_some_and(char::is_alphanumeric);
-        if bare.is_some() && starts_a_phrase {
-            return None;
-        }
-        let word = caps
-            .name("fixed")
-            .or(caps.name("adverb"))
-            .or(bare)
-            .map(|found| found.as_str());
-        return word.and_then(period_named);
+    if let Some(period) = period_after(tail) {
+        return Some(period);
     }
     let before: String = {
         let mut chars: Vec<char> = text[..start]
@@ -544,6 +556,44 @@ mod tests {
         );
         let (low, _) = parse_salary_monthly_usd("Yearly salary:  $15,000 - $19,000");
         assert_eq!(low.unwrap().round(), 1250.0);
+    }
+
+    #[test]
+    fn a_period_written_with_commas_brackets_or_an_introduction_is_still_read() {
+        for text in [
+            "$15,000 - $19,000, per year",
+            "$15,000 - $19,000 (USD) per year",
+            "$15,000 - $19,000 USD, a year",
+            "$15,000 - $19,000 p.a.",
+            "Annual salary is $15,000 - $19,000",
+            "Annual salary range: $15,000 - $19,000",
+            "Annual base salary (gross) of $15,000 - $19,000",
+            "Annual salary: US$15,000 - $19,000",
+            "Annual salary: USD $15,000 - $19,000",
+            "$15,000 - $19,000 yearly\nRequirements",
+        ] {
+            let (low, high) = parse_salary_monthly_usd(text);
+            assert_eq!(
+                (low.map(f64::round), high.map(f64::round)),
+                (Some(1250.0), Some(1583.0)),
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_period_word_that_starts_another_phrase_falls_back_to_the_introduction_or_the_size() {
+        for text in [
+            "$4,000 - $6,000 / year-end bonus",
+            "Monthly salary: $4,000 - $6,000 yearly learning budget",
+            "$4,000 - $6,000\nYearly learning budget",
+        ] {
+            assert_eq!(
+                parse_salary_monthly_usd(text),
+                (Some(4000.0), Some(6000.0)),
+                "{text:?}"
+            );
+        }
     }
 
     #[test]
