@@ -114,3 +114,22 @@ test("the drawn by-board note says a rejection counts as an answer, in both lang
     }
   } finally { setLang("es"); }
 });
+
+test("the funnel note has its own class and the errors note does not, so the 1100 px rule hides only the first", async () => {
+  const { createSistema } = await import("../src/moments/sistema/render.js");
+  const { sistemaView } = await import("../src/moments/sistema/view.js");
+  setLang("es");
+  setTimeZone("America/Santiago");
+  dom.reset();
+  const ui = createSistema({ run() {}, open() {}, funnelBy() {} });
+  const host = dom.document.createElement("div");
+  dom.document.body.append(host);
+  host.append(ui.el);
+  ui.patch(sistemaView(model(snap), { nowMs }));
+  const funnel = ui.el.querySelectorAll(".funnel-note");
+  assert.equal(funnel.length, 1);
+  assert.ok(funnel[0].classList.contains("note") && funnel[0].classList.contains("label"), "it keeps the classes it had");
+  assert.ok(funnel[0].closest('[data-block="sources"]'));
+  const errorsNote = ui.el.querySelector('[data-block="errors"] .note');
+  assert.ok(errorsNote && !errorsNote.classList.contains("funnel-note"));
+});

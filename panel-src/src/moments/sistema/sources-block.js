@@ -21,7 +21,7 @@ export function createSourcesBlock() {
   const srcCells = new WeakMap();       // each row of the table -> the nodes the patch writes to
   const srcTable = h("table", { class: "sources-table" }, h("thead", {}, h("tr", {}, ...srcHead)), srcBody);
   const srcWeek = h("span", { class: "src-week" });
-  const srcNote = h("p", { class: "note label" });
+  const srcNote = h("p", { class: "note label funnel-note" });
   const srcEmpty = h("p", { class: "empty" });
   const srcMore = h("p", { class: "more label" });
   const sourcesLabel = h("span", { class: "title-text" });
