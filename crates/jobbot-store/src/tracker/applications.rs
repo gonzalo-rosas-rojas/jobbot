@@ -6,7 +6,7 @@ use chrono::{DateTime, TimeDelta, Utc};
 use rusqlite::types::Value;
 use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params, params_from_iter};
 
-use jobbot_domain::gate::region_override_note;
+use jobbot_domain::gate::{REGION_OVERRIDE_PREFIX, region_override_note};
 use jobbot_domain::origin::Origin;
 use jobbot_domain::outbound::plain_line;
 
@@ -18,6 +18,10 @@ use super::{
 /// The states of an application that is not finished and was never sent: the ones
 /// `unsent_applications` reads.
 const UNSENT_STATES: [State; 3] = [State::Scored, State::Prepared, State::NeedsGonza];
+
+/// The events that are a move out of `needs_gonza` back to the queue, as an SQL condition on `events`: the only
+/// moves `resolve` makes when Gonza sends a parked application on, and so the only ones that can carry an override.
+const BACK_TO_THE_QUEUE: &str = "from_state = 'needs_gonza' AND to_state IN ('scored', 'prepared')";
 
 /// The states of an application waiting in the queue: the ones `top_scored` reads.
 const QUEUED_STATES: [State; 2] = [State::Scored, State::Prepared];
@@ -215,7 +219,8 @@ impl Tracker {
     /// `region_override_note` builds from the `location` and `remote` the stored posting has now (the move's note went
     /// through `plain_line`, so the expected one does too). The fact is the event, not a column, so it outlives every
     /// later move (the row's own note is overwritten by each); and because the note holds what he saw, a refresh that
-    /// changes the location or the remote flag makes it stop applying.
+    /// changes the location or the remote flag makes it stop applying. Only the move out of `needs_gonza` back to the
+    /// queue counts (`resolve` makes it), so a note typed on any other move can never be an override.
     pub fn region_override(&self, job_key: &str) -> Result<bool> {
         let conn = self.lock();
         let seen: Option<(String, bool)> = conn
@@ -230,8 +235,29 @@ impl Tracker {
         };
         let expected = plain_line(&region_override_note(&location, remote));
         Ok(conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM events WHERE job_key = ?1 AND note = ?2)",
+            &format!(
+                "SELECT EXISTS(SELECT 1 FROM events WHERE job_key = ?1 AND note = ?2 AND {BACK_TO_THE_QUEUE})"
+            ),
             params![job_key, expected],
+            |row| row.get(0),
+        )?)
+    }
+
+    /// Whether Gonza EVER sent this application back past the region check, whatever the posting said then or says
+    /// now: some move out of `needs_gonza` back to the queue has a note that starts with `REGION_OVERRIDE_PREFIX`
+    /// (the notes of an older build count too: any text after the prefix). The prune uses it to park such an
+    /// application again when its posting changed, instead of withdrawing it.
+    pub fn had_region_override(&self, job_key: &str) -> Result<bool> {
+        let conn = self.lock();
+        Ok(conn.query_row(
+            &format!(
+                "SELECT EXISTS(SELECT 1 FROM events WHERE job_key = ?1 AND substr(note, 1, ?2) = ?3 AND {BACK_TO_THE_QUEUE})"
+            ),
+            params![
+                job_key,
+                REGION_OVERRIDE_PREFIX.len() as i64,
+                REGION_OVERRIDE_PREFIX
+            ],
             |row| row.get(0),
         )?)
     }

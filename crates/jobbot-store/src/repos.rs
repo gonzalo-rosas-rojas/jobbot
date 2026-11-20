@@ -142,6 +142,9 @@ impl ApplicationRepo for Tracker {
     fn region_override(&self, job_key: &str) -> StoreResult<bool> {
         Tracker::region_override(self, job_key).map_err(StoreError::from)
     }
+    fn had_region_override(&self, job_key: &str) -> StoreResult<bool> {
+        Tracker::had_region_override(self, job_key).map_err(StoreError::from)
+    }
     fn approve(&self, job_key: &str) -> StoreResult<()> {
         Tracker::approve(self, job_key).map_err(StoreError::from)
     }

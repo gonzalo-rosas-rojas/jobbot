@@ -453,6 +453,9 @@ pub trait ApplicationRepo {
     /// Whether Gonza cleared the region of this application (`resolve` on a card parked for its region): the region
     /// check no longer applies to it, and nothing else about it changes.
     fn region_override(&self, job_key: &str) -> StoreResult<bool>;
+    /// Whether Gonza ever cleared the region of this application, whatever the posting says now. The prune parks
+    /// such an application again when its posting changed instead of withdrawing it.
+    fn had_region_override(&self, job_key: &str) -> StoreResult<bool>;
     /// Marks an application as reviewed and approved by Gonza.
     fn approve(&self, job_key: &str) -> StoreResult<()>;
     /// Applications in `state`, best score first.

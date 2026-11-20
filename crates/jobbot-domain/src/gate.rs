@@ -5,6 +5,7 @@
 use chrono::{DateTime, TimeDelta, Utc};
 
 use crate::models::Job;
+use crate::outbound::plain_line;
 use crate::rules::Criteria;
 use crate::text::host_of;
 
@@ -72,7 +73,13 @@ pub const REGION_OVERRIDE_PREFIX: &str = "region_override:";
 /// `Store::region_override` is true only while the stored posting still has those two values: a refresh that moves
 /// the location means he has not seen the new one, and the gate parks it again. Only the region check is cleared:
 /// every other rule still applies.
+///
+/// The location is written as the region rule reads it, not as the source spells it: runs of whitespace collapsed,
+/// trimmed and lowercased (`region_ok_with` ignores case too), so a re-save that only changes the case or the spacing
+/// does not break the override. The read side builds its expected note with this same function, so write and read stay
+/// in step.
 pub fn region_override_note(location: &str, remote: bool) -> String {
+    let location = plain_line(location).to_lowercase();
     let seen = serde_json::json!({ "location": location, "remote": remote });
     format!("{REGION_OVERRIDE_PREFIX} {seen}")
 }
@@ -181,5 +188,20 @@ mod tests {
             region_override_note("Remote", true),
             region_override_note("Remote", false)
         );
+    }
+
+    #[test]
+    fn a_harmless_respelling_of_the_location_gives_the_same_note() {
+        let same = region_override_note("Remote - USA", true);
+        for respelled in [
+            "remote - usa",
+            " Remote  -  USA ",
+            "Remote\t-\tUSA",
+            "REMOTE - USA",
+        ] {
+            assert_eq!(region_override_note(respelled, true), same, "{respelled:?}");
+        }
+        assert_ne!(region_override_note("Remote, USA", true), same);
+        assert_ne!(region_override_note("Remote - USA", false), same);
     }
 }

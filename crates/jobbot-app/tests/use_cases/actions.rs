@@ -355,6 +355,56 @@ fn the_override_applies_only_while_the_posting_says_what_gonza_saw() {
     );
 }
 #[test]
+fn a_harmless_re_save_keeps_the_override_and_a_remote_flip_breaks_it() {
+    let (t, key) = parked_for_region();
+    resolve(&t, &key, *NOW, ResolveIntent::SendOutsideRegion).unwrap();
+    let mut job = t.get_job(&key).unwrap().unwrap();
+    let seen = job.location.clone();
+
+    // Another case and other spacing: the same place.
+    job.location = format!("  {}  ", seen.to_uppercase().replace(' ', "   "));
+    t.refresh_posting(&job).unwrap();
+    assert!(t.region_override(&key).unwrap(), "{:?}", job.location);
+
+    job.remote = !job.remote;
+    assert!(t.refresh_posting(&job).unwrap());
+    assert!(!t.region_override(&key).unwrap(), "remote flipped");
+}
+#[test]
+fn only_the_move_out_of_needs_gonza_can_carry_an_override() {
+    let (t, key) = tracker_with(&[]);
+    let job = t.get_job(&key).unwrap().unwrap();
+    let note = jobbot_domain::gate::region_override_note(&job.location, job.remote);
+    // A typed note on any other move is not an override, even with the exact text.
+    t.transition(&key, State::Prepared, Some(&note), *NOW)
+        .unwrap();
+    assert!(!t.region_override(&key).unwrap());
+    assert!(!t.had_region_override(&key).unwrap());
+    t.transition(&key, State::NeedsGonza, Some(&note), *NOW)
+        .unwrap();
+    t.transition(&key, State::Submitted, Some(&note), *NOW)
+        .unwrap();
+    assert!(!t.region_override(&key).unwrap());
+    assert!(!t.had_region_override(&key).unwrap());
+}
+#[test]
+fn an_override_of_an_older_build_counts_as_had_an_override_but_does_not_hold() {
+    let (t, key) = tracker_with(&[]);
+    t.transition(&key, State::NeedsGonza, Some(OUT_OF_REGION_NOTE), *NOW)
+        .unwrap();
+    // The text the first build wrote: the prefix and any words after it.
+    t.transition(
+        &key,
+        State::Scored,
+        Some("region_override: revisada por Gonza, se envía igual"),
+        *NOW,
+    )
+    .unwrap();
+
+    assert!(t.had_region_override(&key).unwrap());
+    assert!(!t.region_override(&key).unwrap());
+}
+#[test]
 fn send_outside_region_on_any_other_reason_is_a_plain_resolve() {
     let (t, key) = tracker_with(&[]);
     t.transition(&key, State::NeedsGonza, Some("captcha"), *NOW)
