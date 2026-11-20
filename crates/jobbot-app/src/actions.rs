@@ -530,8 +530,8 @@ pub fn record(tracker: &dyn Store, spec: &RecordSpec, now: DateTime<Utc>) -> Res
         }
     };
     // What the origin is when nobody typed one: nobody wrote down how a hand-recorded application came about.
-    let origin_if_recorded = typed.unwrap_or(Origin::Unknown);
-    tracker.start_application(&key, origin_if_recorded, now)?;
+    let origin_when_none_typed = typed.unwrap_or(Origin::Unknown);
+    tracker.start_application(&key, origin_when_none_typed, now)?;
     let Some(row) = tracker.get_application(&key)? else {
         return Ok(not_found(&key));
     };
@@ -553,7 +553,7 @@ pub fn record(tracker: &dyn Store, spec: &RecordSpec, now: DateTime<Utc>) -> Res
     // not prepared it and nobody wrote down how it came about; one that was already `prepared` or waiting
     // (`needs_gonza`) keeps the origin it has. The same rule as the migration's backfill.
     if typed.is_some() || row.state == State::Scored {
-        tracker.set_origin(&key, origin_if_recorded)?;
+        tracker.set_origin(&key, origin_when_none_typed)?;
     }
     let note = spec
         .note
