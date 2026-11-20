@@ -24,7 +24,7 @@ use crate::text::{fold_look_alikes, normalize};
 /// or follows a word of `WORDS_BEFORE_AN_ID_TOKEN`; RFC also needs a label of at most four words.
 /// EIN, PAN and SIN are NOT caught in capitals (ordinary words and acronyms in English): only
 /// their phrases below ("ein number", "pan card", "sin number") count. "C.I." is read by
-/// `carnet_abbreviation_is_an_id`.
+/// `carnet_abbreviation_is_an_id` and "CI" in capitals by `carnet_capitals_are_an_id`.
 ///
 /// The rest of the rule is structural and read by `is_never_filled_after_reading`: a number-word
 /// beside a document of `DOCUMENTS`, a banking noun with its number, a label of only document
@@ -461,7 +461,27 @@ static LABEL_ASIDE: LazyLock<Regex> = LazyLock::new(|| {
 /// before it ("U.S.C.I.S."). Capture 1 is the character before, which the regex crate cannot look
 /// behind for.
 static CARNET_ABBREVIATION: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)(^|[^\p{L}.])c\.\s*i(?:\.|\s*:)").expect("CARNET_ABBREVIATION is valid")
+    Regex::new(r"(?i)(^|[^\p{L}.])c\.(?:\s*i(?:\.|\s*:)|i\b)")
+        .expect("CARNET_ABBREVIATION is valid")
+});
+
+/// "CI" in capitals, not glued to a letter or a dot before it. Case-sensitive on purpose: "ci" is
+/// inside "ciudad" and "cita", and "Ci" is a syllable. Capture 1 is the character before.
+static CARNET_CAPITALS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(^|[^\p{L}\p{N}.])CI\b").expect("CARNET_CAPITALS is valid"));
+
+/// What follows an abbreviation of continuous integration when it is written as the pair with
+/// continuous delivery: "CI/CD", "CI / CD", "CI & CD", "CI and CD", "CI-CD".
+static CONTINUOUS_DELIVERY_PAIR: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)^\s*(?:[/&+-]|and\b|y\b)\s*c\.?d\b")
+        .expect("CONTINUOUS_DELIVERY_PAIR is valid")
+});
+
+/// Spanish format hints that only a number gets: "sin puntos", "sin guion", "solo números". A form
+/// that writes one beside "CI" asks for the ID card number, as RUT forms do.
+static SPANISH_NUMBER_FORMAT_HINT: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\b(?:sin\s+(?:puntos|guion|guión|guiones)|s[oó]lo?\s+n[uú]meros?)\b")
+        .expect("SPANISH_NUMBER_FORMAT_HINT is valid")
 });
 
 /// Words around "C.I." that make it continuous integration, not the ID card.
@@ -568,9 +588,19 @@ fn word_after(after: &str) -> Option<String> {
 /// Whether a number-word stands right beside an ID token: the word before it ("Nro. C.I."), the
 /// word after it ("C.I. number") or a "#" after it.
 fn number_word_is_beside(before: &str, after: &str) -> bool {
-    word_before(before).is_some_and(|word| is_number_word_beside_an_id_token(&word))
-        || word_after(after).is_some_and(|word| is_number_word_beside_an_id_token(&word))
+    word_before(before).is_some_and(|word| {
+        is_number_word_beside_an_id_token(&word)
+            || (word == "de" && number_word_stands_before_de(before))
+    }) || word_after(after).is_some_and(|word| is_number_word_beside_an_id_token(&word))
         || after.trim_start().starts_with('#')
+}
+
+/// Whether the "de" that ends `before` follows a number-word: "Número de CI", "No. de C.I.".
+fn number_word_stands_before_de(before: &str) -> bool {
+    let without_de = before
+        .trim_end()
+        .trim_end_matches(|c: char| c.is_alphanumeric());
+    word_before(without_de).is_some_and(|word| is_number_word_beside_an_id_token(&word))
 }
 
 /// A "/" that opens another abbreviation ("C.I./C.D."), not a word ("C.I./Pasaporte").
@@ -604,6 +634,46 @@ fn carnet_abbreviation_is_an_id(label: &str) -> bool {
         let after = &label[found.end()..];
         !glued_to_another_abbreviation(after)
             && (number_word_is_beside(before, after) || !talks_about_continuous_integration)
+    })
+}
+
+/// Words that may stand before an ID token in a label that is only the token: "Please enter your
+/// CI" (the others come from `WORDS_BEFORE_AN_ID_TOKEN`).
+const WORDS_BEFORE_A_BARE_TOKEN: &[&str] = &["please"];
+
+/// Whether `before` and `after` hold nothing but the words a form puts around a bare ID token:
+/// "Ingrese su CI", "CI (required)", "CI:".
+fn nothing_but_wrapping_words(before: &str, after: &str) -> bool {
+    let words_of = |text: &str| -> Vec<String> {
+        text.split(|c: char| !c.is_alphanumeric())
+            .filter(|word| !word.is_empty())
+            .map(str::to_lowercase)
+            .collect()
+    };
+    words_of(before).iter().all(|word| {
+        WORDS_BEFORE_AN_ID_TOKEN.contains(&word.as_str())
+            || WORDS_BEFORE_A_BARE_TOKEN.contains(&word.as_str())
+    }) && words_of(after)
+        .iter()
+        .all(|word| REQUIRED_MARKERS.contains(&word.as_str()))
+}
+
+/// Whether "CI" in capitals in the raw label is the ID card of Uruguay, Bolivia, Paraguay,
+/// Venezuela or Ecuador ("cédula de identidad"). In a job form for software people "CI" far more
+/// often means continuous integration ("Which CI tools have you used?", "GitLab CI"), and no word
+/// in such a question reliably says so ("Describe your CI setup", "Your CI stack"). So the token
+/// alone is not enough, as "C.I." is: it is the ID card only with a number-word beside it
+/// ("Número de CI", "CI Nro."), with a Spanish format hint ("CI (sin puntos)"), or as the whole
+/// label ("CI", "Ingrese su CI"). The pair "CI/CD" is never the ID card.
+fn carnet_capitals_are_an_id(label: &str) -> bool {
+    CARNET_CAPITALS.captures_iter(label).any(|found| {
+        let token_starts = found.get(1).map_or(0, |before| before.end());
+        let before = &label[..token_starts];
+        let after = &label[found.get(0).map_or(label.len(), |whole| whole.end())..];
+        !CONTINUOUS_DELIVERY_PAIR.is_match(after)
+            && (number_word_is_beside(before, after)
+                || SPANISH_NUMBER_FORMAT_HINT.is_match(label)
+                || nothing_but_wrapping_words(before, after))
     })
 }
 
@@ -647,7 +717,10 @@ fn read_label(label: &str) -> String {
 /// reads any entry, so that no bank pattern can answer it.
 pub fn is_never_filled(label: &str) -> bool {
     // These two read the raw label: lowercased, "RUN" would be a verb and "C.I." a dotted noise.
-    if capital_token_is_an_id(label) || carnet_abbreviation_is_an_id(label) {
+    if capital_token_is_an_id(label)
+        || carnet_abbreviation_is_an_id(label)
+        || carnet_capitals_are_an_id(label)
+    {
         return true;
     }
     let text = read_label(label);
@@ -1142,6 +1215,31 @@ mod tests {
         "Documento: C.I.",
         "Identificación (C.I.)",
         "C.I: 12345678",
+        // The same ID card written "CI" in capitals, or "C.I" without its last dot (Uruguay,
+        // Bolivia, Paraguay, Venezuela, Ecuador): a number-word beside it, a Spanish format hint,
+        // or the token as the whole label.
+        "Número de CI",
+        "Numero de CI",
+        "Nro. CI",
+        "Nro CI",
+        "N° CI",
+        "Nº CI",
+        "No. de CI",
+        "CI N°",
+        "CI Nro.",
+        "CI number",
+        "CI No.",
+        "CI #",
+        "CI (sin puntos ni guión)",
+        "CI (sin puntos ni guiones)",
+        "CI sin puntos",
+        "CI (solo números)",
+        "C.I",
+        "Número de C.I",
+        "C.I (sin puntos)",
+        "CI:",
+        "CI",
+        "Su CI",
         // A number-word right beside "C.I." makes it the ID card whatever else the label says:
         // a word of continuous integration elsewhere ("experience", "test") does not undo it.
         "Enter your C.I. number and years of experience",
@@ -1265,6 +1363,33 @@ mod tests {
         "C.I. pipelines you have built",
         "U.S.C.I.S. status",
         "Experience with C.I. tools",
+        // "CI" in capitals as continuous integration: the pair with CD, or a question about it.
+        "Experience with CI/CD",
+        "CI/CD",
+        "CI / CD",
+        "CI & CD",
+        "CI and CD pipelines",
+        "Describe your CI setup",
+        "Which CI tools have you used?",
+        "What CI do you use?",
+        "Your CI stack",
+        "CI pipeline experience",
+        "Years of experience with CI",
+        "CI experience (years)",
+        "Number of years working with CI/CD",
+        "How many CI pipelines have you built?",
+        "CI tooling (GitHub Actions, GitLab CI, Jenkins)",
+        "GitLab CI",
+        "Travis CI",
+        "Circle CI",
+        "Familiarity with CI",
+        // "ci" inside ordinary words, or not in capitals, is never the ID card.
+        "ci",
+        "Ci",
+        "ciudad",
+        "Ciudad",
+        "cita",
+        "socio",
         // Number-words and ID words that are not a document number.
         "No. of years",
         "Years of experience with ID systems",
