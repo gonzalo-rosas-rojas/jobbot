@@ -510,11 +510,21 @@ static TIME_ZONE_PLACE: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// Words that say a clause is about someone other than the candidate.
+const OTHER_PARTY_WORDS: &str = r"(?:our|we|team|teams|clients?|customers?|company|offices?|headquarters|hq|engineers|employees|colleagues|they|stakeholders|partners|people|folks|teammates|peers|managers?|users|org|organi[sz]ation|founders|staff|members|leadership)";
+
 static OTHER_PARTY: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"\b(?:our|we|team|teams|clients?|customers?|company|offices?|headquarters|hq|engineers|employees|colleagues|they|stakeholders|partners|people|folks|teammates|peers|managers?|users|org|organi[sz]ation|founders|staff|members|leadership)\b",
-    )
-    .expect("OTHER_PARTY is a valid regex")
+    Regex::new(&format!(r"\b{OTHER_PARTY_WORDS}\b")).expect("OTHER_PARTY is a valid regex")
+});
+
+/// A clause that ends on a party the candidate works with: "...comfortable working with clients",
+/// "...to support customers who are". The place that follows is that party's, whatever the clause
+/// opened with. The party must END the clause: in "must support users and be based in..." the
+/// candidate is still the one who must be there.
+static WORKS_WITH_OTHER_PARTY: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(&format!(
+        r"\b(?:with|alongside|support(?:s|ing)?|serv(?:e|es|ing)|help(?:s|ing)?|assist(?:s|ing)?)\s+(?:\S+\s+){{0,2}}?{OTHER_PARTY_WORDS}\W+(?:(?:who|that|which)\s+)?(?:(?:are|is)\s+)?$"
+    ))
+    .expect("WORKS_WITH_OTHER_PARTY is a valid regex")
 });
 
 /// Words that put the candidate in a clause: a modal ("you must", "needs to"), hiring wording
@@ -528,18 +538,23 @@ static CANDIDATE_SIDE: LazyLock<Regex> = LazyLock::new(|| {
 
 /// Whether a sentence puts the candidate in North American time zones. A match whose six words
 /// before the verb name another party (the team, the clients, the company) says where they are,
-/// not where the candidate must be, unless the same words also speak to the candidate.
+/// not where the candidate must be, unless the same words also speak to the candidate. And when
+/// those words end on a party the candidate works with, the place is that party's even then
+/// ("You must be comfortable working with clients based in US time zones").
 fn time_zone_place_is_the_candidates(sentence: &str) -> bool {
     TIME_ZONE_PLACE.captures_iter(sentence).any(|caps| {
         let window = &caps[1];
-        CANDIDATE_SIDE.is_match(window) || !OTHER_PARTY.is_match(window)
+        !WORKS_WITH_OTHER_PARTY.is_match(window)
+            && (CANDIDATE_SIDE.is_match(window) || !OTHER_PARTY.is_match(window))
     })
 }
 
-/// The words of a wish, shared by the time-zone hedge and the clearance rules: "preferred", "nice
-/// to have", "a plus". "plus" and "bonus" count only with an article, "bonus points" or "bonus:":
-/// "an active clearance plus 5 years of AWS" is not a wish.
-const WISH_WORDS: &str = r"(?:(?:prefer(?:red|ably)?|ideally|nice\s+to\s+have|desirable|an\s+advantage|beneficial|an?\s+plus|an?\s+bonus|bonus\s+points?)\b|bonus\s*:)";
+/// The words of a wish, shared by the time-zone hedge and the clearance rules: "preferred",
+/// "preferable", "nice to have", "a plus". "plus", "bonus" and "advantage" count only with an
+/// article ("a plus", "a big plus", "an added bonus"), as "bonus points" or as "bonus:": "an
+/// active clearance plus 5 years of AWS" is not a wish. The adjectives between the article and the
+/// noun are a closed list, so "plus a strong AWS background" is not one either.
+const WISH_WORDS: &str = r"(?:(?:prefer(?:red|ably|able)?|ideally|nice\s+to\s+have|desirable|beneficial|an?\s+(?:(?:big|huge|great|strong|major|definite|real|added|significant|distinct|nice)\s+)?(?:plus|bonus|advantage)|bonus\s+points?)\b|bonus\s*:)";
 
 /// A wish or an alternative in a time-zone sentence, not a requirement: "Preferably based in North
 /// American time zones", "...or willing to work those hours".
@@ -680,13 +695,15 @@ static LEADING_CLEARANCE_WORDS: LazyLock<Regex> = LazyLock::new(|| {
 
 /// Whether `between`, the text from a clearance to a wish, leaves the wish attached to it: no
 /// requirement word and no other clearance or level word (after the clearance's own words).
-fn wish_attaches_after(between: &str) -> bool {
+fn wish_after_the_clearance_attaches(between: &str) -> bool {
     let rest = LEADING_CLEARANCE_WORDS.replace(between, "");
     !REQUIREMENT_WORD.is_match(&rest) && !OTHER_LEVEL_WORD.is_match(&rest)
 }
 
-/// Whether `between`, the text from a wish to a clearance, leaves the wish attached to it.
-fn wish_attaches_before(between: &str) -> bool {
+/// Whether `between`, the text from a wish to the clearance that follows it, leaves the wish
+/// attached to it: no requirement word. A level word here is the clearance's own ("Preferably
+/// Secret clearance"), so it is not looked at.
+fn wish_before_the_clearance_attaches(between: &str) -> bool {
     !REQUIREMENT_WORD.is_match(between)
 }
 
@@ -705,11 +722,19 @@ fn without_attached_wishes(text: &str, pattern: &Regex, attached: fn(&str) -> bo
 
 /// The sentence without the clearances that are only wished for ("Active TS/SCI clearance
 /// required; polygraph a plus" keeps its requirement). A wish counts only when it is attached to
-/// the clearance itself: next to it, in the same clause, with no requirement word and no other
-/// level between.
+/// the clearance itself: next to it, in the same clause, with no requirement word between and,
+/// for a wish that comes after the clearance, no other level between either.
 fn without_wished_clearances(sentence: &str) -> String {
-    let text = without_attached_wishes(sentence, &CLEARANCE_THEN_WISH, wish_attaches_after);
-    without_attached_wishes(&text, &WISH_THEN_CLEARANCE, wish_attaches_before)
+    let text = without_attached_wishes(
+        sentence,
+        &CLEARANCE_THEN_WISH,
+        wish_after_the_clearance_attaches,
+    );
+    without_attached_wishes(
+        &text,
+        &WISH_THEN_CLEARANCE,
+        wish_before_the_clearance_attaches,
+    )
 }
 
 /// Whether a sentence is only a wish: it opens with a wish word before any clearance word and has
@@ -1400,11 +1425,19 @@ mod tests {
             "We are looking for engineers located in North American time zones",
             "Our company requires candidates to reside in US time zones",
             "The team needs you located in North American time zones",
+            // Another party in the middle of the clause does not own the place: the candidate
+            // is still the one who must be there.
+            "Must support users and be based in North American time zones",
         ] {
             assert!(!passes_saying(sentence), "{sentence:?} confines the job");
         }
-        // Working hours that overlap are no place; a denial or an open place keeps the job; a
-        // zone range that spans the Americas does not close it.
+    }
+
+    /// Working hours that overlap are no place; a denial or an open place keeps the job; a zone
+    /// range that spans the Americas does not close it; neither does a place that belongs to the
+    /// team or the clients, nor one that is only wished for.
+    #[test]
+    fn a_time_zone_about_someone_else_or_only_wished_for_leaves_the_job_open() {
         for sentence in [
             "This role is open to LATAM. You must be able to work in North American time zones.",
             "You don't need to be located in North American time zones.",
@@ -1419,6 +1452,21 @@ mod tests {
             "Your teammates are located in North American time zones",
             "Your manager is based in North American time zones",
             "You will support users based in US time zones",
+            // The clause speaks to the candidate, but the place is the party's they work with.
+            "You must be comfortable working with clients based in US time zones.",
+            "You'll need to collaborate with stakeholders located in US time zones.",
+            "You will need to work closely with teams based in North American time zones.",
+            "The role requires you to support clients located in US time zones.",
+            "We're hiring engineers to support customers located in US time zones.",
+            "Candidates will collaborate with clients based in US time zones.",
+            "You should be comfortable working with a team based in North American time zones",
+            "You must work with our clients, who are located in US time zones",
+            // A wish with an adjective, or "preferable".
+            "Being located in North American time zones is a big plus.",
+            "Based in US time zones is a strong plus.",
+            "Being located in US time zones is an added bonus.",
+            "Residing in North American time zones is a definite advantage.",
+            "Location within US time zones is preferable.",
             "Located in North American time zones is a nice to have",
             "Located in North American time zones is desirable",
             "Being located in North American time zones is an advantage",
@@ -1487,6 +1535,7 @@ mod tests {
             "Valid TS clearance needed.",
             // "plus" and "bonus" are wishes only with an article.
             "Must hold an active Secret clearance plus 5 years of AWS",
+            "Must hold an active Secret clearance plus a strong AWS background",
             // A wish for ANOTHER level never swallows the requirement.
             "Must hold an active Secret clearance (TS/SCI preferred)",
             "Active Secret clearance with TS/SCI preferred",
@@ -1535,6 +1584,10 @@ mod tests {
             "An active Secret clearance is a bonus",
             "Security clearance is a bonus",
             "Security clearance is nice to have",
+            // A wish with an adjective.
+            "An active Secret clearance is a big plus.",
+            "Active TS/SCI clearance is a huge plus.",
+            "TS/SCI clearance would be a strong plus.",
             // A sentence with a wish word and no requirement word is a wish.
             "Bonus points for an active clearance",
             "Bonus: active Secret clearance",
