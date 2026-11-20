@@ -666,12 +666,18 @@ const CONSENT_NEVER: &[&str] = &[
     "retention",
 ];
 
-/// Phrases that mark a field the program never fills: government identity numbers and banking.
-/// Gonza's fixed rule, so it lives here and not in the editable answers file: a loose bank pattern
-/// ("number", "country") must not be able to put a passport or tax number, or an account, into a
-/// form that nobody reviewed. Matched like `CONSENT_NEVER` (normalized, whole words, optional
-/// plural `s`), in English and Spanish. Phrases are specific on purpose: "LinkedIn ID", "valid
-/// passport?", "Swift" the language or "banking" experience are ordinary fields and stay answerable.
+/// Terms that mark a field the program never fills, whatever words surround them: government
+/// identity numbers and banking. Gonza's fixed rule, so it lives here and not in the editable
+/// answers file: a loose bank pattern ("number", "country") must not be able to put a passport or
+/// tax number, or an account, into a form that nobody reviewed.
+///
+/// This list holds only what is unambiguous on its own, matched like `CONSENT_NEVER` (normalized,
+/// whole words, optional plural `s`), in English and Spanish. Bare "rfc", "sin", "ein", "pan" and
+/// "run" are left out on purpose: they are ordinary words ("Experience writing RFCs", "sin
+/// experiencia"). The rest of the rule is structural and lives in `is_never_filled`: a
+/// number-word beside a document word (`DOCUMENT_WORDS`), a noun followed by a number-word for
+/// accounts and cards, and a label that is only a generic word. Phrases stay specific: "LinkedIn
+/// ID", "valid passport?", "Swift" the language or "banking" experience stay answerable.
 const FIELD_NEVER: &[&str] = &[
     // Government identity numbers.
     "national id",
@@ -694,17 +700,46 @@ const FIELD_NEVER: &[&str] = &[
     "passport number",
     "passport no",
     "numero de pasaporte",
+    "r u t",
+    "government id",
+    "government issued id",
+    "identity document",
+    "documento de identidad",
+    "passport details",
+    "passport id",
+    "nif",
+    "nie",
+    "nin",
+    "cuit",
+    "cuil",
+    "aadhaar",
     // Tax numbers.
+    "tfn",
+    "tax file number",
+    "itin",
+    "ein number",
+    "abn",
+    "pan number",
+    "pan card",
+    "utr number",
+    "sin number",
     "tax id",
     "tax identification",
+    "taxpayer id",
+    "taxpayer identification",
+    "tax payer id",
+    "tax payer identification",
     "tin number",
-    "taxpayer",
-    "tax payer",
     "vat number",
     "numero de contribuyente",
     // Banking and cards.
     "bank account",
     "bank details",
+    "beneficiary account",
+    "cuenta corriente",
+    "bsb",
+    "aba number",
+    "aba routing",
     "account number",
     "iban",
     "routing number",
@@ -731,29 +766,140 @@ const FIELD_NEVER: &[&str] = &[
     "licence no",
 ];
 
-/// "as on your national ID", "as shown on your passport", "in your identity card", on a normalized
-/// label: the document a name must match.
+/// Words that say "a number" once a label is normalized: "No.", "Nro.", "Nº" and "N°" (the
+/// ordinal sign becomes a dot, so they read as "no" and "n") and "#" (written out as "number").
+const NUMBER_WORDS: &[&str] = &["number", "numbers", "no", "nro", "num", "numero", "n"];
+
+/// Words and phrases of identity, tax and licence documents. A number-word within
+/// `MAX_WORDS_APART` words of one of them, in either order, makes a field the program never fills.
+const DOCUMENT_WORDS: &[&str] = &[
+    "passport",
+    "pasaporte",
+    "id",
+    "identity",
+    "identidad",
+    "identification",
+    "identificacion",
+    "document",
+    "documento",
+    "cedula",
+    "tax",
+    "taxpayer",
+    "tributario",
+    "contribuyente",
+    "licence",
+    "license",
+    "licencia",
+    "national insurance",
+    "ni",
+    "visa grant",
+    "medicare",
+];
+
+/// "Within three words of each other": the words between a number-word and a document word, plus
+/// one. "Tax File Number (TFN)" is two apart, "Number of years of experience with identity
+/// management" is five.
+const MAX_WORDS_APART: usize = 3;
+
+/// Nouns that are a banking field only when a number-word follows them: "account number",
+/// "acct #", "card no". Order matters, so "Number of accounts managed" and "Card games" pass.
+const NOUNS_THEN_NUMBER: &[&str] = &["account", "acct", "card"];
+
+/// Spanish nouns that are a banking field when "number of" comes first: "número de cuenta",
+/// "N° de tarjeta".
+const NUMBER_THEN_DE_NOUNS: &[&str] = &["cuenta", "tarjeta"];
+
+/// Labels that are only one of these words are held. A section such as "Passport" or "Bank" may
+/// hold an input labelled just "Number": the scanner uses the group caption only for a field that
+/// has no label (`field_scan.js`), so the lookup sees the bare word and cannot tell which number it
+/// is. Holding it keeps a loose bank pattern from answering it.
+const GENERIC_LABELS: &[&str] = &["number", "no", "numero", "nro", "num", "id", "n"];
+
+/// "as on your national ID", "as shown on your passport", "in your identity card", "como aparece
+/// en su cédula", "según tu pasaporte", on a normalized label: the document a name must match.
 static NAMED_DOCUMENT: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"\b(?:on|in|per|from)\s+(?:your|the|my)\s+(?:national\s+id|national\s+identity\s+card|identity\s+card|id\s+card|passport|dni|cedula(?:\s+de\s+identidad)?)\b",
+        r"\b(?:on|in|per|from|according\s+to|en|segun|conforme\s+a|de\s+acuerdo\s+(?:a|con))\s+(?:(?:your|the|my|su|tu|el|la|mi)\s+)?(?:national\s+id(?:\s+card)?|national\s+identity\s+card|identity\s+(?:card|document)|id\s+card|id|passport|dni|cedula(?:\s+de\s+identidad)?|pasaporte|documento(?:\s+de\s+identidad)?|document|carnet(?:\s+de\s+identidad)?)\b",
     )
     .expect("NAMED_DOCUMENT is a valid regex")
 });
 
-/// True when `label` names a field on `FIELD_NEVER` (see `AnswerBank::lookup`). Accents are folded
-/// first (`normalize` alone would turn "cédula" into "c dula") and a lone `#` reads as "number".
+/// "Yes/No", "yes or no" at the end of a question: its "no" is an answer, not a number.
+static YES_NO: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\byes\s+(?:or\s+)?no\b").expect("YES_NO is a valid regex"));
+
+/// True when `label` is a field the program never fills (see `FIELD_NEVER` and `AnswerBank::lookup`).
+/// The label is read as a person would: accents folded (`normalize` alone would turn "cédula" into
+/// "c dula"), "#" written as "number", the ordinal signs "º" and "°" as dots so "Nº de pasaporte"
+/// reads "n de pasaporte", and a "Yes/No" removed.
 fn is_never_filled(label: &str) -> bool {
-    let text = normalize(&fold_look_alikes(&label.replace('#', " number ")));
-    // "Full name (as on your national ID)" asks for a name that matches a document, not for the
-    // document's number: the reference is taken out of a name label before the list reads it.
-    let text = if contains_phrase(&text, "name") {
-        NAMED_DOCUMENT.replace_all(&text, " ").into_owned()
-    } else {
-        text
-    };
+    let plain = fold_look_alikes(&label.replace(['º', '°', '˚'], ".").replace('#', " number "));
+    let text = normalize(&plain);
+    let text = YES_NO.replace_all(&text, " ").into_owned();
+    if GENERIC_LABELS.contains(&text.trim()) {
+        return true;
+    }
+    let text = without_named_document(&text);
+    let words: Vec<&str> = text.split_whitespace().collect();
     FIELD_NEVER
         .iter()
         .any(|phrase| contains_phrase(&text, &normalize(phrase)))
+        || number_beside_document(&words)
+        || number_beside_banking_noun(&words)
+}
+
+/// "Full name (as on your national ID)" asks for a name that matches a document, not for the
+/// document's number: the reference to the document is taken out of a label that asks for a name.
+/// Only when nothing left is a number-word: "Name and number as on your national ID" is kept whole.
+fn without_named_document(text: &str) -> String {
+    let asks_for_a_name = contains_phrase(text, "name") || contains_phrase(text, "nombre");
+    if !asks_for_a_name {
+        return text.to_string();
+    }
+    let rest = NAMED_DOCUMENT.replace_all(text, " ").into_owned();
+    if rest.split_whitespace().any(|w| NUMBER_WORDS.contains(&w)) {
+        text.to_string()
+    } else {
+        rest
+    }
+}
+
+/// True when a number-word and a document word are at most `MAX_WORDS_APART` words apart.
+fn number_beside_document(words: &[&str]) -> bool {
+    let numbers: Vec<usize> = (0..words.len())
+        .filter(|&i| NUMBER_WORDS.contains(&words[i]))
+        .collect();
+    DOCUMENT_WORDS.iter().any(|term| {
+        let term: Vec<&str> = term.split(' ').collect();
+        words
+            .windows(term.len())
+            .enumerate()
+            .filter(|(_, window)| *window == term.as_slice())
+            .any(|(start, _)| {
+                let end = start + term.len() - 1;
+                numbers.iter().any(|&n| {
+                    let apart = if n < start {
+                        start - n
+                    } else {
+                        n.saturating_sub(end)
+                    };
+                    apart <= MAX_WORDS_APART
+                })
+            })
+    })
+}
+
+/// True for "account number", "acct #", "card no" (noun, then number-word) and the Spanish
+/// "número de cuenta", "N° de tarjeta" (number-word, "de", noun).
+fn number_beside_banking_noun(words: &[&str]) -> bool {
+    words
+        .windows(2)
+        .any(|pair| NOUNS_THEN_NUMBER.contains(&pair[0]) && NUMBER_WORDS.contains(&pair[1]))
+        || words.windows(3).any(|triple| {
+            NUMBER_WORDS.contains(&triple[0])
+                && triple[1] == "de"
+                && NUMBER_THEN_DE_NOUNS.contains(&triple[2])
+        })
 }
 
 /// Whether one bank pattern matches an already normalized label (see `AnswerBank::lookup`). A
@@ -860,7 +1006,9 @@ mod tests {
         "Tax ID",
         "Tax identification number",
         "TIN number",
-        "Taxpayer",
+        "Taxpayer ID",
+        "Taxpayer identification number",
+        "Tax payer ID",
         "VAT number",
         "Número de contribuyente",
         "Bank account",
@@ -878,6 +1026,75 @@ mod tests {
         "Driver's license number",
         "Driver’s licence number",
         "Licence no",
+        // A number-word beside a document word, in either order.
+        "Tax number",
+        "Tax File Number (TFN)",
+        "National Insurance (NI) number",
+        "NI number",
+        "ID document number",
+        "Identity document number",
+        "Document number",
+        "Número de documento",
+        "Número de identificación",
+        "Nº de pasaporte",
+        "N° de pasaporte",
+        "Nro. de pasaporte",
+        "Número pasaporte",
+        "Pasaporte (número)",
+        "Visa grant number",
+        "Medicare number",
+        "ID No.",
+        "Job ID number",
+        "Employee ID number",
+        "Experience reconciling bank accounts",
+        // Order-sensitive: the noun first, or the Spanish "number of account".
+        "Account no",
+        "Acct #",
+        "N° de cuenta",
+        "Nro. de cuenta",
+        "Card number",
+        "Card no",
+        "Número de tarjeta",
+        // Terms that hold alone.
+        "R.U.T.",
+        "TFN",
+        "Tax File Number",
+        "ITIN",
+        "EIN number",
+        "ABN",
+        "BSB",
+        "Aadhaar",
+        "PAN number",
+        "PAN card",
+        "NIN",
+        "NIF",
+        "NIE",
+        "CUIT",
+        "CUIL",
+        "UTR number",
+        "ABA number",
+        "ABA routing",
+        "SIN number",
+        "Government ID",
+        "Government issued ID",
+        "Identity document",
+        "Documento de identidad",
+        "Passport details",
+        "Passport ID",
+        "Bank details",
+        "Cuenta corriente",
+        "Beneficiary account",
+        // A name label that also asks for a number is not only a name.
+        "Name and number as on your national ID",
+        "Name and document number per your national ID card",
+        "Nombre y número de cédula",
+        "Name as on your passport, and passport number",
+    ];
+
+    /// Labels that are only a generic word: a section caption such as "Passport" may be missing
+    /// from the label the scanner reports, which is then just this word.
+    const GENERIC_LABELS: &[&str] = &[
+        "Number", "No", "Numero", "Número", "Nro", "Nro.", "Num", "ID", "N", "Number *", "No.",
     ];
 
     /// Labels that only look like the ones above: none of them may be held back.
@@ -903,6 +1120,22 @@ mod tests {
         "Full Name (as on your national ID)",
         "Legal name as shown on your passport",
         "Name as in your identity card",
+        "Nombre completo (como aparece en su cédula de identidad)",
+        "Nombre según tu pasaporte",
+        "Nombre tal como figura en el documento",
+        // A number-word with no document beside it, or a document word with no number.
+        "Number of years of experience with identity management platforms",
+        "Number of direct reports",
+        "What is your tax residency country?",
+        "Country of tax residence",
+        "Number of accounts managed",
+        "Account manager experience",
+        "Card games you like",
+        "Experience writing RFCs",
+        "sin experiencia",
+        "Are you a U.S. taxpayer?",
+        "Do you have a valid passport? (Yes/No)",
+        "Do you have a valid passport? Yes or No",
     ];
 
     fn loose_and_exact_bank(label: &str) -> AnswerBank {
@@ -935,6 +1168,23 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_label_that_is_only_a_generic_word_is_held_too() {
+        for label in GENERIC_LABELS {
+            let bank = loose_and_exact_bank(label);
+            assert!(
+                bank.lookup(label).is_none(),
+                "a bank entry answered the bare label {label:?}"
+            );
+        }
+        // Inside a longer label the same word says nothing by itself.
+        assert!(
+            loose_and_exact_bank("Phone number")
+                .lookup("Phone number")
+                .is_some()
+        );
     }
 
     #[test]
