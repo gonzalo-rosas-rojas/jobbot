@@ -700,6 +700,12 @@ const FIELD_NEVER: &[&str] = &[
     "passport number",
     "ni number",
     "ni no",
+    "r u n",
+    "swift bic",
+    "vat id",
+    "ifsc",
+    "clabe",
+    "tax code",
     "numero de pasaporte",
     "r u t",
     "government id",
@@ -771,11 +777,30 @@ const FIELD_NEVER: &[&str] = &[
 /// where "no" is read as a number is the very end of the label (`ends_with_no_after_a_document`).
 const NUMBER_WORDS: &[&str] = &["number", "numbers", "nro", "num", "numero"];
 
-/// Words and phrases of identity, tax and licence documents. A number-word within
-/// `MAX_WORDS_APART` words of one of them, in either order, makes a field the program never fills.
-const DOCUMENT_WORDS: &[&str] = &[
+/// Strong document terms: a real number-word ANYWHERE in the label with one of them holds ("Enter
+/// the number exactly as it appears on your passport"). They name a government document and
+/// nothing else.
+const STRONG_DOCUMENT_TERMS: &[&str] = &[
     "passport",
     "pasaporte",
+    "cedula",
+    "national id",
+    "identity card",
+    "government id",
+    "government issued id",
+    "documento de identidad",
+    "driver s licence",
+    "driver s license",
+    "drivers licence",
+    "drivers license",
+    "driving licence",
+    "driving license",
+    "social security",
+];
+
+/// Weak document words, which are also ordinary words ("tax software", "document the process"):
+/// a number-word within `MAX_WORDS_APART` words of one of them, in either order, holds.
+const DOCUMENT_WORDS: &[&str] = &[
     "id",
     "identity",
     "identidad",
@@ -801,6 +826,63 @@ const DOCUMENT_WORDS: &[&str] = &[
 /// management" is five.
 const MAX_WORDS_APART: usize = 3;
 
+/// Words a label may be made of, besides document words, and still say only "the document".
+const DOCUMENT_ONLY_FILLER: &[&str] = &[
+    "your",
+    "the",
+    "a",
+    "an",
+    "or",
+    "and",
+    "please",
+    "enter",
+    "provide",
+    "tu",
+    "su",
+    "el",
+    "la",
+    "de",
+    "o",
+    "y",
+    "personal",
+    "national",
+    "government",
+    "issued",
+    "card",
+    "document",
+    "documento",
+    "licence",
+    "license",
+    "licencia",
+    "tax",
+];
+
+/// At least one of these must be in a label made of document words to hold it: "Tax" or
+/// "Document" alone could be anything.
+const DOCUMENT_ONLY_ANCHORS: &[&str] = &[
+    "passport",
+    "pasaporte",
+    "cedula",
+    "id",
+    "identity",
+    "identification",
+    "identidad",
+    "identificacion",
+    "rut",
+    "run",
+    "dni",
+    "cpf",
+    "curp",
+    "ssn",
+    "nin",
+    "nif",
+    "nie",
+    "cuit",
+    "cuil",
+    "tfn",
+    "itin",
+];
+
 /// Nouns that are a banking field only when a number-word follows them: "account number",
 /// "acct #", "card no". Order matters, so "Number of accounts managed" and "Card games" pass.
 const NOUNS_THEN_NUMBER: &[&str] = &["account", "acct", "card"];
@@ -819,7 +901,7 @@ const GENERIC_LABELS: &[&str] = &["number", "no", "numero", "nro", "num", "id", 
 /// en su cédula", "según tu pasaporte", on a normalized label: the document a name must match.
 static NAMED_DOCUMENT: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"\b(?:on|in|per|from|according\s+to|en|segun|conforme\s+a|de\s+acuerdo\s+(?:a|con))\s+(?:(?:your|the|my|su|tu|el|la|mi)\s+)?(?:government(?:\s+issued)?\s+id(?:\s+card)?|driver\s+s\s+licen[cs]e|drivers\s+licen[cs]e|national\s+id(?:\s+card)?|national\s+identity\s+card|identity\s+(?:card|document)|id\s+card|id|passport|dni|cedula(?:\s+de\s+identidad)?|pasaporte|documento(?:\s+de\s+identidad)?|document|carnet(?:\s+de\s+identidad)?)\b",
+        r"\b(?:on|in|per|from|according\s+to|must\s+match|matches|matching|match|tal\s+cual|igual\s+que|igual\s+a|en|segun|conforme\s+a|de\s+acuerdo\s+(?:a|con))\s+(?:(?:your|the|my|su|tu|el|la|mi)\s+)?(?:government(?:\s+issued)?\s+id(?:\s+card)?|driver\s+s\s+licen[cs]e|drivers\s+licen[cs]e|national\s+id(?:\s+card)?|national\s+identity\s+card|identity\s+(?:card|document)|id\s+card|id|passport|dni|cedula(?:\s+de\s+identidad)?|pasaporte|documento(?:\s+de\s+identidad)?|document|carnet(?:\s+de\s+identidad)?)\b",
     )
     .expect("NAMED_DOCUMENT is a valid regex")
 });
@@ -855,17 +937,32 @@ fn read_label(label: &str) -> String {
 /// True when `label` is a field the program never fills (see `FIELD_NEVER` and `AnswerBank::lookup`).
 fn is_never_filled(label: &str) -> bool {
     let text = read_label(label);
-    if GENERIC_LABELS.contains(&text.trim()) {
-        return true;
-    }
-    let text = without_named_document(&text);
+    GENERIC_LABELS.contains(&text.trim()) || is_held_after_reading(&without_named_document(&text))
+}
+
+/// The rules of the never-filled list on a label already read (`read_label`) and, for a name
+/// field, already freed of its document reference: a term that holds alone, a number-word beside
+/// a document word, a banking noun with its number, "no" closing the label after a document word,
+/// or a label made only of document words.
+fn is_held_after_reading(text: &str) -> bool {
     let words: Vec<&str> = text.split_whitespace().collect();
     FIELD_NEVER
         .iter()
-        .any(|phrase| contains_phrase(&text, &normalize(phrase)))
+        .any(|phrase| contains_phrase(text, &normalize(phrase)))
         || number_beside_document(&words)
         || number_beside_banking_noun(&words)
         || ends_with_no_after_a_document(&words)
+        || only_document_words(&words)
+}
+
+/// True for a label made only of document words and filler ("Your ID", "Passport or ID", "ID
+/// (passport or national)"), with at least one anchor among them: nothing in it says it is not the
+/// document's number. "LinkedIn ID" and "Job ID" have a word of their own and are not.
+fn only_document_words(words: &[&str]) -> bool {
+    words
+        .iter()
+        .all(|w| DOCUMENT_ONLY_FILLER.contains(w) || DOCUMENT_ONLY_ANCHORS.contains(w))
+        && words.iter().any(|w| DOCUMENT_ONLY_ANCHORS.contains(w))
 }
 
 /// "Passport No", "ID No", "Account no": a "no" or "n" that closes the label right after a
@@ -874,23 +971,30 @@ fn ends_with_no_after_a_document(words: &[&str]) -> bool {
     let [.., before, last] = words else {
         return false;
     };
+    let ends_a_document_term = || {
+        DOCUMENT_WORDS
+            .iter()
+            .chain(STRONG_DOCUMENT_TERMS)
+            .any(|term| term.rsplit(' ').next() == Some(*before))
+    };
     ["no", "n", "nr"].contains(last)
-        && (NOUNS_THEN_NUMBER.contains(before)
-            || DOCUMENT_WORDS
-                .iter()
-                .any(|term| term.rsplit(' ').next() == Some(*before)))
+        && (NOUNS_THEN_NUMBER.contains(before) || ends_a_document_term())
 }
 
 /// "Full name (as on your national ID)" asks for a name that matches a document, not for the
 /// document's number: the reference to the document is taken out of a label that asks for a name.
-/// Only when nothing left is a number-word: "Name and number as on your national ID" is kept whole.
+/// Only when what is left has neither a number-word nor a document word: "Name and number as on
+/// your national ID" and "Name and ID as on your national ID" are kept whole.
 fn without_named_document(text: &str) -> String {
-    let asks_for_a_name = contains_phrase(text, "name") || contains_phrase(text, "nombre");
+    let asks_for_a_name = ["name", "nombre", "surname", "apellido"]
+        .iter()
+        .any(|word| contains_phrase(text, word));
     if !asks_for_a_name {
         return text.to_string();
     }
     let rest = NAMED_DOCUMENT.replace_all(text, " ").into_owned();
-    if rest.split_whitespace().any(|w| NUMBER_WORDS.contains(&w)) {
+    let says_more = |w: &str| NUMBER_WORDS.contains(&w) || DOCUMENT_ONLY_ANCHORS.contains(&w);
+    if rest.split_whitespace().any(says_more) {
         text.to_string()
     } else {
         rest
@@ -902,24 +1006,32 @@ fn number_beside_document(words: &[&str]) -> bool {
     let numbers: Vec<usize> = (0..words.len())
         .filter(|&i| NUMBER_WORDS.contains(&words[i]))
         .collect();
-    DOCUMENT_WORDS.iter().any(|term| {
+    if numbers.is_empty() {
+        return false;
+    }
+    let has_strong = STRONG_DOCUMENT_TERMS.iter().any(|term| {
         let term: Vec<&str> = term.split(' ').collect();
-        words
-            .windows(term.len())
-            .enumerate()
-            .filter(|(_, window)| *window == term.as_slice())
-            .any(|(start, _)| {
-                let end = start + term.len() - 1;
-                numbers.iter().any(|&n| {
-                    let apart = if n < start {
-                        start - n
-                    } else {
-                        n.saturating_sub(end)
-                    };
-                    apart <= MAX_WORDS_APART
+        words.windows(term.len()).any(|window| window == term)
+    });
+    has_strong
+        || DOCUMENT_WORDS.iter().any(|term| {
+            let term: Vec<&str> = term.split(' ').collect();
+            words
+                .windows(term.len())
+                .enumerate()
+                .filter(|(_, window)| *window == term.as_slice())
+                .any(|(start, _)| {
+                    let end = start + term.len() - 1;
+                    numbers.iter().any(|&n| {
+                        let apart = if n < start {
+                            start - n
+                        } else {
+                            n.saturating_sub(end)
+                        };
+                        apart <= MAX_WORDS_APART
+                    })
                 })
-            })
-    })
+        })
 }
 
 /// True for "account number", "acct #", "card no" (noun, then number-word) and the Spanish
@@ -1076,9 +1188,6 @@ mod tests {
         "Visa grant number",
         "Medicare number",
         "ID No.",
-        "Job ID number",
-        "Employee ID number",
-        "Experience reconciling bank accounts",
         // Order-sensitive: the noun first, or the Spanish "number of account".
         "Account no.",
         "Passport Nr.",
@@ -1131,6 +1240,47 @@ mod tests {
         "Nombre y número de cédula",
         "Name as on your passport, and passport number",
         "ID number as it appears on your government ID",
+        "Name and ID as on your national ID",
+        "Nombre y RUN según cédula",
+        // A strong document word with a number-word anywhere in the label.
+        "Enter the number exactly as it appears on your passport",
+        "Number shown on the front of your passport",
+        // More terms that hold alone.
+        "R.U.N.",
+        "SWIFT BIC",
+        "VAT ID",
+        "IFSC",
+        "CLABE",
+        "Tax code",
+    ];
+
+    /// Held on purpose although they could be read as ordinary: holding is the safe side. "Job ID
+    /// number" and "Employee ID number" hold through "id number", "bank accounts" through "bank
+    /// account".
+    const HELD_ON_PURPOSE: &[&str] = &[
+        "Job ID number",
+        "Employee ID number",
+        "Experience reconciling bank accounts",
+    ];
+
+    /// A label made only of document words: nothing else says what it asks for. Tried plain, in
+    /// both cases and after "Please enter your" (a "(required)" would add a word).
+    const ONLY_DOCUMENT_WORDS: &[&str] = &[
+        "Passport",
+        "Pasaporte",
+        "Your ID",
+        "Personal ID",
+        "Passport or ID",
+        "ID (passport or national)",
+        "Identification *",
+        "Identity card",
+        "ID card",
+        "Document ID",
+        "ID document",
+        "RUT",
+        "RUN",
+        "R.U.N.",
+        "DNI",
     ];
 
     /// Labels that are only a generic word: a section caption such as "Passport" may be missing
@@ -1158,17 +1308,9 @@ mod tests {
         "Number of years",
         "Phone number",
         "What drives you?",
-        // A name field only says which document the name must match: it asks for no number.
-        "Full Name (as on your national ID)",
-        "Legal name as shown on your passport",
-        "Name as in your identity card",
-        "Nombre completo (como aparece en su cédula de identidad)",
-        "Nombre según tu pasaporte",
-        "Nombre tal como figura en el documento",
-        "Please enter your legal name exactly as shown on your government-issued ID.",
-        "Full name as it appears on your passport",
-        "Name as on your government ID",
-        "Name as shown on your driver's licence",
+        "LinkedIn profile or ID",
+        "LinkedIn ID / URL",
+        "Employee referral: name and ID",
         // A number-word with no document beside it, or a document word with no number.
         "Number of years of experience with identity management platforms",
         "Number of direct reports",
@@ -1182,6 +1324,32 @@ mod tests {
         "Are you a U.S. taxpayer?",
         "Do you have a valid passport? (Yes/No)",
         "Do you have a valid passport? Yes or No",
+    ];
+
+    /// Name fields that only say which document the name must match. Each one is held WITHOUT the
+    /// name exemption (it holds a term that holds alone), so it proves the exemption.
+    const NAME_EXEMPTION_PROOF: &[&str] = &[
+        "Full Name (as on your national ID)",
+        "Please enter your legal name exactly as shown on your government-issued ID.",
+        "Name as on your government ID",
+        "Nombre completo (como aparece en su cédula de identidad)",
+        "Legal full name (must match your government-issued ID)",
+        "Full name, matching your national ID",
+        "Nombre completo (tal cual tu cédula)",
+        "Surname (as in your national ID)",
+        "Apellidos según documento de identidad",
+    ];
+
+    /// Name fields answerable with or without the exemption: they hold no term that holds alone
+    /// and no number-word, so they say nothing about the exemption.
+    const NAME_ANSWERABLE_EITHER_WAY: &[&str] = &[
+        "Legal name as shown on your passport",
+        "Name as in your identity card",
+        "Nombre según tu pasaporte",
+        "Nombre tal como figura en el documento",
+        "Full name as it appears on your passport",
+        "Name as shown on your driver's licence",
+        "Name as on your passport (no nicknames)",
     ];
 
     /// "no" and "n" are plain words here (an answer, a negation, "ni" is "nor"): none of them is
@@ -1243,6 +1411,53 @@ mod tests {
                     "a bank entry answered {shown:?}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn a_held_on_purpose_label_is_held() {
+        for label in HELD_ON_PURPOSE {
+            let bank = loose_and_exact_bank(label);
+            assert!(bank.lookup(label).is_none(), "answered {label:?}");
+        }
+    }
+
+    #[test]
+    fn a_label_made_only_of_document_words_is_held() {
+        for label in ONLY_DOCUMENT_WORDS {
+            for shown in [
+                label.to_string(),
+                label.to_uppercase(),
+                label.to_lowercase(),
+                format!("Please enter your {label} *"),
+            ] {
+                let bank = loose_and_exact_bank(&shown);
+                assert!(
+                    bank.lookup(&shown).is_none(),
+                    "a bank entry answered {shown:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_name_exemption_is_what_answers_these_name_fields() {
+        for label in NAME_EXEMPTION_PROOF {
+            // Without the exemption the label is held: the proof that the exemption does the work.
+            assert!(
+                is_held_after_reading(&read_label(label)),
+                "{label:?} would be answerable without the exemption: it proves nothing"
+            );
+            let bank = loose_and_exact_bank(label);
+            assert!(bank.lookup(label).is_some(), "{label:?} was held back");
+        }
+        for label in NAME_ANSWERABLE_EITHER_WAY {
+            assert!(
+                !is_held_after_reading(&read_label(label)),
+                "{label:?} belongs with the proofs: it is held without the exemption"
+            );
+            let bank = loose_and_exact_bank(label);
+            assert!(bank.lookup(label).is_some(), "{label:?} was held back");
         }
     }
 
