@@ -354,11 +354,15 @@ fn is_document_word(word: &str) -> bool {
 const MAX_WORDS_APART: usize = 3;
 
 /// Nouns that are a banking field only when a number-word follows them: "account number",
-/// "acct #", "card no". Order matters, so "Number of accounts managed" and "Card games" pass.
-const NOUNS_THEN_NUMBER: &[&str] = &["account", "acct", "card"];
+/// "acct #", "card no", and in Spanish "Cuenta N°", "Tarjeta Nro.", "Cuenta (número)". Order
+/// matters, so "Number of accounts managed" and "Card games" pass. "Cuenta" is also a verb and an
+/// online account ("¿Cuenta con experiencia?", "Cuenta de GitHub"): only the number-word right
+/// after it makes it a bank number.
+const NOUNS_THEN_NUMBER: &[&str] = &["account", "acct", "card", "cuenta", "tarjeta"];
 
-/// Spanish nouns that are a banking field when "number of" comes first: "número de cuenta",
-/// "N° de tarjeta".
+/// Spanish nouns that are a banking field when a number-word comes first, with or without "de":
+/// "número de cuenta", "N° de tarjeta", "N° cuenta", "Nro. tarjeta". Anything else between the
+/// two ("Número de años de cuenta") leaves the label answerable.
 const NUMBER_THEN_DE_NOUNS: &[&str] = &["cuenta", "tarjeta"];
 
 /// Labels that are only one of these words are never filled. A section such as "Passport" or
@@ -971,17 +975,17 @@ fn number_beside_document(words: &[&str]) -> bool {
         })
 }
 
-/// "account number", "acct #", "card no" (noun, then number-word) and the Spanish "número de
-/// cuenta", "N° de tarjeta" (number-word, "de", noun).
+/// "account number", "acct #", "card no", "Cuenta N°" (noun, then number-word) and the Spanish
+/// "número de cuenta", "N° de tarjeta", "N° cuenta" (number-word, optional "de", noun).
 fn number_beside_banking_noun(words: &[&str]) -> bool {
-    words
-        .windows(2)
-        .any(|pair| NOUNS_THEN_NUMBER.contains(&pair[0]) && NUMBER_WORDS.contains(&pair[1]))
-        || words.windows(3).any(|triple| {
-            NUMBER_WORDS.contains(&triple[0])
-                && triple[1] == "de"
-                && NUMBER_THEN_DE_NOUNS.contains(&triple[2])
-        })
+    words.windows(2).any(|pair| {
+        (NOUNS_THEN_NUMBER.contains(&pair[0]) && NUMBER_WORDS.contains(&pair[1]))
+            || (NUMBER_WORDS.contains(&pair[0]) && NUMBER_THEN_DE_NOUNS.contains(&pair[1]))
+    }) || words.windows(3).any(|triple| {
+        NUMBER_WORDS.contains(&triple[0])
+            && triple[1] == "de"
+            && NUMBER_THEN_DE_NOUNS.contains(&triple[2])
+    })
 }
 
 #[cfg(test)]
@@ -1158,6 +1162,29 @@ mod tests {
         "Passport (numbers only)",
         "ID number (numbers only)",
         "Tax number (numbers only)",
+        // The account or card number in the Spanish orders: number-word then noun (with or
+        // without "de"), or noun then number-word.
+        "N° cuenta",
+        "Nº cuenta",
+        "N° de cuenta",
+        "Nro. cuenta",
+        "Nro. de cuenta",
+        "Nro de cuenta",
+        "Número cuenta",
+        "Numero cuenta",
+        "Cuenta N°",
+        "Cuenta Nº",
+        "Cuenta Nro.",
+        "Cuenta (número)",
+        "Cuenta número",
+        "No. de cuenta",
+        "Núm. de cuenta",
+        "N° de cuenta bancaria",
+        "Número de cuenta corriente",
+        "N° cuenta RUT",
+        "Nro. de tarjeta",
+        "N° tarjeta",
+        "Tarjeta N°",
     ];
 
     /// Terms that are never filled alone by phrase (any case), in Chilean, foreign and banking
@@ -1439,6 +1466,22 @@ mod tests {
         "Are you a U.S. taxpayer?",
         "Do you have a valid passport? (Yes/No)",
         "Do you have a valid passport? Yes or No",
+        // "Cuenta" is also a verb and the noun for an online account; "número" and "tarjeta" are
+        // ordinary words. Only a number-word beside "cuenta" or "tarjeta" is a bank number.
+        "Cuenta de GitHub",
+        "Cuenta de LinkedIn",
+        "Tu cuenta de GitHub",
+        "¿Tienes cuenta en Upwork?",
+        "Cuéntanos sobre ti",
+        "Cuenta con experiencia en React?",
+        "¿Cuenta con disponibilidad inmediata?",
+        "Número de años de experiencia",
+        "N° de proyectos entregados",
+        "Tarjeta de presentación",
+        "Número de personas a cargo",
+        "Account manager experience",
+        "GitHub account",
+        "Nombre de usuario de la cuenta de GitHub",
     ];
 
     /// Name fields that only say which document the name must match. Each one is never filled
