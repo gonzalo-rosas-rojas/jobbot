@@ -493,7 +493,9 @@ pub fn record(tracker: &dyn Store, spec: &RecordSpec, now: DateTime<Utc>) -> Res
             }
         }
     };
-    tracker.start_application(&key, typed.unwrap_or(Origin::Unknown), now)?;
+    // What the origin is when nobody typed one: nobody wrote down how a hand-recorded application came about.
+    let origin_if_recorded = typed.unwrap_or(Origin::Unknown);
+    tracker.start_application(&key, origin_if_recorded, now)?;
     let Some(row) = tracker.get_application(&key)? else {
         return Ok(not_found(&key));
     };
@@ -514,14 +516,8 @@ pub fn record(tracker: &dyn Store, spec: &RecordSpec, now: DateTime<Utc>) -> Res
     // that is still `scored` (new, or queued by discovery but never prepared) is `unknown`, because jobbot had
     // not prepared it and nobody wrote down how it came about; one that was already `prepared` or waiting
     // (`needs_gonza`) keeps the origin it has. The same rule as the migration's backfill.
-    match typed {
-        Some(origin) => {
-            tracker.set_origin(&key, origin)?;
-        }
-        None if row.state == State::Scored => {
-            tracker.set_origin(&key, Origin::Unknown)?;
-        }
-        None => {}
+    if typed.is_some() || row.state == State::Scored {
+        tracker.set_origin(&key, origin_if_recorded)?;
     }
     let note = spec
         .note
