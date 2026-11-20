@@ -4,7 +4,7 @@
 //   block.el               section.block.sources
 //   block.patch(view)
 //
-// One table, three ways to read it (the boards, the origins, the regions): a switch above it, per visit. The switch is a row of buttons the sheet's one
+// One table, three ways to read it (the boards, the origins, the regions): a switch on the title row, per visit. The switch is a row of buttons the sheet's one
 // click listener answers (`data-funnel-by`); the table itself is the same nodes, patched.
 
 import { h, setText } from "../../core/dom.js";
@@ -29,7 +29,7 @@ export function createSourcesBlock() {
   const switchLabel = h("span", { class: "funnel-by-label label" });
   const switchButtons = FUNNEL_BYS.map((id) => h("button", { class: "funnel-by-pick label", type: "button", "data-funnel-by": id, "aria-pressed": false }));
   const switchBar = h("div", { class: "funnel-by", role: "group" }, switchLabel, ...switchButtons);
-  const sourcesBlock = h("section", { class: "block sources", "data-block": "sources" }, sourcesTitle, switchBar, srcTable, srcEmpty, srcMore, srcNote);
+  const sourcesBlock = h("section", { class: "block sources", "data-block": "sources" }, h("div", { class: "funnel-head" }, sourcesTitle, switchBar), srcTable, srcEmpty, srcMore, srcNote);
 
   function patch(view) {
     const s = view.funnel;

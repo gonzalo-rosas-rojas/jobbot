@@ -370,13 +370,15 @@ test("the arming of RESUME fades by itself after five seconds and a click elsewh
 // ---- the errors of the night open the card ---------------------------------------------------------------------------------------------
 
 test("each error of a card has an Abrir that opens it; the error of the run has none", async () => {
-  // a wide window: the funnel's "view by" row takes a line, and at 1920x1080 an error of the run leaves room for its own row only
-  const t = await open({ width: 3440, height: 1440 });
+  const t = await open();
   try {
     await load(t, "night");
     await ev(t, `window.__lab.refresh((s) => { s.controls.last_run_result = "error: boom"; })`);
     const rows = await ev(t, `[...document.querySelectorAll(".err")].map((e) => [e.dataset.rowId, !!e.querySelector("button[data-open]"), e.querySelector(".err-hour").textContent])`);
     assert.equal(rows[0][0], "run");
+    // at the default 1920x1080, after a failed run, a card error and its Abrir are still on the sheet and in view
+    const visible = await ev(t, `(() => { const host = document.querySelector("#host").getBoundingClientRect(); return [...document.querySelectorAll(".err[data-row-id] button[data-open]")].filter((b) => { const r = b.getBoundingClientRect(); return r.width > 0 && r.top >= host.top && r.bottom <= host.bottom; }).length; })()`);
+    assert.ok(visible >= 1, "a card error with its Abrir is visible at 1920x1080 after a failed run");
     assert.equal(rows[0][1], false, "the run itself is not a card");
     assert.ok(rows.slice(1).every(([, hasButton]) => hasButton));
     assert.ok(rows.every(([, , hour]) => /^\d\d:\d\d$/.test(hour)));

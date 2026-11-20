@@ -114,7 +114,9 @@
 
 .sistema .row[data-pending] .act { opacity: 0.3; pointer-events: none; }
 
-.sistema .funnel-by { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 14px; margin-bottom: 6px; color: var(--ink-dim); }
+.sistema .funnel-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 2px 14px; padding-bottom: 6px; border-bottom: 1px solid var(--line-strong); }
+.sistema .funnel-head .block-title { padding-bottom: 0; border-bottom: 0; }
+.sistema .funnel-by { display: flex; flex-wrap: nowrap; align-items: baseline; gap: 0 12px; color: var(--ink-dim); }
 .sistema .funnel-by-pick { display: inline-flex; align-items: center; min-height: 24px; padding: 0 0 2px; color: var(--ink-dim); text-transform: inherit; letter-spacing: inherit; border-bottom: 1px solid transparent; white-space: nowrap; }
 .sistema .funnel-by-pick:hover { color: var(--ink); }
 .sistema .funnel-by-pick[aria-pressed="true"] { color: var(--ink); font-weight: 600; border-bottom-color: var(--ink); }
