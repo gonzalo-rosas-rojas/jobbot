@@ -91,11 +91,26 @@ test("the switch marks the pressed view and a click asks for it", async () => {
   assert.equal(ui.el.querySelectorAll("thead th").length, 5, "the board's column and four numbers");
 });
 
-test("the by-board note says a rejection counts as an answer, in both languages", async () => {
-  const { t } = await import("../src/i18n/index.js");
-  setLang("es");
-  assert.ok(t("sistema.funnel.note.source").endsWith("Un rechazo tambi\u00e9n cuenta como respuesta."));
-  setLang("en");
-  assert.ok(t("sistema.funnel.note.source").endsWith("A rejection also counts as an answer."));
-  setLang("es");
+test("the drawn by-board note says a rejection counts as an answer, in both languages", async () => {
+  const { createSistema } = await import("../src/moments/sistema/render.js");
+  const { sistemaView } = await import("../src/moments/sistema/view.js");
+  const drawn = {
+    es: "Un rechazo tambi\u00e9n cuenta como respuesta.",
+    en: "A rejection also counts as an answer.",
+  };
+  try {
+    for (const [lang, sentence] of Object.entries(drawn)) {
+      setLang(lang);
+      setTimeZone("America/Santiago");
+      dom.reset();
+      const ui = createSistema({ run() {}, open() {}, funnelBy() {} });
+      const host = dom.document.createElement("div");
+      dom.document.body.append(host);
+      host.append(ui.el);
+      ui.patch(sistemaView(model(snap), { nowMs, by: "source" }));
+      const note = ui.el.querySelector('[data-block="sources"] .note');
+      assert.ok(note && !note.hidden, lang + ": the by-board note is drawn");
+      assert.ok(note.textContent.endsWith(sentence), `${lang}: ${note.textContent}`);
+    }
+  } finally { setLang("es"); }
 });
