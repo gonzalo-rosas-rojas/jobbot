@@ -24,6 +24,7 @@ url.workspace = true
 [dev-dependencies]
 jobbot-testkit = { path = "../jobbot-testkit" }
 proptest.workspace = true
+rusqlite.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
 

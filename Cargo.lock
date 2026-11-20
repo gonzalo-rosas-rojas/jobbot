@@ -1335,6 +1335,7 @@ dependencies = [
  "jobbot-testkit",
  "proptest",
  "regex",
+ "rusqlite",
  "serde",
  "serde_json",
  "tempfile",

@@ -1567,6 +1567,42 @@ async fn a_results_log_that_cannot_be_written_does_not_abort_a_run_of_handoffs()
     );
 }
 #[tokio::test]
+async fn a_screenshot_that_cannot_be_stored_does_not_abort_a_run_of_handoffs() {
+    // A database file whose screenshot column refuses writes, as a locked or full disk would.
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("jobbot.db");
+    let env = Env {
+        tracker: Tracker::open(&db).unwrap(),
+        dir,
+    };
+    for n in [1, 2] {
+        env.prepared(&ashby_job(n), 90.0 - f64::from(n));
+    }
+    rusqlite::Connection::open(&db)
+        .unwrap()
+        .execute_batch(
+            "CREATE TRIGGER refuse_screenshots BEFORE UPDATE OF screenshot_path ON applications \
+             BEGIN SELECT RAISE(ABORT, 'screenshot write refused'); END;",
+        )
+        .unwrap();
+
+    let outcomes = env
+        .run_with(&FakeFiller::new(), None, &open_gate(), SubmitMode::Live)
+        .await
+        .expect("the run goes on");
+
+    let statuses: Vec<(&str, &str)> = outcomes
+        .iter()
+        .map(|o| (o.job_key.as_str(), o.status.as_str()))
+        .collect();
+    assert_eq!(
+        statuses,
+        [("test:1", "needs_gonza"), ("test:2", "needs_gonza")]
+    );
+    let row = env.tracker.get_application("test:1").unwrap().unwrap();
+    assert!(row.needs_reason.unwrap().starts_with("handoff:"));
+}
+#[tokio::test]
 async fn the_sheet_names_the_job_the_link_the_cv_and_what_the_bank_could_not_answer() {
     let env = Env::new();
     env.prepared(&ashby_job(1), 90.0);
