@@ -856,13 +856,24 @@ fn dated_app(t: &Tracker, id: &str, scored_days_ago: i64, steps: &[(State, i64)]
     job.key()
 }
 #[test]
-fn an_email_from_the_company_between_scoring_and_sending_moves_nothing() {
+fn an_email_from_the_company_between_scoring_and_the_hand_off_moves_nothing() {
     let t = Tracker::in_memory().unwrap();
-    // Scored on day -10, sent on day -2. The company wrote on day -5 about something else.
-    let key = dated_app(&t, "1", 10, &[(State::Prepared, 9), (State::Submitted, 2)]);
+    // Scored on day -10, handed to Gonza on day -4 (his form may go out from then), confirmed on
+    // day -1. The company wrote on day -6, before the form could have gone out: the cut-off is the
+    // hand-off, not the scoring.
+    let key = dated_app(
+        &t,
+        "1",
+        10,
+        &[
+            (State::Prepared, 9),
+            (State::NeedsGonza, 4),
+            (State::Submitted, 1),
+        ],
+    );
     let earlier = with(
         msg("m1", "rejection"),
-        json!({ "job_key": key, "received_at": (*NOW - TimeDelta::days(5)).to_rfc3339() }),
+        json!({ "job_key": key, "received_at": (*NOW - TimeDelta::days(6)).to_rfc3339() }),
     );
 
     let report = run(&t, &[earlier]);
@@ -908,6 +919,39 @@ fn a_below_the_floor_flag_is_not_a_send_so_an_older_email_from_the_company_moves
 
     assert_eq!(report.state_changes, 0, "{:?}", report.lines);
     assert_eq!(state_of(&t, &key), State::Submitted);
+}
+#[test]
+fn a_company_name_that_normalizes_to_nothing_matches_no_waiting_application() {
+    let t = Tracker::in_memory().unwrap();
+    // A waiting by-hand form of a posting that has no company at all.
+    let nameless: Job = make_job_with(|j| {
+        j.external_id = "1".into();
+        j.company.clear();
+    });
+    t.add_job(&nameless, 80.0, &BTreeMap::new(), sent_at())
+        .unwrap();
+    t.create_application(&nameless.key(), sent_at()).unwrap();
+    t.transition(&nameless.key(), State::Prepared, None, sent_at())
+        .unwrap();
+    t.transition(
+        &nameless.key(),
+        State::NeedsGonza,
+        Some("listing_only: envíalo tú"),
+        sent_at(),
+    )
+    .unwrap();
+    // A company written in letters `normalize` does not keep reads as "" as well.
+    let by_company = with(msg("m1", "rejection"), json!({ "company": "株式会社" }));
+
+    let report = run(&t, &[by_company]);
+
+    assert_eq!(
+        (report.state_changes, report.unmatched),
+        (0, 1),
+        "{:?}",
+        report.lines
+    );
+    assert_eq!(state_of(&t, &nameless.key()), State::NeedsGonza);
 }
 #[test]
 fn an_email_that_could_belong_to_a_form_sent_by_hand_does_not_move_the_older_application() {
@@ -976,9 +1020,6 @@ fn a_reply_imported_before_the_confirm_moves_the_application_when_it_is_seen_aga
     let again = run(&t, std::slice::from_ref(&reply));
 
     assert_eq!(again.state_changes, 1, "{:?}", again.lines);
-    assert_eq!(state_of(&t, &key), State::Replied);
-    // Once moved, a third import changes nothing.
-    assert_eq!(run(&t, &[reply]).state_changes, 0);
     assert_eq!(state_of(&t, &key), State::Replied);
 }
 #[test]

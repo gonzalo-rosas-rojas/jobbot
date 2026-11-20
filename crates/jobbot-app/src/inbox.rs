@@ -6,13 +6,13 @@
 
 use anyhow::{Result, anyhow, bail};
 use chrono::{DateTime, TimeDelta, Utc};
+use jobbot_domain::handoff::may_have_been_sent;
 use jobbot_domain::outbound::{clean, plain_line};
 use jobbot_domain::state::State;
 use jobbot_domain::text::normalize;
 use serde_json::{Map, Value};
 
 use crate::actions;
-use crate::discovery::may_have_been_sent;
 use crate::ports::store::{EmailAdded, EmailKind, EmailRow, NewEmail, NewTask, Store};
 use tracing::field::Empty;
 
@@ -289,17 +289,21 @@ fn resolve_job(tracker: &dyn Store, item: &Item) -> Result<Link> {
             why.unwrap_or_else(|| "sin job_key ni empresa".to_string()),
         ));
     };
-    let mut keys = tracker.job_keys_of_company(&normalize(company), &LIVE_STATES)?;
+    let company_norm = normalize(company);
+    let mut keys = tracker.job_keys_of_company(&company_norm, &LIVE_STATES)?;
     // A waiting application whose form may already have gone out (sent by hand, or a click the
     // page did not confirm) is a candidate too: an email of the company may be about it, and
-    // moving an older application of the same company instead would be a guess.
-    let company_norm = normalize(company);
-    for row in tracker.list_by_state(State::NeedsGonza)? {
-        if row.company_norm == company_norm
-            && row.needs_reason.as_deref().is_some_and(may_have_been_sent)
-            && !keys.contains(&row.job_key)
-        {
-            keys.push(row.job_key);
+    // moving an older application of the same company instead would be a guess. A name that
+    // normalizes to nothing matches nothing (as in `job_keys_of_company`), not every row without
+    // a company.
+    if !company_norm.is_empty() {
+        for row in tracker.list_by_state(State::NeedsGonza)? {
+            if row.company_norm == company_norm
+                && row.needs_reason.as_deref().is_some_and(may_have_been_sent)
+                && !keys.contains(&row.job_key)
+            {
+                keys.push(row.job_key);
+            }
         }
     }
     let by_company = match keys.as_slice() {
