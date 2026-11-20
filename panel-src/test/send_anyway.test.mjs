@@ -7,6 +7,7 @@ import enCommon from "../src/i18n/en/common.js";
 import { readFileSync } from "node:fs";
 import { setLang, setTimeZone } from "../src/i18n/index.js";
 import { model, PERMANENT_ACTIONS } from "../src/core/model.js";
+import { KEYLESS_ACTIONS, keyShownIfAny } from "../src/ui/keys.js";
 import { hoyView, ACTION_LABEL } from "../src/moments/hoy/view.js";
 import { colaView } from "../src/moments/cola/view.js";
 import { requestOf as hoyRequestOf } from "../src/moments/hoy/actions.js";
@@ -85,10 +86,16 @@ test("every action HOY can label is drawn without throwing and has a request", (
     const rows = rowsOfHoy(snap);
     const row = rows.find((r) => r.data && r.data.card === "fx:1");
     assert.ok(row, `${id}: the card is a row`);
-    if (row.actions.some((a) => a.id === id)) {
-      assert.notEqual(hoyRequestOf(id, row, { until: "1d", state: "rejected" }), null, `${id} has a request in HOY`);
-    }
+    assert.ok(row.actions.some((a) => a.id === id), `${id}: HOY offers it on the card`);
+    assert.notEqual(hoyRequestOf(id, row, { until: "1d", state: "rejected" }), null, `${id} has a request in HOY`);
   }
+});
+
+test("only the keyless actions are drawn without a key: any other id outside the table still throws", () => {
+  assert.deepEqual(KEYLESS_ACTIONS, ["send_anyway"]);
+  assert.equal(keyShownIfAny("send_anyway", { room: "hoy" }), "");
+  assert.notEqual(keyShownIfAny("approve", { room: "hoy" }), "");
+  assert.throws(() => keyShownIfAny("aprove", { room: "hoy" }), /is not an action of the key table/);
 });
 
 test("send anyway is permanent (two presses) and has its words in both languages", () => {

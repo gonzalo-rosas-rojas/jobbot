@@ -52,12 +52,15 @@ export function keyShown(id, { room = "keys", shiftGlyph = false } = {}) {
   return (shiftGlyph ? SHOWN_SHIFTED : SHOWN_ALWAYS)[entry.display] || entry.display;
 }
 
+/** The actions that have no key on purpose: an act that must be deliberate is pressed, never typed. */
+export const KEYLESS_ACTIONS = ["send_anyway"];
+
 /**
- * `keyShown` for a button that may have no key on purpose (an act that is deliberate, such as "send anyway"): "" when the id is not in the
- * table, so the button is drawn without one. A typo in an id is not caught here; the tests that walk the action lists are what tie them to the table.
+ * `keyShown` for the buttons of a card: "" for an action of `KEYLESS_ACTIONS`, so it is drawn without a key. Any other id that is not in the
+ * table still throws, so a typo in an id is seen and not drawn as a button with no key.
  */
 export function keyShownIfAny(id, opts) {
-  return KEYS.some((k) => k.id === id) ? keyShown(id, opts) : "";
+  return KEYLESS_ACTIONS.includes(id) ? "" : keyShown(id, opts);
 }
 
 export const isSequence = (key) => key.trim().includes(" ");

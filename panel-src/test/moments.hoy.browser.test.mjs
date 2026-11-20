@@ -281,6 +281,7 @@ test("a card parked outside the region is drawn with its Enviar igual button and
       return { row: !!row, label: button && button.textContent.replace(/\s+/g, " ").trim(), visible: !!button && button.getBoundingClientRect().width > 0, hasKey: !!(button && button.querySelector(".kbd, kbd")) }; })()`);
     assert.equal(v.row, true, "the region card is on HOY");
     assert.ok(v.visible && v.label.startsWith("Enviar igual"), `its button is drawn (${v.label})`);
+    assert.equal(v.hasKey, false, "and it shows no key: the act is pressed, never typed");
     assert.deepEqual(t.page.problems(), [], "and drawing it threw nothing");
   } finally { await t.close(); }
 });
