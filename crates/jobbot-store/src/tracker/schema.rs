@@ -193,6 +193,7 @@ impl Tracker {
         conn.execute_batch(SCHEMA)?;
         Self::add_missing_columns(&conn)?;
         Self::add_origin_column(&mut conn)?;
+        Self::give_blank_company_norms_their_identity(&mut conn)?;
         conn.execute_batch(INDEXES_ON_ADDED_COLUMNS)?;
         Ok(Tracker {
             conn: Mutex::new(conn),
@@ -227,7 +228,9 @@ impl Tracker {
     /// only when the application was still `scored` (`record` sets `unknown` under the same rule for new
     /// applications). Nobody knows how those came about, and `cold` would claim jobbot found them and applied
     /// without contact. `substr` and not `LIKE`: in `LIKE` the `_` of `manual_record` matches any character. The
-    /// statements are built with `format!` from constants, as `add_missing_columns` builds its `ALTER`.
+    /// statements are built with `format!` from constants, as `add_missing_columns` builds its `ALTER`. Filling the
+    /// blank `company_norm` of older rows is not part of this step: it runs on every open
+    /// (`give_blank_company_norms_their_identity`), so a file that already has the column gets it too.
     fn add_origin_column(conn: &mut Connection) -> Result<()> {
         if Self::has_column(conn, "applications", "origin")? {
             return Ok(());
@@ -242,7 +245,6 @@ impl Tracker {
                      OR job_key IN (SELECT job_key FROM events
                                      WHERE substr(note, 1, length('{prefix}')) = '{prefix}');"
             ))?;
-            Self::give_blank_company_norms_their_identity(&tx)?;
         }
         tx.commit()?;
         Ok(())
@@ -251,9 +253,30 @@ impl Tracker {
     /// Rows stored before `company_identity` existed kept `company_norm = ''` when `normalize` could not fold the
     /// name (another script, or only a legal suffix), so such a company was nobody's and the cap, the cooldown and
     /// the e-mail match never saw it. Those rows, and only those, get the identity now. A row that already has a
-    /// norm keeps it, and a company with no name stays blank, so a second run finds nothing to do. It runs inside
-    /// the transaction of `add_origin_column`, so a cut leaves both undone.
-    fn give_blank_company_norms_their_identity(tx: &Connection) -> Result<()> {
+    /// norm keeps it, and a company with no name stays blank, so a second run finds nothing to do. It runs on every
+    /// open, whatever the version of the file: the rows are looked for first without a lock (the common case finds
+    /// none and never takes the write lock), and the writes go in their own short IMMEDIATE transaction, which looks
+    /// again because another process may have done it in between.
+    fn give_blank_company_norms_their_identity(conn: &mut Connection) -> Result<()> {
+        if Self::blank_company_norms(conn)?.is_empty() {
+            return Ok(());
+        }
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        for (table, key_column, key, identity) in Self::blank_company_norms(&tx)? {
+            tx.execute(
+                &format!("UPDATE {table} SET company_norm = ?1 WHERE {key_column} = ?2"),
+                params![identity, key],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// The rows with `company_norm = ''` whose company has an identity: (table, key column, key, identity).
+    fn blank_company_norms(
+        conn: &Connection,
+    ) -> Result<Vec<(&'static str, &'static str, String, String)>> {
+        let mut found = Vec::new();
         for (table, key_column, company_of) in [
             ("jobs", "key", "company"),
             (
@@ -262,7 +285,7 @@ impl Tracker {
                 "(SELECT company FROM jobs WHERE jobs.key = applications.job_key)",
             ),
         ] {
-            let mut blank = tx.prepare(&format!(
+            let mut blank = conn.prepare(&format!(
                 "SELECT {key_column}, {company_of} FROM {table} WHERE company_norm = ''"
             ))?;
             let rows: Vec<(String, Option<String>)> = blank
@@ -271,14 +294,11 @@ impl Tracker {
             for (key, company) in rows {
                 let identity = company_identity(&company.unwrap_or_default());
                 if !identity.is_empty() {
-                    tx.execute(
-                        &format!("UPDATE {table} SET company_norm = ?1 WHERE {key_column} = ?2"),
-                        params![identity, key],
-                    )?;
+                    found.push((table, key_column, key, identity));
                 }
             }
         }
-        Ok(())
+        Ok(found)
     }
 
     fn has_column(conn: &Connection, table: &str, column: &str) -> Result<bool> {
@@ -880,6 +900,26 @@ mod tests {
             "a filled one is left as it is"
         );
         assert_eq!(norm_of("application board:1"), "acme");
+    }
+
+    #[test]
+    fn a_database_that_already_has_origin_gets_its_blank_company_norms_on_open_and_a_second_open_writes_nothing()
+     {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("current.db");
+        drop(Tracker::open(&path).unwrap());
+        blank_company_norms(&path);
+
+        let t = Tracker::open(&path).unwrap();
+
+        let norms = company_norms(&t);
+        assert!(norms.contains(&("job blank:1".to_string(), "жк строй".to_string())));
+        assert!(norms.contains(&("application blank:1".to_string(), "жк строй".to_string())));
+        assert!(norms.contains(&("job blank:2".to_string(), String::new())));
+        let mut conn = t.lock();
+        let before = conn.total_changes();
+        Tracker::give_blank_company_norms_their_identity(&mut conn).unwrap();
+        assert_eq!(conn.total_changes(), before, "nothing left to write");
     }
 
     #[test]
