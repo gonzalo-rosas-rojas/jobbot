@@ -4,9 +4,9 @@
 // the focus and the cursor exactly where they were. Hierarchy, from the biggest down: the headline (when the engine last ran), two figures
 // (the next run, the sends of 24 h; what Claude cost is said in the account's row) next to the night's window with its marks, then the instruments in two columns in the
 // reading face (Inter) with their labels in mono, the limits as one band, and the keys of the page at the foot.
-// This file only joins the blocks, one module each (top, engine, account, sources, errors, limits, foot), and listens for the click of the button and of "open".
+// This file only joins the blocks, one module each (top, engine, account, sources, errors, limits, foot), and listens for the click of the button, of "open" and of the funnel's "view by" switch.
 //
-//   const ui = createSistema({ run, open });
+//   const ui = createSistema({ run, open, funnelBy });
 //   ui.el                    section.sistema  (host.append(ui.el))
 //   ui.patch(view, state)    state = { pending, armed, foot }: what the STOP button is doing right now, and whether the foot of the page has room
 
@@ -20,7 +20,7 @@ import { createErrorsBlock } from "./errors-block.js";
 import { createLimitsBlock } from "./limits-block.js";
 import { createFootBlock } from "./foot-block.js";
 
-export function createSistema({ run, open }) {
+export function createSistema({ run, open, funnelBy }) {
   const skeleton = () => h("div", { class: "row skeleton", "aria-hidden": "true" });
 
   // ---- the blocks: the top across the sheet, then two columns
@@ -45,6 +45,8 @@ export function createSistema({ run, open }) {
   // ---- one delegated listener for the button and the "open" of an error: nothing is bound per row, so nothing is lost when a row is rebuilt
   el.addEventListener("click", (e) => {
     const target = e.target;
+    const by = target.closest("button[data-funnel-by]");
+    if (by) { funnelBy(by.dataset.funnelBy); return; }
     const act = target.closest("button[data-action]");
     if (act) { run(act.dataset.action); return; }
     const go = target.closest("button[data-open]");

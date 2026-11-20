@@ -3,13 +3,17 @@
 //   const block = createSourcesBlock();
 //   block.el               section.block.sources
 //   block.patch(view)
+//
+// One table, three ways to read it (the boards, the origins, the regions): a switch above it, per visit. The switch is a row of buttons the sheet's one
+// click listener answers (`data-funnel-by`); the table itself is the same nodes, patched.
 
 import { h, setText } from "../../core/dom.js";
 import { t } from "../../i18n/index.js";
 import { sync, setData, setHidden } from "../shared/util.js";
 import { setVar, pct, keyedRow } from "./parts.js";
+import { FUNNEL_BYS } from "./view.js";
 
-const SOURCE_COLUMNS = ["board", "posted", "sent", "answered"];
+const SOURCE_COLUMNS = ["board", "posted", "sent", "answered", "rejected"];
 
 export function createSourcesBlock() {
   const srcHead = SOURCE_COLUMNS.map((id) => h("th", { class: id === "board" ? "col-board label" : "col-n label", scope: "col" }));
@@ -22,23 +26,33 @@ export function createSourcesBlock() {
   const srcMore = h("p", { class: "more label" });
   const sourcesLabel = h("span", { class: "title-text" });
   const sourcesTitle = h("h2", { class: "block-title label" }, sourcesLabel, srcWeek);
-  const sourcesBlock = h("section", { class: "block sources", "data-block": "sources" }, sourcesTitle, srcTable, srcEmpty, srcMore, srcNote);
+  const switchLabel = h("span", { class: "funnel-by-label label" });
+  const switchButtons = FUNNEL_BYS.map((id) => h("button", { class: "funnel-by-pick label", type: "button", "data-funnel-by": id, "aria-pressed": false }));
+  const switchBar = h("div", { class: "funnel-by", role: "group" }, switchLabel, ...switchButtons);
+  const sourcesBlock = h("section", { class: "block sources", "data-block": "sources" }, sourcesTitle, switchBar, srcTable, srcEmpty, srcMore, srcNote);
 
   function patch(view) {
     const s = view.sources;
-    setText(sourcesLabel, t("sistema.sources.title"));
-    SOURCE_COLUMNS.forEach((id, i) => setText(srcHead[i], t("sistema.sources.head." + id)));
+    setText(sourcesLabel, s.title);
+    setText(switchLabel, s.switchLabel);
+    if (switchBar.getAttribute("aria-label") !== s.switchLabel) switchBar.setAttribute("aria-label", s.switchLabel);
+    s.switch.forEach((pick, i) => {
+      setText(switchButtons[i], pick.label);
+      const on = String(pick.on);
+      if (switchButtons[i].getAttribute("aria-pressed") !== on) switchButtons[i].setAttribute("aria-pressed", on);
+    });
+    SOURCE_COLUMNS.forEach((id, i) => setText(srcHead[i], i === 0 ? s.head : t("sistema.sources.head." + id)));
     setText(srcWeek, s.week || "");
     setHidden(srcWeek, !s.week);
     const bodyRows = s.rows.map((r) => {
       const { el: tr, cells } = keyedRow(srcBody, "tr", "data-src", r.id, () => {
-        const row = h("tr", { "data-src": r.id }, h("th", { class: "col-board", scope: "row" }, h("span", { class: "src-name" }), h("span", { class: "src-bar", "aria-hidden": "true" })), h("td", { class: "col-n num" }), h("td", { class: "col-n num" }), h("td", { class: "col-n num" }));
+        const row = h("tr", { "data-src": r.id }, h("th", { class: "col-board", scope: "row" }, h("span", { class: "src-name" }), h("span", { class: "src-bar", "aria-hidden": "true" })), h("td", { class: "col-n num" }), h("td", { class: "col-n num" }), h("td", { class: "col-n num" }), h("td", { class: "col-n num" }));
         return { el: row, cells: { name: row.querySelector(".src-name"), bar: row.querySelector(".src-bar"), numbers: [...row.querySelectorAll("td")] } };
       }, srcCells);
       setText(cells.name, r.name);
       setVar(cells.bar, "--w", pct(r.w * 100));
-      // the label of each number, for the narrow page, where the table turns into rows of three numbers under their names (CSS: attr(data-label))
-      [["posted", r.n], ["sent", r.sent], ["answered", r.answered]].forEach(([id, n], i) => {
+      // the label of each number, for the narrow page, where the table turns into rows of four numbers under their names (CSS: attr(data-label))
+      [["posted", r.n], ["sent", r.sent], ["answered", r.answered], ["rejected", r.rejected]].forEach(([id, n], i) => {
         setText(cells.numbers[i], String(n));
         setData(cells.numbers[i], "label", t("sistema.sources.head." + id));
       });

@@ -13,7 +13,7 @@
 // (the batch threshold; null when the page has no such setting, and the stop then says "sin dato").
 
 import { t, lang } from "../i18n/index.js";
-import { sistemaView, SOURCES_SHOWN, ERRORS_SHOWN } from "./sistema/view.js";
+import { sistemaView, SOURCES_SHOWN, ERRORS_SHOWN, FUNNEL_BYS } from "./sistema/view.js";
 import { createActions } from "./sistema/actions.js";
 import { createSistema } from "./sistema/render.js";
 
@@ -44,6 +44,7 @@ const overflows = (host) => host.scrollHeight > host.clientHeight + 1;
  */
 const fitKey = (me, full) => [
   lang(),
+  me.by,                                                   // each split of the funnel lists a different number of rows
   full.sources.rows.length,
   full.sources.moreLabel,
   full.errors.total,
@@ -58,7 +59,7 @@ const fitKey = (me, full) => [
 function paint(me) {
   if (!me.model) return;
   const state = me.actions.state();
-  const base = { nowMs: me.ctx.now(), intent: state.intent, batchMin: batchOf(me.ctx) };
+  const base = { nowMs: me.ctx.now(), intent: state.intent, batchMin: batchOf(me.ctx), by: me.by };
   const max = { sources: SOURCES_SHOWN, errors: ERRORS_SHOWN, foot: true };
   const full = sistemaView(me.model, { ...base, show: max });
   const key = fitKey(me, full);
@@ -88,6 +89,7 @@ function wire(me) {
   me.ui = createSistema({
     run: (action) => { if (action === "engine") me.actions.run(me.view && me.view.stop); },
     open: (key, rowId) => ctx.open(key, rowId),
+    funnelBy: (id) => { if (FUNNEL_BYS.includes(id) && id !== me.by) { me.by = id; paint(me); } },
   });
 }
 
@@ -110,7 +112,7 @@ function watchLayout(me) {
 
 function mount(host, ctx) {
   if (S) unmount();
-  const me = { ctx, host, model: null, view: null, fit: null, epoch: 0 };
+  const me = { ctx, host, model: null, view: null, fit: null, epoch: 0, by: "source" };
   wire(me);
   host.append(me.ui.el);
   watchLayout(me);

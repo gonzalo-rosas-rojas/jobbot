@@ -54,6 +54,20 @@ export function patch(s, { empty }) {
     greenhouse: { n: 20, sent: 16, answered: 5, tests: 2, interviews: 1, offers: 1 },
     lever: { n: 9, sent: 6, answered: 1, tests: 0, interviews: 1, offers: 0 },
   });
+  // `rejected` (of `answered`) and the two other splits of the funnel came after the boards one: by origin and by region, each adding up to the boards.
+  const REJECTED = { ashby: 1, greenhouse: 2, lever: 0 };
+  for (const [name, group] of Object.entries(s.funnel.by_source)) orSet(group, "rejected", REJECTED[name] ?? 0);
+  orSet(s.funnel, "by_origin", empty ? {} : {
+    cold: { n: 30, sent: 22, answered: 4, rejected: 2, tests: 2, interviews: 1, offers: 0 },
+    referral: { n: 4, sent: 4, answered: 3, rejected: 0, tests: 1, interviews: 1, offers: 1 },
+    recruiter: { n: 3, sent: 3, answered: 2, rejected: 1, tests: 0, interviews: 1, offers: 0 },
+    unknown: { n: 4, sent: 2, answered: 0, rejected: 0, tests: 0, interviews: 0, offers: 0 },
+  });
+  orSet(s.funnel, "by_region", empty ? {} : {
+    open: { n: 25, sent: 19, answered: 6, rejected: 2, tests: 2, interviews: 2, offers: 1 },
+    silent: { n: 12, sent: 9, answered: 2, rejected: 1, tests: 1, interviews: 1, offers: 0 },
+    other: { n: 4, sent: 3, answered: 1, rejected: 0, tests: 0, interviews: 0, offers: 0 },
+  });
   orSet(s, "snoozed", { total: 0, cards: [] });
   const moves = s.activity.moves || [];
   orSet(s.activity, "moves_by_state", moves.reduce((m, mv) => ((m[mv.to] = (m[mv.to] || 0) + 1), m), {}));
@@ -111,7 +125,15 @@ export function heavy(rich) {
     link: null, kind: i % 2 ? "recruiter" : "manual", created_at: at(s, -DAY),
   }));
   s.today.tasks_total = 6;
-  s.funnel.by_source = { ashby: { n: 31, sent: 20, answered: 6, tests: 2, interviews: 1, offers: 0 }, greenhouse: { n: 30, sent: 14, answered: 4, tests: 2, interviews: 2, offers: 1 }, lever: { n: 29, sent: 11, answered: 2, tests: 1, interviews: 1, offers: 0 } };
+  s.funnel.by_source = { ashby: { n: 31, sent: 20, answered: 6, rejected: 2, tests: 2, interviews: 1, offers: 0 }, greenhouse: { n: 30, sent: 14, answered: 4, rejected: 1, tests: 2, interviews: 2, offers: 1 }, lever: { n: 29, sent: 11, answered: 2, rejected: 1, tests: 1, interviews: 1, offers: 0 } };
+  s.funnel.by_origin = {
+    cold: { n: 60, sent: 30, answered: 7, rejected: 2, tests: 3, interviews: 2, offers: 0 }, referral: { n: 10, sent: 6, answered: 3, rejected: 1, tests: 1, interviews: 1, offers: 1 },
+    recruiter: { n: 8, sent: 5, answered: 1, rejected: 0, tests: 1, interviews: 1, offers: 0 }, unknown: { n: 12, sent: 4, answered: 1, rejected: 1, tests: 0, interviews: 0, offers: 0 },
+  };
+  s.funnel.by_region = {
+    open: { n: 50, sent: 28, answered: 7, rejected: 2, tests: 3, interviews: 3, offers: 1 }, silent: { n: 30, sent: 14, answered: 4, rejected: 2, tests: 2, interviews: 1, offers: 0 },
+    other: { n: 10, sent: 3, answered: 1, rejected: 0, tests: 0, interviews: 0, offers: 0 },
+  };
   return s;
 }
 

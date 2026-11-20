@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { setLang, setTimeZone, t } from "../src/i18n/index.js";
 import { model } from "../src/core/model.js";
-import { sistemaView, ENGINE_STALE_HOURS, STEP_IDS, nightOf } from "../src/moments/sistema/view.js";
+import { sistemaView, ENGINE_STALE_HOURS, STEP_IDS, FUNNEL_BYS, nightOf } from "../src/moments/sistema/view.js";
 import { KEYS } from "../src/ui/keys.js";
 import { tokensOf, contrast } from "./helpers/color.mjs";
 import { scenario, clone, withRun, STEPS_OK, SKIPS, skipped, HOUR, MIN } from "./helpers/sistema-scenarios.mjs";
@@ -250,6 +250,74 @@ test("the sources of the postings: counts per board, never a rate with fewer tha
   const oddView = view(odd).sources;
   clean(oddView, "odd sources");
   assert.ok(oddView.rows.every((r) => Number.isInteger(r.n) && Number.isInteger(r.sent) && Number.isInteger(r.answered)));
+});
+
+test("the funnel table switches to origins and regions, names them in words and keeps the order by n", () => {
+  fresh();
+  const name = (r) => [r.name, r.n, r.sent, r.answered, r.rejected];
+  const origin = view(scenario("night"), { by: "origin" }).sources;
+  assert.deepEqual(origin.rows.map(name), [["en frío", 30, 22, 4, 2], ["referido", 4, 4, 3, 0], ["sin dato", 4, 2, 0, 0], ["reclutador", 3, 3, 2, 1]]);
+  assert.deepEqual([origin.by, origin.title, origin.head], ["origin", "Origen de cada postulación", "origen"]);
+  assert.match(origin.note, /corrígelo con jobbot origin/);
+  const region = view(scenario("night"), { by: "region" }).sources;
+  assert.deepEqual(region.rows.map((r) => r.name), ["nombra una región abierta", "no dice dónde", "otro lugar"]);
+  assert.deepEqual([region.title, region.head], ["Región que nombra el aviso", "región"]);
+  assert.match(region.note, /no cambia el puntaje/);
+  const boards = view(scenario("night"), { by: "source" }).sources;
+  assert.deepEqual([boards.title, boards.head], ["Fuentes por tablón", "tablón"]);
+  assert.equal(boards.week, origin.week, "the 7-day line is the same in every view");
+  fresh("en");
+  assert.deepEqual(view(scenario("night"), { by: "origin" }).sources.rows.map((r) => r.name), ["cold", "referral", "unknown", "recruiter"]);
+  assert.equal(view(scenario("night"), { by: "origin" }).sources.title, "How each application came");
+  fresh();
+  for (const by of ["origin", "region"]) {
+    const none = view(scenario("never"), { by }).sources;
+    assert.deepEqual([none.rows.length, none.week, none.note], [0, null, null], by);
+    assert.match(none.empty, /Todavía no hay postulaciones por/);
+    clean(none, "empty " + by);
+  }
+});
+
+test("an origin or a region the page does not know is shown by its cleaned name", () => {
+  fresh();
+  const snap = scenario("night");
+  snap.funnel.by_origin = { cold: { n: 1 }, friend: { n: 5, sent: 1, answered: 0 }, "": { n: 9 } };
+  snap.funnel.by_region = { mars: { n: 2 } };
+  const origin = view(snap, { by: "origin" }).sources;
+  assert.deepEqual(origin.rows.map((r) => r.name), ["friend", "en frío"]);
+  assert.deepEqual(view(snap, { by: "region" }).sources.rows.map((r) => r.name), ["mars"]);
+  clean(origin, "unknown origin");
+});
+
+test("rejected is a fourth number in every row and a missing one is 0", () => {
+  fresh();
+  const boards = view(scenario("night")).sources.rows;
+  assert.deepEqual(boards.map((r) => [r.name, r.rejected]), [["greenhouse", 2], ["ashby", 1], ["lever", 0]]);
+  const snap = scenario("night");
+  snap.funnel.by_source = { old: { n: 3, sent: 2, answered: 1 }, odd: { n: 2, rejected: "x" }, neg: { n: 1, rejected: -4 } };
+  const rows = view(snap).sources.rows;
+  assert.ok(rows.every((r) => r.rejected === 0), JSON.stringify(rows));
+});
+
+test("an unknown \"by\" shows the boards", () => {
+  fresh();
+  const boards = view(scenario("night")).sources;
+  for (const by of ["nope", undefined, null, 7, "by_origin"]) {
+    const v = view(scenario("night"), { by }).sources;
+    assert.equal(v.by, "source");
+    assert.deepEqual(v.rows, boards.rows);
+  }
+});
+
+test("the switch says which view is on", () => {
+  fresh();
+  for (const by of FUNNEL_BYS) {
+    const sw = view(scenario("night"), { by }).sources.switch;
+    assert.deepEqual(sw.map((p) => p.id), ["source", "origin", "region"]);
+    assert.deepEqual(sw.filter((p) => p.on).map((p) => p.id), [by], "exactly one is on");
+  }
+  assert.deepEqual(view(scenario("night")).sources.switch.map((p) => p.label), ["tablón", "origen", "región"]);
+  assert.equal(view(scenario("night")).sources.switchLabel, "Ver por");
 });
 
 test("the auto-approval threshold: from the model only (null is off, a whole 1..100 is 'desde N puntos', anything else is 'sin dato'), read only, and honest that the engine does not use it yet", () => {

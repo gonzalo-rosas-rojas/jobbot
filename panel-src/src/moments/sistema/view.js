@@ -9,7 +9,7 @@
 //
 // The hours of this stop are the server's (America/Santiago, the clock of the run window): the night is 18:00 to 09:00 there.
 
-import { t, tn, fmtDate, fmtMoney, fmtNumber, fmtPercent } from "../../i18n/index.js";
+import { t, tn, has, fmtDate, fmtMoney, fmtNumber, fmtPercent } from "../../i18n/index.js";
 import { ago, windowLabel, reasonShort } from "../../core/format.js";
 import { serverDay, SERVER_TZ, HOUR_MS, MINUTE_MS, DAY_MS } from "../../core/time.js";
 import { horaOf, WINDOW_START, WINDOW_END } from "../../scene/clock.js";
@@ -22,6 +22,8 @@ export const ENGINE_STALE_HOURS = 36;
 export const STEP_IDS = ["discover", "prepare", "submit", "dossiers"];
 export const ERRORS_SHOWN = 4;
 export const SOURCES_SHOWN = 8;
+/** What the funnel table can be split by: the board the posting came from, how the application came about, the region the posting names. */
+export const FUNNEL_BYS = ["source", "origin", "region"];
 /** A snapshot older than this (a poll is every 30 s) says how old it is (spec §9.4). */
 export const OLD_MS = 10 * MINUTE_MS;
 const DEFAULT_SLOT_MIN = 30; // the length of a slot of the strip when the server does not say
@@ -285,10 +287,18 @@ function limitsOf(snap, batchMin) {
   };
 }
 
-function sourcesOf(snap, shown) {
-  const raw = isRecord(snap.funnel) && isRecord(snap.funnel.by_source) ? snap.funnel.by_source : {};
+/** The name a row of the funnel shows: a board as the server wrote it, an origin or a region in words when the page knows it (a value a newer server sends is still shown, cleaned). */
+function groupName(by, name) {
+  if (by !== "source" && has("sistema.funnel." + by + "." + name)) return t("sistema.funnel." + by + "." + name);
+  return clean(name, 28);
+}
+
+/** The funnel table: the boards (the default), the origins or the regions. An unknown `by` is the boards. */
+function sourcesOf(snap, shown, by = "source") {
+  if (!FUNNEL_BYS.includes(by)) by = "source";
+  const raw = isRecord(snap.funnel) && isRecord(snap.funnel["by_" + by]) ? snap.funnel["by_" + by] : {};
   const all = Object.entries(raw).filter(([name, v]) => name.trim() && isRecord(v))
-    .map(([name, v]) => ({ id: "src:" + name, name: clean(name, 28), n: whole(v.n), sent: whole(v.sent), answered: whole(v.answered) }))
+    .map(([name, v]) => ({ id: "src:" + name, name: groupName(by, name), n: whole(v.n), sent: whole(v.sent), answered: whole(v.answered), rejected: whole(v.rejected) }))
     .filter((r) => r.name)
     .sort((a, b) => b.n - a.n || a.name.localeCompare(b.name));
   const top = all[0] ? all[0].n : 0;
@@ -300,12 +310,18 @@ function sourcesOf(snap, shown) {
     week = tn("sistema.sources.week", sentWeek, { a: whole(metrics.responses_week) });
     if (sentWeek >= MIN_SENT_FOR_RATE && num(metrics.response_rate) != null) week += " · " + fmtPercent(metrics.response_rate);
   }
+  const own = by === "source";
   return {
+    by,
+    title: t(own ? "sistema.sources.title" : "sistema.funnel.title." + by),
+    head: t(own ? "sistema.sources.head.board" : "sistema.funnel.head." + by),
     rows,
     week,
-    note: rows.length ? t("sistema.sources.note") : null,
-    empty: rows.length ? null : t("sistema.sources.empty"),
+    note: rows.length ? t(own ? "sistema.sources.note" : "sistema.funnel.note." + by) : null,
+    empty: rows.length ? null : t(own ? "sistema.sources.empty" : "sistema.funnel.empty." + by),
     moreLabel: all.length > rows.length ? t("sistema.more", { n: all.length - rows.length }) : null,
+    switchLabel: t("sistema.funnel.by"),
+    switch: FUNNEL_BYS.map((id) => ({ id, label: t("sistema.funnel.by." + id), on: id === by })),
   };
 }
 
@@ -339,14 +355,15 @@ function errorsOf(snap, { nowMs, lastMs, runResult, shown }) {
 }
 
 /**
- * sistemaView(model, { nowMs, intent, batchMin, show }) ->
+ * sistemaView(model, { nowMs, intent, batchMin, show, by }) ->
  *   { engine, eyebrow, status, old, head: { lead, tail }, chip: { tone, text, stop }, figures[2], strip, run: { last, result, steps[4], window },
  *     task, stop, account, spend, limits, sources, errors, foot }
  * `intent` is what the person asked for before the server has answered (true: STOP on, false: STOP off, null: ask the snapshot): the page
  * shows it at once. `batchMin` is the lote's threshold from the page's settings; null when there is no setting, which the stop shows as "sin dato".
  * `show` ({ sources, errors }) says how many boards and errors to list when the sheet has no room for all: the rest is "y N más".
+ * `by` is which split of the funnel the table shows, one of FUNNEL_BYS ("source" when it is anything else).
  */
-export function sistemaView(m, { nowMs, intent = null, batchMin = null, show = null } = {}) {
+export function sistemaView(m, { nowMs, intent = null, batchMin = null, show = null, by = "source" } = {}) {
   const shownSources = show && Number.isInteger(show.sources) && show.sources >= 1 ? Math.min(show.sources, SOURCES_SHOWN) : SOURCES_SHOWN;
   const shownErrors = show && Number.isInteger(show.errors) && show.errors >= 1 ? Math.min(show.errors, ERRORS_SHOWN) : ERRORS_SHOWN;
   const snap = m.snap;
@@ -387,7 +404,7 @@ export function sistemaView(m, { nowMs, intent = null, batchMin = null, show = n
     account: accountOf(c.claude_account, nowMs),
     spend: spendOf(snap.claude),
     limits: limitsOf(snap, batchMin),
-    sources: sourcesOf(snap, shownSources),
+    sources: sourcesOf(snap, shownSources, by),
     errors: errorsOf(snap, { nowMs, lastMs, runResult: result, shown: shownErrors }),
     foot: {
       title: t("sistema.foot.prefs"),

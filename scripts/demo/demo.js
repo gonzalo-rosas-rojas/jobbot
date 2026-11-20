@@ -131,9 +131,14 @@
         + ".\nOfrecemos: pago en dólares, horario flexible y un equipo que deja sus decisiones por escrito.";
   };
 
+  // How each fictional application came about, spread by its number: mostly cold, a few of the others (the funnel by origin).
+  const ORIGINS = ["cold", "cold", "cold", "referral", "cold", "cold", "recruiter", "cold", "unknown"];
+  // What the posting's place names (`LOCATIONS[where]`), as the server's region signal reads it: only "UTC-3 a UTC-6" names no place.
+  const REGION_OF_PLACE = ["open", "open", "open", "silent", "open", "open"];
+
   // [key, company, title, score, state, source, days since the last move, extra]
   const A = (n, company, title, score, state, source, days, extra) => Object.assign({
-    key: "demo:" + n, n, company, title, score, state, base: state, source, updated: ago(days * DAY + (n % 5) * HOUR),
+    key: "demo:" + n, n, company, title, score, state, base: state, source, origin: ORIGINS[n % ORIGINS.length], updated: ago(days * DAY + (n % 5) * HOUR),
     note: null, approved: false, kind: null, salary: null, where: 0, family: "backend", moves: [], touched: false,
   }, extra || {});
 
@@ -448,22 +453,27 @@
     const responsesWeek = count((a) => inWeek(a, answers));
     const interviews = count((a) => reached(a, ["interview"]));
     const offers = count((a) => reached(a, ["offer", "accepted"]));
-    const bySource = {};
-    for (const a of list) {
-      const s = (bySource[a.source] = bySource[a.source] || { n: 0, sent: 0, answered: 0, tests: 0, interviews: 0, offers: 0 });
-      s.n += 1;
-      if (reached(a, ["submitted"])) s.sent += 1;
-      if (reached(a, answers)) s.answered += 1;
-      if (reached(a, ["technical_test"])) s.tests += 1;
-      if (reached(a, ["interview"])) s.interviews += 1;
-      if (reached(a, ["offer", "accepted"])) s.offers += 1;
-    }
+    // The same stages split three ways: by the board, by how the application came about and by the region the posting names.
+    const split = (groupOf) => {
+      const groups = {};
+      for (const a of list) {
+        const s = (groups[groupOf(a)] = groups[groupOf(a)] || { n: 0, sent: 0, answered: 0, rejected: 0, tests: 0, interviews: 0, offers: 0 });
+        s.n += 1;
+        if (reached(a, ["submitted"])) s.sent += 1;
+        if (reached(a, answers)) s.answered += 1;
+        if (reached(a, ["rejected"])) s.rejected += 1;
+        if (reached(a, ["technical_test"])) s.tests += 1;
+        if (reached(a, ["interview"])) s.interviews += 1;
+        if (reached(a, ["offer", "accepted"])) s.offers += 1;
+      }
+      return groups;
+    };
     return {
       metrics: { sent_week: sentWeek, responses_week: responsesWeek, response_rate: sentWeek ? responsesWeek / sentWeek : null,
         tests_week: count((a) => inWeek(a, ["technical_test"])), interviews_week: count((a) => inWeek(a, ["interview"])),
         interviews_total: interviews, offers_total: offers, interview_to_offer: interviews ? offers / interviews : null },
       funnel: { sent: count((a) => reached(a, ["submitted"])), answered: count((a) => reached(a, answers)), tests: count((a) => reached(a, ["technical_test"])),
-        interviews, offers, by_source: bySource },
+        interviews, offers, by_source: split((a) => a.source), by_origin: split((a) => a.origin), by_region: split((a) => REGION_OF_PLACE[a.where]) },
     };
   }
 
