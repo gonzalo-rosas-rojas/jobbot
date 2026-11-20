@@ -832,11 +832,11 @@ fn a_reply_imported_before_the_confirm_moves_the_application_when_it_is_seen_aga
         json!({ "job_key": key, "received_at": (*NOW - TimeDelta::days(2)).to_rfc3339() }),
     );
     // The first import finds the application waiting for Gonza: the move is refused.
-    assert_eq!(run(&t, &[reply.clone()]).state_changes, 0);
+    assert_eq!(run(&t, std::slice::from_ref(&reply)).state_changes, 0);
     assert_eq!(state_of(&t, &key), State::NeedsGonza);
     actions::confirm(&t, &key, *NOW - TimeDelta::days(1)).unwrap();
 
-    let again = run(&t, &[reply.clone()]);
+    let again = run(&t, std::slice::from_ref(&reply));
 
     assert_eq!(again.state_changes, 1, "{:?}", again.lines);
     assert_eq!(state_of(&t, &key), State::Replied);
