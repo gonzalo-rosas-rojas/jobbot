@@ -115,7 +115,7 @@ test("the drawn by-board note says a rejection counts as an answer, in both lang
   } finally { setLang("es"); }
 });
 
-test("the funnel note has its own class and the errors note does not, so the 1100 px rule hides only the first", async () => {
+test("the funnel note has the funnel-note class and the errors note does not", async () => {
   const { createSistema } = await import("../src/moments/sistema/render.js");
   const { sistemaView } = await import("../src/moments/sistema/view.js");
   setLang("es");

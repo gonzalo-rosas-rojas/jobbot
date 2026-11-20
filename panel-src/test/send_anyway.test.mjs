@@ -22,7 +22,7 @@ test("send anyway has its own request in HOY and in COLA, one key, and resolve k
   }
 });
 
-test("the lote only approves: no bulk request carries send anyway", () => {
+test("batchRequest always posts to /api/approve", () => {
   assert.equal(batchRequest(["fx:1", "fx:2"]).path, "/api/approve");
 });
 
