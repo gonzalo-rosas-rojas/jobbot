@@ -438,6 +438,62 @@ async fn an_exclusion_that_would_withdraw_more_than_ten_withdraws_none_and_says_
     assert_eq!(report.excluded_held_back_rules, ["name:Bulk Excluded"]);
     assert_eq!(state_and_note(&tracker, "test:3").0, State::Scored);
 }
+/// `count` queued excluded-company postings, the first two of which the source now dates as too
+/// old; one more discovery run with the exclusion in force. Returns the report and the tracker.
+async fn excluded_with_two_stale(count: usize) -> (DiscoveryReport, Tracker) {
+    let jobs: Vec<Job> = (1..=count)
+        .map(|n| recently_dated(&n.to_string(), &format!("Bulk Excluded {n}")))
+        .collect();
+    let tracker = stored_by_discovery(jobs.clone()).await;
+    let now_returned: Vec<Job> = jobs
+        .into_iter()
+        .enumerate()
+        .map(|(index, job)| Job {
+            posted_at: (index < 2)
+                .then_some(*NOW - TimeDelta::days(60))
+                .or(job.posted_at),
+            ..job
+        })
+        .collect();
+    let (criteria, exclusions) = rules_excluding("Bulk Excluded");
+    let report = discover(
+        &[fake(now_returned, &[])],
+        &criteria,
+        &exclusions,
+        &tracker,
+        *NOW,
+    )
+    .await
+    .unwrap();
+    (report, tracker)
+}
+#[tokio::test]
+async fn an_application_that_is_stale_is_withdrawn_as_stale_even_when_it_is_excluded_too() {
+    // 11 excluded, 2 of them stale: the 2 leave as stale, the other 9 are within the guard.
+    let (report, tracker) = excluded_with_two_stale(MAX_EXCLUSION_WITHDRAWALS_PER_PASS + 1).await;
+
+    assert_eq!(report.pruned_stale, 2);
+    assert_eq!(report.pruned_excluded, 9);
+    assert_eq!(report.excluded_held_back, 0);
+    assert_eq!(state_and_note(&tracker, "test:1").1.unwrap(), STALE_NOTE);
+    assert!(
+        state_and_note(&tracker, "test:5")
+            .1
+            .unwrap()
+            .starts_with("excluded:")
+    );
+}
+#[tokio::test]
+async fn stale_ones_leave_first_and_the_guard_counts_only_the_rest() {
+    // 13 excluded, 2 of them stale: 2 leave as stale, the other 11 exceed the guard.
+    let (report, tracker) = excluded_with_two_stale(13).await;
+
+    assert_eq!(report.pruned_stale, 2);
+    assert_eq!(report.pruned_excluded, 0);
+    assert_eq!(report.excluded_held_back, 11);
+    assert_eq!(state_and_note(&tracker, "test:2").1.unwrap(), STALE_NOTE);
+    assert_eq!(state_and_note(&tracker, "test:5").0, State::Scored);
+}
 #[tokio::test]
 async fn an_excluded_company_already_on_the_by_hand_list_is_kept_and_reported() {
     let first = good("1", "Later Excluded Co");

@@ -268,7 +268,9 @@ fn may_have_been_sent(reason: &str) -> bool {
 ///   withdrawn stays.
 /// * A posting whose company, domain or category is excluded now (`check_exclusion`: the rule was
 ///   added after the posting was queued) is withdrawn with the gate's own `excluded:<rule>` note,
-///   before any other reason. The submission gate would withdraw it too, but only once the
+///   after the two reasons below (an application that is stale or out of region is withdrawn for
+///   that reason even if it is excluded too, and does not count toward the guard). The
+///   submission gate would withdraw it too, but only once the
 ///   application reached `prepared` and a run looked at it. Two limits, because withdrawal is
 ///   terminal: an application that may have gone out already (waiting for Gonza by hand, or with
 ///   an open click) is kept and listed in `excluded_waiting`, and when one pass would withdraw
@@ -319,15 +321,17 @@ pub fn prune_ineligible(
             }
             continue;
         }
-        if exclusion.excluded {
-            let rule = exclusion.reason.unwrap_or_default();
-            by_exclusion.push((row.job_key, rule));
-            continue;
-        }
+        // Age and region first, whether or not the company is also excluded: those reasons need
+        // no judgement about a rule and must not wait behind the exclusion guard. Only what
+        // survives them is judged by exclusion, and only that counts toward the guard.
         let (note, counter) = if is_stale_stored(&job, tracker, criteria, now)? {
             (stale_note(criteria), &mut report.stale)
         } else if refreshed.contains(&row.job_key) && !region_ok_for(&job, criteria) {
             (OUT_OF_REGION_NOTE.to_string(), &mut report.out_of_region)
+        } else if exclusion.excluded {
+            let rule = exclusion.reason.unwrap_or_default();
+            by_exclusion.push((row.job_key, rule));
+            continue;
         } else {
             continue;
         };
