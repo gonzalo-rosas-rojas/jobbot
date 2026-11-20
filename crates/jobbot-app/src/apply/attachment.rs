@@ -59,6 +59,30 @@ fn clean_title(title: &str) -> String {
     }
 }
 
+/// Overwrites the readable copies `attachment_for` made of an application's CV with `cv_pdf`, its
+/// freshly rendered tailored PDF. The copies sit in `adjuntos/<job key>/` next to the CVs (the
+/// folder `cv_pdf` is in, `<data_dir>/cv`), and the handoff sheet names them, so they must not
+/// keep the CV that was replaced. Only files already there are rewritten: nothing is created, and
+/// a failure is logged, never fatal (the same courtesy rule as `attachment_for`).
+pub fn refresh_attachment_copies(cv_pdf: &Path, job_key: &str) {
+    let Some(cv_dir) = cv_pdf.parent() else {
+        return;
+    };
+    let dir = cv_dir.join("adjuntos").join(safe_key(job_key));
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let is_pdf = path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"));
+        if is_pdf && let Err(err) = std::fs::copy(cv_pdf, &path) {
+            tracing::warn!(error = %err, file = %path.display(), "the readable CV copy could not be refreshed");
+        }
+    }
+}
+
 /// Copies `cv_pdf` to `<data_dir>/cv/adjuntos/<job key>/<attachment_name>` and returns the copy.
 /// The name is a courtesy, never a reason to stop a run: if the copy fails the form gets the
 /// tailored PDF as it is.

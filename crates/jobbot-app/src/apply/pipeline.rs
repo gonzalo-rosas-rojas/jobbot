@@ -18,7 +18,7 @@ use jobbot_domain::rules::{Criteria, Exclusions};
 use jobbot_domain::state::State;
 use jobbot_domain::text::safe_key;
 
-use crate::apply::attachment::attachment_for;
+use crate::apply::attachment::{attachment_for, refresh_attachment_copies};
 use crate::apply::cv::{
     CvError, Renderer, assert_no_new_skills, ensure_ready, relocating_to, tailor,
 };
@@ -321,7 +321,9 @@ pub const REPLACED_CV_DIR: &str = "replaced";
 /// and has one, from the master as it is now (after an edit of `cv/cv-master.md`), tailored as
 /// `prepare` would. No state changes. A sent application is never touched: its PDF is the record of
 /// what went out. Gonza may have sent a waiting one by hand without confirming it, so the PDF being
-/// replaced is first copied to `<its folder>/replaced/<name>.<UTC time>.pdf`. Returns the keys whose
+/// replaced is first copied to `<its folder>/replaced/<name>.<UTC time>.pdf`. The readable copies
+/// in `adjuntos/<job key>/` (the files the handoff sheets name) are overwritten with the new PDF
+/// too. Returns the keys whose
 /// CV was rendered again, best score first within each state.
 #[tracing::instrument(skip_all, fields(refreshed = Empty))]
 pub async fn refresh_cvs(
@@ -360,6 +362,8 @@ pub async fn refresh_cvs(
                     .with_context(|| format!("keeping {}", pdf_path.display()))?;
             }
             renderer.render(&variant, pdf_path).await?;
+            // The copy a handoff sheet names is a file of its own: it carries the new CV too.
+            refresh_attachment_copies(pdf_path, &row.job_key);
             refreshed.push(row.job_key);
         }
     }

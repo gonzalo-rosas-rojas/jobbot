@@ -176,6 +176,53 @@ async fn a_job_in_the_relocation_place_gets_the_relocated_cv_and_others_the_mast
     );
 }
 #[tokio::test]
+async fn refresh_also_replaces_the_readable_copy_a_handoff_sheet_names() {
+    let env = Env::new();
+    let master = env.cv_master(MASTER);
+    let job = make_job_with(|j| j.external_id = "attached".into());
+    env.scored(&job, 80.0);
+    prepare_all(
+        &env.tracker,
+        &master,
+        &env.out_dir(),
+        &FakeRenderer::default(),
+        *NOW,
+    )
+    .await
+    .unwrap();
+    // The copy `attachment_for` made next to the CVs, and one of another application.
+    let copies = env.out_dir().join("adjuntos");
+    let mine = copies.join(safe_key(&job.key()));
+    let other = copies.join("other_key");
+    for dir in [&mine, &other] {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(dir.join("cv_name_Title.pdf"), b"%PDF-before").unwrap();
+    }
+
+    refresh_cvs(
+        &env.tracker,
+        &master,
+        &FakeRenderer::default(),
+        Relocation {
+            places: &[],
+            to: None,
+        },
+        *NOW,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        std::fs::read(mine.join("cv_name_Title.pdf")).unwrap(),
+        b"%PDF-fake",
+        "the file the handoff sheet names carries the new CV"
+    );
+    assert_eq!(
+        std::fs::read(other.join("cv_name_Title.pdf")).unwrap(),
+        b"%PDF-before"
+    );
+}
+#[tokio::test]
 async fn refresh_renders_waiting_cvs_again_keeps_the_old_ones_and_never_touches_sent_ones() {
     let env = Env::new();
     let master = env.cv_master(MASTER);
