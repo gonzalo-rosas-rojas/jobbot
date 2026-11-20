@@ -548,7 +548,7 @@ mod tests {
         for (text, low, high) in [
             ("$20-$30/hour, per project needs", 3200.0, 4800.0),
             ("Rates vary per project: $20-$40/hr", 3200.0, 6400.0),
-            ("$25-$35/hr per assignment; length varies", 4000.0, 5600.0),
+            ("$26-$36/hr per assignment; length varies", 4160.0, 5760.0),
         ] {
             assert_eq!(
                 parse_salary_monthly_usd(text),
