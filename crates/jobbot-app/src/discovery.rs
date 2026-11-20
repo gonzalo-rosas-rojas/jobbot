@@ -156,6 +156,9 @@ pub struct PruneReport {
     pub excluded_waiting: Vec<String>,
     pub stale: usize,
     pub out_of_region: usize,
+    /// Applications Gonza had cleared the region of whose posting no longer says what he saw: parked again in
+    /// `needs_gonza` with the region reason, not withdrawn. They are not counted in `out_of_region`.
+    pub parked_region: usize,
 }
 
 /// The reasons under which a form may have gone out although the application never reached
@@ -201,12 +204,14 @@ pub use jobbot_domain::handoff::MAY_HAVE_BEEN_SENT;
 ///   same note (`fuera_de_region`) and sends nothing. Withdrawal is terminal and has no undo, the
 ///   gate runs before the approval check, and the region rules are still being tuned: a false
 ///   positive on stored text must not destroy an approved application for good. Only a fresh fetch
-///   (this pass) withdraws.
+///   (this pass) withdraws. Except one Gonza sent on past the region check (`had_region_override`): if its posting
+///   no longer says what he saw it is parked again, with a card, never withdrawn (`parked_region`, not counted in
+///   `out_of_region`).
 /// * Eligibility beats the reason an application waits: a `NeedsGonza` application that waits for
 ///   Gonza for another reason (missing answers, below the pay floor) is withdrawn too.
 ///
 /// A second pass finds nothing new: withdrawn applications are not looked at again.
-#[tracing::instrument(skip_all, fields(excluded = Empty, stale = Empty, out_of_region = Empty))]
+#[tracing::instrument(skip_all, fields(excluded = Empty, stale = Empty, out_of_region = Empty, parked_region = Empty))]
 pub fn prune_ineligible(
     criteria: &Criteria,
     exclusions: &Exclusions,
@@ -242,15 +247,32 @@ pub fn prune_ineligible(
         let region_decided = waiting_reason.is_some_and(is_out_of_region_reason)
             || tracker.region_override(&row.job_key)?;
         let exclusion = check_exclusion(&job, exclusions);
+        let region_closed = !may_be_sent
+            && !region_decided
+            && refreshed.contains(&row.job_key)
+            && !region_ok_for(&job, criteria);
+        // He cleared the region of this one before and the posting no longer says what he saw: his decision is not
+        // undone by a withdrawal (final, with no card). It is parked again, so he sees a card and decides again.
+        let had_override = region_closed && tracker.had_region_override(&row.job_key)?;
+        let parks_again = had_override && !exclusion.excluded;
         // Age and region first, whether or not the company is also excluded: the reason that
         // needs no rule is the one that goes on record.
         let (note, counter) = if !may_be_sent && is_stale_stored(&job, tracker, criteria, now)? {
             (stale_note(criteria), &mut report.stale)
-        } else if !may_be_sent
-            && !region_decided
-            && refreshed.contains(&row.job_key)
-            && !region_ok_for(&job, criteria)
-        {
+        } else if parks_again {
+            match tracker.transition(
+                &row.job_key,
+                State::NeedsGonza,
+                Some(OUT_OF_REGION_NOTE),
+                now,
+            ) {
+                Ok(()) => report.parked_region += 1,
+                // It waits for Gonza already, or was moved since the list was read: that stands.
+                Err(StoreError::IllegalTransition { .. }) => {}
+                Err(other) => return Err(other.into()),
+            }
+            continue;
+        } else if region_closed && !had_override {
             (OUT_OF_REGION_NOTE.to_string(), &mut report.out_of_region)
         } else if exclusion.excluded && gone_out {
             // Not withdrawn (it may have gone out already), but Gonza must not send it again.
@@ -290,6 +312,7 @@ pub fn prune_ineligible(
         ("excluded", report.excluded),
         ("stale", report.stale),
         ("out_of_region", report.out_of_region),
+        ("parked_region", report.parked_region),
     ]);
     Ok(report)
 }

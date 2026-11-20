@@ -670,67 +670,132 @@ async fn the_prune_follows_region_ok_on_the_fresh_fields() {
 async fn the_prune_leaves_alone_what_is_parked_for_its_region_or_was_cleared_by_gonza() {
     let parked = good("1", "Parked Co");
     let cleared = good("2", "Cleared Co");
-    let changed = good("3", "Changed Co");
-    let ordinary = good("4", "Ordinary Co");
-    let tracker = stored_by_discovery(vec![
-        parked.clone(),
-        cleared.clone(),
-        changed.clone(),
-        ordinary.clone(),
-    ])
-    .await;
-    let in_us = |job: &Job| Job {
-        location: "Remote - USA".into(),
-        ..job.clone()
-    };
+    let ordinary = good("3", "Ordinary Co");
+    let tracker =
+        stored_by_discovery(vec![parked.clone(), cleared.clone(), ordinary.clone()]).await;
     tracker
         .transition("test:1", State::NeedsGonza, Some(REGION_NOTE), *NOW)
         .unwrap();
-    // Gonza looked at these two, outside the region as the posting stood, and said to send them anyway.
-    for (job, key) in [(&cleared, "test:2"), (&changed, "test:3")] {
-        tracker.refresh_posting(&in_us(job)).unwrap();
-        tracker
-            .transition(key, State::NeedsGonza, Some(REGION_NOTE), *NOW)
-            .unwrap();
-        jobbot_app::actions::resolve(
-            &tracker,
-            key,
-            *NOW,
-            jobbot_app::actions::ResolveIntent::SendOutsideRegion,
-        )
-        .unwrap();
-    }
-    walk(&tracker, "test:4", &[State::Prepared]);
+    cleared_outside_the_region(&tracker, &cleared, "test:2");
+    walk(&tracker, "test:3", &[State::Prepared]);
     // The fetch: the parked one says USA, the cleared one says what he saw (and a new link, so it is refreshed),
-    // the changed one now says another place he has not seen, the ordinary one says USA.
-    let new_link = |job: Job| Job {
+    // the ordinary one says USA.
+    let new_link = Job {
         apply_url: "https://job-boards.greenhouse.io/acme/jobs/2".into(),
-        ..in_us(&job)
-    };
-    let elsewhere = Job {
-        location: "San Francisco, CA".into(),
-        ..changed.clone()
+        ..in_us(&cleared)
     };
 
-    let report = discover_again(
-        &tracker,
-        vec![
-            in_us(&parked),
-            new_link(cleared),
-            elsewhere,
-            in_us(&ordinary),
-        ],
-    )
-    .await;
+    let report = discover_again(&tracker, vec![in_us(&parked), new_link, in_us(&ordinary)]).await;
 
-    assert_eq!(
-        report.pruned_region, 2,
-        "the changed one and the ordinary one"
-    );
+    assert_eq!(report.pruned_region, 1, "only the ordinary one");
     assert_eq!(state_and_note(&tracker, "test:1").0, State::NeedsGonza);
     assert_eq!(state_and_note(&tracker, "test:2").0, State::Scored);
     assert_eq!(state_and_note(&tracker, "test:3").0, State::Withdrawn);
-    assert_eq!(state_and_note(&tracker, "test:4").0, State::Withdrawn);
+}
+fn in_us(job: &Job) -> Job {
+    Job {
+        location: "Remote - USA".into(),
+        ..job.clone()
+    }
+}
+/// Gonza looked at the application with the posting saying "Remote - USA" and sent it on anyway.
+fn cleared_outside_the_region(tracker: &Tracker, job: &Job, key: &str) {
+    tracker.refresh_posting(&in_us(job)).unwrap();
+    tracker
+        .transition(key, State::NeedsGonza, Some(REGION_NOTE), *NOW)
+        .unwrap();
+    jobbot_app::actions::resolve(
+        tracker,
+        key,
+        *NOW,
+        jobbot_app::actions::ResolveIntent::SendOutsideRegion,
+    )
+    .unwrap();
+}
+#[tokio::test]
+async fn a_cleared_application_whose_posting_moved_is_parked_again_not_withdrawn() {
+    let moved = good("1", "Moved Co");
+    let tracker = stored_by_discovery(vec![moved.clone()]).await;
+    cleared_outside_the_region(&tracker, &moved, "test:1");
+    let events_before = tracker.events_for("test:1").unwrap().len();
+    let elsewhere = Job {
+        location: "San Francisco, CA".into(),
+        ..moved.clone()
+    };
+
+    // Through discovery, as in production: the fetch refreshes the location and the prune runs right after.
+    let report = discover_again(&tracker, vec![elsewhere.clone()]).await;
+
+    let row = tracker.get_application("test:1").unwrap().unwrap();
+    assert_eq!(
+        row.state,
+        State::NeedsGonza,
+        "he sees a card and decides again"
+    );
+    assert_eq!(row.needs_reason.as_deref(), Some(REGION_NOTE));
+    assert_eq!(
+        tracker.events_for("test:1").unwrap().len(),
+        events_before + 1
+    );
+    assert_eq!(
+        report.pruned_region, 0,
+        "parked again is not a withdrawal: it is not counted as pruned"
+    );
+    // A second pass finds it parked and leaves it alone.
+    discover_again(&tracker, vec![elsewhere]).await;
+    assert_eq!(state_and_note(&tracker, "test:1").0, State::NeedsGonza);
+    assert_eq!(
+        tracker.events_for("test:1").unwrap().len(),
+        events_before + 1
+    );
+}
+#[tokio::test]
+async fn an_override_written_by_an_older_build_is_parked_again_too() {
+    let old = good("1", "Old Co");
+    let tracker = stored_by_discovery(vec![old.clone()]).await;
+    tracker.refresh_posting(&in_us(&old)).unwrap();
+    tracker
+        .transition("test:1", State::NeedsGonza, Some(REGION_NOTE), *NOW)
+        .unwrap();
+    tracker
+        .transition(
+            "test:1",
+            State::Scored,
+            Some("region_override: revisada por Gonza, se envía igual"),
+            *NOW,
+        )
+        .unwrap();
+
+    let report = discover_again(&tracker, vec![in_us(&old)]).await;
+
+    // The old note does not hold, so the region branch fires: parked again, not withdrawn.
+    assert_eq!(report.pruned_region, 0);
+    assert_eq!(state_and_note(&tracker, "test:1").0, State::NeedsGonza);
+}
+#[tokio::test]
+async fn a_cleared_application_whose_posting_moved_and_whose_company_is_excluded_is_withdrawn_as_excluded()
+ {
+    let moved = good("1", "Moved Co");
+    let tracker = stored_by_discovery(vec![moved.clone()]).await;
+    cleared_outside_the_region(&tracker, &moved, "test:1");
+    let elsewhere = Job {
+        location: "San Francisco, CA".into(),
+        ..moved
+    };
+    let (criteria, exclusions) = rules_excluding("Moved Co");
+
+    let report = discover(
+        &[fake(vec![elsewhere], &[])],
+        &criteria,
+        &exclusions,
+        &tracker,
+        *NOW,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(state_and_note(&tracker, "test:1").0, State::Withdrawn);
+    assert_eq!(report.pruned_excluded, 1);
 }
 #[tokio::test]
 async fn a_healthy_posting_stays_in_the_queue_and_its_fresh_fields_are_stored() {
