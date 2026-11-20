@@ -19,7 +19,7 @@ use jobbot_domain::handoff::{
 use jobbot_domain::models::Job;
 use jobbot_domain::rules::{Criteria, Exclusions};
 use jobbot_domain::state::State;
-use jobbot_domain::text::safe_key;
+use jobbot_domain::text::{normalize, safe_key};
 
 use crate::apply::attachment::{
     CopyFailure, attachment_for, keep_before_replacing, refresh_attachment_copies,
@@ -46,6 +46,9 @@ const CLOSED_NOTE: &str = "posting_closed: el aviso ya no está abierto en la fu
 /// The most applications one company may have in flight at once. Mass applying is weak: of the
 /// postings of one company only the best-scored ones go forward. `prepare` and `submit` leave the
 /// rest as they are (they are looked at again on every run, so a place that frees up is taken).
+/// A company is its `text::normalize`d name, the identity the 90-day cooldown uses
+/// (`company_in_cooldown`), so "Acme" and "Acme, Inc." are one company; a name that normalizes to
+/// nothing is nobody's company and is never capped.
 pub const MAX_PER_COMPANY: usize = 2;
 
 /// The states that count against a company's cap: everything on its way to an answer.
@@ -68,11 +71,6 @@ const SENT: [State; 5] = [
     State::Interview,
     State::Offer,
 ];
-
-/// The identity of a company for the cap: its name, lowercased and trimmed.
-pub fn company_key(name: &str) -> String {
-    name.trim().to_lowercase()
-}
 
 /// An application the cap leaves out of a run.
 #[derive(Debug, Clone, PartialEq)]
@@ -131,14 +129,14 @@ fn cap_skips(tracker: &dyn Store, stage: CapStage) -> anyhow::Result<Vec<CapSkip
     for state in holding {
         for row in tracker.list_by_state(*state)? {
             if is_application(&row) {
-                *held.entry(company_key(&row.company)).or_default() += 1;
+                *held.entry(normalize(&row.company)).or_default() += 1;
             }
         }
     }
     let mut pools: BTreeMap<String, Vec<ApplicationRow>> = BTreeMap::new();
     for state in competing {
         for row in tracker.list_by_state(*state)? {
-            let company = company_key(&row.company);
+            let company = normalize(&row.company);
             if !company.is_empty() && is_application(&row) {
                 pools.entry(company).or_default().push(row);
             }
@@ -1007,9 +1005,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_cap_is_one_constant_and_the_company_key_ignores_case_and_edges() {
+    fn the_cap_is_one_constant() {
         assert_eq!(MAX_PER_COMPANY, 2);
-        assert_eq!(company_key("  Acme AI "), "acme ai");
-        assert_eq!(company_key("ACME AI"), company_key("acme ai"));
     }
 }

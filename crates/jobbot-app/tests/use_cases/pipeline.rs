@@ -2345,17 +2345,46 @@ async fn an_application_waiting_for_gonza_holds_a_place_by_its_score() {
     assert_eq!(env.state("test:1"), State::NeedsGonza);
 }
 #[tokio::test]
-async fn the_company_is_its_name_lowercased_and_trimmed() {
+async fn the_company_is_its_normalized_name_as_for_the_cooldown() {
     let env = Env::new();
     env.prepared(&at("Acme AI", 1), 90.0);
     env.prepared(&at("  acme ai ", 2), 80.0);
-    env.prepared(&at("ACME AI", 3), 70.0);
+    env.prepared(&at("ACME AI, Inc.", 3), 70.0);
     // A name that only looks alike is another company.
     env.prepared(&at("Acme AI Labs", 4), 60.0);
     let filler = FakeFiller::new();
     env.run(&filler, &criteria(), SubmitMode::DryRun).await;
     let calls: Vec<String> = filler.calls().into_iter().map(|(key, _)| key).collect();
     assert_eq!(calls, vec!["test:1", "test:2", "test:4"]);
+}
+#[tokio::test]
+async fn a_company_whose_name_normalizes_to_nothing_is_never_capped() {
+    let env = Env::new();
+    for n in 1..=3 {
+        env.prepared(&at("LLC", n), 100.0 - f64::from(n));
+    }
+    let filler = FakeFiller::new();
+    let crit = Criteria {
+        review_dry_runs_per_run: 10,
+        ..criteria()
+    };
+    env.run(&filler, &crit, SubmitMode::DryRun).await;
+    assert_eq!(filler.calls().len(), 3);
+}
+#[tokio::test]
+async fn prepare_counts_suffix_variants_of_a_company_as_one() {
+    let env = Env::new();
+    let master = env.cv_master(MASTER);
+    env.prepared(&at("Acme", 1), 90.0);
+    env.prepared(&at("Acme", 2), 80.0);
+    env.scored(&at("Acme, Inc.", 3), 70.0);
+    let renderer = FakeRenderer::default();
+    let report = prepare_report(&env.tracker, &master, &env.out_dir(), &renderer, *NOW)
+        .await
+        .unwrap();
+    assert!(report.prepared.is_empty());
+    assert_eq!(report.skipped.len(), 1);
+    assert_eq!(report.skipped[0].job_key, "test:3");
 }
 #[tokio::test]
 async fn a_blank_company_name_is_never_capped() {
