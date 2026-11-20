@@ -823,6 +823,71 @@ fn a_reply_that_came_before_the_late_confirm_still_moves_the_application() {
     assert_eq!(report.state_changes, 1, "{:?}", report.lines);
     assert_eq!(state_of(&t, &key), State::Replied);
 }
+/// An application whose history has DISTINCT moments: the `app` helper stamps every move at once,
+/// which hides which entry a cut-off is read from. `steps` are `(state, days before NOW)`.
+fn dated_app(t: &Tracker, id: &str, scored_days_ago: i64, steps: &[(State, i64)]) -> String {
+    let job: Job = make_job_with(|j| {
+        j.external_id = id.into();
+        j.company = "Acme AI".into();
+    });
+    let ago = |days: i64| *NOW - TimeDelta::days(days);
+    t.add_job(&job, 80.0, &BTreeMap::new(), ago(scored_days_ago))
+        .unwrap();
+    t.create_application(&job.key(), ago(scored_days_ago))
+        .unwrap();
+    for (state, days) in steps {
+        t.transition(&job.key(), *state, None, ago(*days)).unwrap();
+    }
+    job.key()
+}
+#[test]
+fn an_email_from_the_company_between_scoring_and_sending_moves_nothing() {
+    let t = Tracker::in_memory().unwrap();
+    // Scored on day -10, sent on day -2. The company wrote on day -5 about something else.
+    let key = dated_app(&t, "1", 10, &[(State::Prepared, 9), (State::Submitted, 2)]);
+    let earlier = with(
+        msg("m1", "rejection"),
+        json!({ "job_key": key, "received_at": (*NOW - TimeDelta::days(5)).to_rfc3339() }),
+    );
+
+    let report = run(&t, &[earlier]);
+
+    assert_eq!(report.state_changes, 0, "{:?}", report.lines);
+    assert_eq!(state_of(&t, &key), State::Submitted);
+    assert!(
+        report
+            .lines
+            .join("\n")
+            .contains("anterior a la postulación, sin cambio de estado"),
+        "{:?}",
+        report.lines
+    );
+}
+#[test]
+fn a_reply_between_the_hand_off_and_the_late_confirm_moves_with_distinct_dates() {
+    let t = Tracker::in_memory().unwrap();
+    // Scored on day -10, handed to Gonza on day -4 (the form may go out from then), confirmed on
+    // day -1; the reply came on day -2.
+    let key = dated_app(
+        &t,
+        "1",
+        10,
+        &[
+            (State::Prepared, 9),
+            (State::NeedsGonza, 4),
+            (State::Submitted, 1),
+        ],
+    );
+    let reply = with(
+        msg("m1", "recruiter"),
+        json!({ "job_key": key, "received_at": (*NOW - TimeDelta::days(2)).to_rfc3339() }),
+    );
+
+    let report = run(&t, &[reply]);
+
+    assert_eq!(report.state_changes, 1, "{:?}", report.lines);
+    assert_eq!(state_of(&t, &key), State::Replied);
+}
 #[test]
 fn a_reply_imported_before_the_confirm_moves_the_application_when_it_is_seen_again() {
     let t = Tracker::in_memory().unwrap();

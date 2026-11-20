@@ -390,11 +390,30 @@ pub fn import(tracker: &dyn Store, items: &[Value], now: DateTime<Utc>) -> Resul
     Ok(report)
 }
 
-/// Moves the application a message belongs to, through `actions::mark_from_email` only, and says what
-/// happened in `notes`. Nothing moves for an email from before the application was sent (it
-/// answers an earlier process, and its event would come before the application's own
-/// `submitted`), or when the move is not legal from the current state: both are reported, never
-/// an error.
+/// The earliest moment the form of `key` can have gone out: the first history entry that put the
+/// application in `needs_gonza` (Gonza sends it by hand from then) or `submitted`, else its
+/// `submitted_at`. Never the `scored` entry: an application is scored days before anything is
+/// sent, and mail from the company in between answers something else. `None` when the
+/// application never got that far.
+fn form_could_have_gone_out_at(tracker: &dyn Store, key: &str) -> Result<Option<DateTime<Utc>>> {
+    let from_history = tracker
+        .events_for(key)?
+        .into_iter()
+        .find(|event| matches!(event.to_state, State::NeedsGonza | State::Submitted))
+        .map(|event| event.at);
+    Ok(match from_history {
+        Some(at) => Some(at),
+        None => tracker
+            .get_application(key)?
+            .and_then(|app| app.submitted_at),
+    })
+}
+
+/// Moves the application a message belongs to, through `actions::mark_from_email` only, and says
+/// what happened in `notes`. Returns whether the state changed. Nothing moves for an email from
+/// before the form could have gone out (`form_could_have_gone_out_at`: it answers an earlier
+/// process), or when the move is not legal from the current state: both are reported in `notes`,
+/// never an error.
 fn move_state(
     tracker: &dyn Store,
     key: &str,
@@ -402,20 +421,19 @@ fn move_state(
     now: DateTime<Utc>,
     notes: &mut Vec<String>,
     report: &mut ImportReport,
-) -> Result<()> {
+) -> Result<bool> {
     let Some(target) = target_state(mail.kind) else {
-        return Ok(());
+        return Ok(false);
     };
     // `submitted_at` is when `confirm` or `record` ran, which for a form Gonza sent by hand is
     // later than the send itself, so a reply that came in between would look "earlier". The
-    // application exists from its first history entry: only mail from before that answers an
-    // earlier process.
-    let events = tracker.events_for(key)?;
-    if let Some(started) = events.first().map(|event| event.at)
-        && mail.received_at < started
+    // earliest moment a form can have gone out is when the application first reached
+    // `needs_gonza` or `submitted`; mail from before that answers an earlier process.
+    if let Some(earliest) = form_could_have_gone_out_at(tracker, key)?
+        && mail.received_at < earliest
     {
         notes.push("anterior a la postulación, sin cambio de estado".to_string());
-        return Ok(());
+        return Ok(false);
     }
     let subject = if mail.subject.is_empty() {
         "correo recibido"
@@ -441,7 +459,7 @@ fn move_state(
             .unwrap_or(&outcome.message);
         notes.push(format!("sin cambio de estado: {why}"));
     }
-    Ok(())
+    Ok(outcome.ok)
 }
 
 /// What `move_state` needs to know about a message.
@@ -469,10 +487,28 @@ fn revisit_known(
     now: DateTime<Utc>,
     report: &mut ImportReport,
 ) -> Result<()> {
+    let mail = Mail {
+        kind: known.kind,
+        subject: &known.subject,
+        received_at: known.received_at,
+    };
     let key = match (&known.job_key, resolve_job(tracker, item)?) {
         (None, Link::Found(key)) => key,
         (Some(key), _) if still_unanswered(tracker, key)? => {
-            return retry_move(tracker, position, item, known, key, now, report);
+            // Already linked, but the application has not moved since it was sent: the move
+            // that was refused before may be legal now. Only a change is worth a line.
+            let mut notes = Vec::new();
+            if move_state(tracker, key, &mail, now, &mut notes, report)? {
+                report.lines.push(plain_line(&format!(
+                    "elemento {position} reaplicado: ya estaba importado ({}) · {}",
+                    item.message_id,
+                    notes.join(" · ")
+                )));
+            } else {
+                report.skipped += 1;
+                report.lines.push(skipped_line(position, &item.message_id));
+            }
+            return Ok(());
         }
         _ => {
             report.skipped += 1;
@@ -488,11 +524,6 @@ fn revisit_known(
     }
     report.linked += 1;
     let mut notes = vec![format!("postulación {key}")];
-    let mail = Mail {
-        kind: known.kind,
-        subject: &known.subject,
-        received_at: known.received_at,
-    };
     move_state(tracker, &key, &mail, now, &mut notes, report)?;
     report.lines.push(plain_line(&format!(
         "elemento {position} vinculado: ya estaba importado ({}) · {}",
@@ -515,38 +546,6 @@ fn still_unanswered(tracker: &dyn Store, key: &str) -> Result<bool> {
             .events_for(key)?
             .last()
             .is_some_and(|event| event.to_state == State::Submitted))
-}
-
-/// A message already linked whose application is still `submitted` with nothing after it: its
-/// state move is tried again (see `still_unanswered`). Nothing else about the message changes.
-fn retry_move(
-    tracker: &dyn Store,
-    position: usize,
-    item: &Item,
-    known: &EmailRow,
-    key: &str,
-    now: DateTime<Utc>,
-    report: &mut ImportReport,
-) -> Result<()> {
-    let mail = Mail {
-        kind: known.kind,
-        subject: &known.subject,
-        received_at: known.received_at,
-    };
-    let mut notes = Vec::new();
-    let before = report.state_changes;
-    move_state(tracker, key, &mail, now, &mut notes, report)?;
-    if report.state_changes == before {
-        report.skipped += 1;
-        report.lines.push(skipped_line(position, &item.message_id));
-    } else {
-        report.lines.push(plain_line(&format!(
-            "elemento {position} reaplicado: ya estaba importado ({}) · {}",
-            item.message_id,
-            notes.join(" · ")
-        )));
-    }
-    Ok(())
 }
 
 fn import_one(
