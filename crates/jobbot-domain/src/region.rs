@@ -524,6 +524,9 @@ static TIME_ZONE_HEDGE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(&format!(r"\b(?:{PREFERENCE_WORDS}|willing)\b")).expect("TIME_ZONE_HEDGE is valid")
 });
 
+/// The names of a clearance level, written once for every pattern of `CLEARANCE` that needs them.
+const CLEARANCE_LEVEL_WORDS: &str = r"top\s+secret|secret|ts|sci|dod|public\s+trust";
+
 /// Sentences that ask for a US government clearance, read after `fold`. Only a citizen can hold
 /// one, so the job cannot be done from Chile. Each pattern names the clearance itself (a bare
 /// "public trust" or "secret" is ordinary English: "we earn the public's trust"). A denial counts
@@ -536,8 +539,10 @@ static CLEARANCE: LazyLock<RegexSet> = LazyLock::new(|| {
     let more = format!(r"(?:\s+(?:and|or)\s+(?:be\s+)?(?:able\s+to\s+)?{verb})*");
     // The clearance must be named: "active", "security" or a level, never a bare "clearance"
     // ("you must have clearance from your manager").
-    let named = r"(?:(?:active|current)\s+(?:(?:u\s?s\s+)?security\s+)?|(?:u\s?s\s+)?security\s+|(?:top\s+secret|secret|ts|sci|dod|public\s+trust)\s+)";
-    let levels = r"(?:top\s+secret|secret|ts|sci|dod|public\s+trust|security)";
+    let named = format!(
+        r"(?:(?:active|current)\s+(?:(?:u\s?s\s+)?security\s+)?|(?:u\s?s\s+)?security\s+|(?:{CLEARANCE_LEVEL_WORDS})\s+)"
+    );
+    let levels = format!(r"(?:{CLEARANCE_LEVEL_WORDS}|security)");
     RegexSet::new([
         r"\bts\s*[/-]\s*sci\b".to_string(),
         r"\bpolygraph\b".to_string(),
