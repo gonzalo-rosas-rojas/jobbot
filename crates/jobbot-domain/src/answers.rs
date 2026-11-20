@@ -698,7 +698,8 @@ const FIELD_NEVER: &[&str] = &[
     "social insurance number",
     "national insurance number",
     "passport number",
-    "passport no",
+    "ni number",
+    "ni no",
     "numero de pasaporte",
     "r u t",
     "government id",
@@ -762,13 +763,13 @@ const FIELD_NEVER: &[&str] = &[
     "driver licence number",
     "license number",
     "licence number",
-    "license no",
-    "licence no",
 ];
 
-/// Words that say "a number" once a label is normalized: "No.", "Nro.", "Nº" and "N°" (the
-/// ordinal sign becomes a dot, so they read as "no" and "n") and "#" (written out as "number").
-const NUMBER_WORDS: &[&str] = &["number", "numbers", "no", "nro", "num", "numero", "n"];
+/// Words that say "a number" once a label is normalized. The abbreviations "No.", "Nr.", "Nro.",
+/// "N.", "Nº", "N°" and "#" are turned into "number" before that (`read_label`), because a plain
+/// "no" or "n" is also an answer ("If no, please explain", "(Y/N)") or "nor"; the one other place
+/// where "no" is read as a number is the very end of the label (`ends_with_no_after_a_document`).
+const NUMBER_WORDS: &[&str] = &["number", "numbers", "nro", "num", "numero"];
 
 /// Words and phrases of identity, tax and licence documents. A number-word within
 /// `MAX_WORDS_APART` words of one of them, in either order, makes a field the program never fills.
@@ -791,7 +792,6 @@ const DOCUMENT_WORDS: &[&str] = &[
     "license",
     "licencia",
     "national insurance",
-    "ni",
     "visa grant",
     "medicare",
 ];
@@ -824,18 +824,37 @@ static NAMED_DOCUMENT: LazyLock<Regex> = LazyLock::new(|| {
     .expect("NAMED_DOCUMENT is a valid regex")
 });
 
-/// "Yes/No", "yes or no" at the end of a question: its "no" is an answer, not a number.
-static YES_NO: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\byes\s+(?:or\s+)?no\b").expect("YES_NO is a valid regex"));
+/// "Yes/No", "Y/N", "Sí/No", "yes or no", with an optional "/N/A": the answers a question lists,
+/// not words of the label. Read on the raw label (accents still there).
+static YES_NO: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\b(?:yes|y|si|sí)\s*(?:/|or|o)\s*(?:no|n)\b(?:\s*/\s*(?:n\s*/\s*a|na)\b)?")
+        .expect("YES_NO is a valid regex")
+});
+
+/// "Nº", "N°", "N˚": the ordinal sign makes the "N" an abbreviation of "number".
+static ORDINAL_NUMBER: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\bn[º°˚]").expect("ORDINAL_NUMBER is a valid regex"));
+
+/// "No.", "Nr.", "Nro.", "Num.", "N." written with a dot. The character before is captured: a
+/// letter or a dot in front ("R.U.N.", "Anno.") means the "n" is part of something else.
+static DOTTED_NUMBER: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)(^|[^\p{L}.])(?:no|nr|nro|num|n)\.").expect("DOTTED_NUMBER is a valid regex")
+});
+
+/// The label as it is matched: the abbreviations of "number" written as "number", the answers a
+/// question lists ("(Y/N)") removed, accents folded (`normalize` alone would turn "cédula" into
+/// "c dula") and everything else as `normalize` reads it.
+fn read_label(label: &str) -> String {
+    let text = ORDINAL_NUMBER.replace_all(label, " number ");
+    let text = text.replace(['º', '°', '˚'], ".").replace('#', " number ");
+    let text = YES_NO.replace_all(&text, " ");
+    let text = DOTTED_NUMBER.replace_all(&text, "$1 number ");
+    normalize(&fold_look_alikes(&text))
+}
 
 /// True when `label` is a field the program never fills (see `FIELD_NEVER` and `AnswerBank::lookup`).
-/// The label is read as a person would: accents folded (`normalize` alone would turn "cédula" into
-/// "c dula"), "#" written as "number", the ordinal signs "º" and "°" as dots so "Nº de pasaporte"
-/// reads "n de pasaporte", and a "Yes/No" removed.
 fn is_never_filled(label: &str) -> bool {
-    let plain = fold_look_alikes(&label.replace(['º', '°', '˚'], ".").replace('#', " number "));
-    let text = normalize(&plain);
-    let text = YES_NO.replace_all(&text, " ").into_owned();
+    let text = read_label(label);
     if GENERIC_LABELS.contains(&text.trim()) {
         return true;
     }
@@ -846,6 +865,20 @@ fn is_never_filled(label: &str) -> bool {
         .any(|phrase| contains_phrase(&text, &normalize(phrase)))
         || number_beside_document(&words)
         || number_beside_banking_noun(&words)
+        || ends_with_no_after_a_document(&words)
+}
+
+/// "Passport No", "ID No", "Account no": a "no" or "n" that closes the label right after a
+/// document or banking word is the abbreviation. Anywhere else it is a plain word.
+fn ends_with_no_after_a_document(words: &[&str]) -> bool {
+    let [.., before, last] = words else {
+        return false;
+    };
+    ["no", "n", "nr"].contains(last)
+        && (NOUNS_THEN_NUMBER.contains(before)
+            || DOCUMENT_WORDS
+                .iter()
+                .any(|term| term.rsplit(' ').next() == Some(*before)))
 }
 
 /// "Full name (as on your national ID)" asks for a name that matches a document, not for the
@@ -1025,7 +1058,6 @@ mod tests {
         "CVV",
         "Driver's license number",
         "Driver’s licence number",
-        "Licence no",
         // A number-word beside a document word, in either order.
         "Tax number",
         "Tax File Number (TFN)",
@@ -1048,12 +1080,21 @@ mod tests {
         "Employee ID number",
         "Experience reconciling bank accounts",
         // Order-sensitive: the noun first, or the Spanish "number of account".
-        "Account no",
+        "Account no.",
+        "Passport Nr.",
+        "ID Nr.",
+        "Tax Nr.",
+        "Passport #:",
+        "Passport num",
+        "N˚ de pasaporte",
+        "N° RUT",
+        "NI no",
+        "NI number",
         "Acct #",
         "N° de cuenta",
         "Nro. de cuenta",
         "Card number",
-        "Card no",
+        "Card no.",
         "Número de tarjeta",
         // Terms that hold alone.
         "R.U.T.",
@@ -1143,6 +1184,36 @@ mod tests {
         "Do you have a valid passport? Yes or No",
     ];
 
+    /// "no" and "n" are plain words here (an answer, a negation, "ni" is "nor"): none of them is
+    /// the abbreviation of "number", so none of these may be held.
+    const PLAIN_SHORT_WORDS: &[&str] = &[
+        "Do you have a valid passport? (Y/N)",
+        "Do you have a valid driver's license? Y/N",
+        "Do you hold a valid driver's license? If no, please explain",
+        "Do you have experience with tax software? No experience is fine",
+        "Do you have a government-issued photo ID? (Y/N)",
+        "Are you a tax resident? Y/N",
+        "¿Tienes pasaporte vigente? (Sí/No)",
+        "Do you have a valid passport? (Yes/No/N/A)",
+        "What's your approach to license compliance? No more than 100 words",
+        "Identidad de género (no obligatorio)",
+        "Pretensión de renta (no incluyas puntos ni comas)",
+        "Pretensión de renta en CLP, no uses puntos ni comas",
+        "Teléfono (no uses ni espacios ni guiones)",
+        "Do you live in NI? (Y/N)",
+    ];
+
+    /// The abbreviation sits at the very end after a document or banking word, so these are only
+    /// tried plain and after "Please enter your" (a trailing "(required)" would move it).
+    const ENDS_WITH_NO: &[&str] = &[
+        "Passport No",
+        "ID No",
+        "Licence no",
+        "Account no",
+        "Card no",
+        "Tax no",
+    ];
+
     fn loose_and_exact_bank(label: &str) -> AnswerBank {
         // The loose entry is made of the label's own words, so it matches the label for sure.
         let loose = normalize(label).replace(' ', "|");
@@ -1172,6 +1243,34 @@ mod tests {
                     "a bank entry answered {shown:?}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn a_no_at_the_end_after_a_document_word_is_a_number() {
+        for label in ENDS_WITH_NO {
+            for shown in [
+                label.to_string(),
+                label.to_uppercase(),
+                format!("Please enter your {label} *"),
+            ] {
+                let bank = loose_and_exact_bank(&shown);
+                assert!(
+                    bank.lookup(&shown).is_none(),
+                    "a bank entry answered {shown:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_plain_no_or_n_is_not_the_abbreviation_of_number() {
+        for label in PLAIN_SHORT_WORDS {
+            let bank = loose_and_exact_bank(label);
+            assert!(
+                bank.lookup(label).is_some(),
+                "{label:?} was held back by a plain \"no\" or \"n\""
+            );
         }
     }
 
