@@ -457,15 +457,15 @@ static LABEL_ASIDE: LazyLock<Regex> = LazyLock::new(|| {
         .expect("LABEL_ASIDE is valid")
 });
 
-/// "C.I." (cédula/carnet de identidad), in any case, with its dots, not glued to a letter or a dot
-/// before it ("U.S.C.I.S."). Capture 1 is the character before, which the regex crate cannot look
-/// behind for.
+/// "C.I.", "C.I:" or "C.I" without its last dot (cédula/carnet de identidad), in any case, not
+/// glued to a letter or a dot before it ("U.S.C.I.S."). Capture 1 is the character before, which
+/// the regex crate cannot look behind for.
 static CARNET_ABBREVIATION: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)(^|[^\p{L}.])c\.(?:\s*i(?:\.|\s*:)|i\b)")
         .expect("CARNET_ABBREVIATION is valid")
 });
 
-/// "CI" in capitals, not glued to a letter or a dot before it. Case-sensitive on purpose: "ci" is
+/// "CI" in capitals, not glued to a letter, a digit or a dot before it. Case-sensitive on purpose: "ci" is
 /// inside "ciudad" and "cita", and "Ci" is a syllable. Capture 1 is the character before.
 static CARNET_CAPITALS: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(^|[^\p{L}\p{N}.])CI\b").expect("CARNET_CAPITALS is valid"));
@@ -477,8 +477,8 @@ static CONTINUOUS_DELIVERY_PAIR: LazyLock<Regex> = LazyLock::new(|| {
         .expect("CONTINUOUS_DELIVERY_PAIR is valid")
 });
 
-/// Spanish format hints that only a number gets: "sin puntos", "sin guion", "solo números". A form
-/// that writes one beside "CI" asks for the ID card number, as RUT forms do.
+/// Spanish format hints that only a number gets: "sin puntos", "sin guion", "solo números". A label
+/// that holds one, anywhere, and "CI" asks for the ID card number, as RUT forms do.
 static SPANISH_NUMBER_FORMAT_HINT: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\b(?:sin\s+(?:puntos|guion|guión|guiones)|s[oó]lo?\s+n[uú]meros?)\b")
         .expect("SPANISH_NUMBER_FORMAT_HINT is valid")
@@ -594,8 +594,8 @@ fn word_after(after: &str) -> Option<String> {
         .map(str::to_lowercase)
 }
 
-/// Whether a number-word stands right beside an ID token: the word before it ("Nro. C.I."), the
-/// word after it ("C.I. number") or a "#" after it.
+/// Whether a number-word stands right beside an ID token: the word before it ("Nro. C.I."), with
+/// a "de" in between ("Número de CI"), the word after it ("C.I. number") or a "#" after it.
 fn number_word_is_beside(before: &str, after: &str) -> bool {
     word_before(before).is_some_and(|word| {
         is_number_word_beside_an_id_token(&word)
@@ -604,10 +604,11 @@ fn number_word_is_beside(before: &str, after: &str) -> bool {
         || after.trim_start().starts_with('#')
 }
 
-/// Whether the "de" that ends `before` follows a number-word: "Número de CI", "No. de C.I.".
+/// Whether the "de" that is the last word of `before` follows a number-word: "Número de CI",
+/// "No. de C.I.", and with punctuation after the "de" ("Número de: CI", "No. de (CI)").
 fn number_word_stands_before_de(before: &str) -> bool {
     let without_de = before
-        .trim_end()
+        .trim_end_matches(|c: char| !c.is_alphanumeric())
         .trim_end_matches(|c: char| c.is_alphanumeric());
     word_before(without_de).is_some_and(|word| is_number_word_beside_an_id_token(&word))
 }
@@ -630,7 +631,7 @@ fn has_continuous_integration_context(label: &str) -> bool {
         .any(|word| CONTINUOUS_INTEGRATION_WORDS.contains(&word))
 }
 
-/// Whether "C.I." (or "C.I:") in the raw label is the Chilean ID card. A standalone one is,
+/// Whether "C.I." (or "C.I:", or "C.I") in the raw label is the ID card. A standalone one is,
 /// unless it is glued to another abbreviation ("C.I./C.D.") or the label talks about continuous
 /// integration. A number-word right beside it ("C.I. number", "Nro. C.I.") makes it the ID card
 /// whatever else the label talks about: nothing may make answerable a label that asks for a
@@ -676,14 +677,15 @@ fn nothing_but_wrapping_words(before: &str, after: &str) -> bool {
 /// word for an identity document in the label ("CI o pasaporte"), or as the whole label ("CI",
 /// "Ingrese su CI"). The pair "CI/CD" is never the ID card.
 fn carnet_capitals_are_an_id(label: &str) -> bool {
+    let label_speaks_of_a_document = SPANISH_NUMBER_FORMAT_HINT.is_match(label)
+        || SPANISH_IDENTITY_DOCUMENT_WORD.is_match(label);
     CARNET_CAPITALS.captures_iter(label).any(|found| {
         let token_starts = found.get(1).map_or(0, |before| before.end());
         let before = &label[..token_starts];
         let after = &label[found.get(0).map_or(label.len(), |whole| whole.end())..];
         !CONTINUOUS_DELIVERY_PAIR.is_match(after)
-            && (number_word_is_beside(before, after)
-                || SPANISH_NUMBER_FORMAT_HINT.is_match(label)
-                || SPANISH_IDENTITY_DOCUMENT_WORD.is_match(label)
+            && (label_speaks_of_a_document
+                || number_word_is_beside(before, after)
                 || nothing_but_wrapping_words(before, after))
     })
 }
@@ -1251,6 +1253,9 @@ mod tests {
         "CI:",
         "CI",
         "Su CI",
+        // Punctuation between the "de" of the number-word and the token.
+        "Número de: CI",
+        "No. de (CI)",
         // "CI" beside a Spanish word for an identity document: it names the ID card as one of
         // the documents the form accepts.
         "Documento: CI",
