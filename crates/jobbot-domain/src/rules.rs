@@ -155,7 +155,7 @@ pub enum RulesError {
 }
 
 /// Parses the text of `exclusions.toml`. Entries are trimmed and the ones left blank are dropped
-/// (a blank category would match almost any text); domains are lowercased.
+/// (so that a stray empty line in the file is not kept as an entry); domains are lowercased.
 pub fn parse_exclusions(text: &str) -> Result<Exclusions, RulesError> {
     let mut rules: Exclusions = toml::from_str(text).map_err(RulesError::Exclusions)?;
     let trimmed = |entries: &[String]| -> Vec<String> {

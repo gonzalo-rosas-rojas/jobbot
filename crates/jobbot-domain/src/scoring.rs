@@ -22,7 +22,8 @@ static RANGE: LazyLock<Regex> = LazyLock::new(|| {
 /// break), and a currency word, itself followed by such separators: `, per year`, `(USD) per
 /// year`. The word is `per year`, `a month`, `/yr`, `annually`, `p.a.`, or a bare `annual`,
 /// `yearly`, `monthly` (see `period_after` for the last one). Anything else in between (`+ annual
-/// bonus`, `. Annual leave`) means the word is not about the pay.
+/// bonus`, `. Annual leave`) means the word is not about the pay, and `annually`/`p.a.` count only
+/// when they close the phrase (`annually reviewed` does not).
 static PERIOD_AFTER: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?i)^[^\p{L}\p{N}/+.;]*(?:(?:usd|us\$|dollars?|gross|net)[^\p{L}\p{N}/+.;]*)*(?:(?:per|a|each|/)\s?(?P<fixed>year|yr|annum|month|mo)\b|(?P<adverb>annually\b|p\.a\.?)|(?P<bare>annual|yearly|monthly)\b)",
@@ -34,7 +35,7 @@ static PERIOD_AFTER: LazyLock<Regex> = LazyLock::new(|| {
 /// `Yearly base pay range (USD) is US$15,000 - $19,000`.
 static PERIOD_BEFORE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"(?i)(annual|yearly|monthly)\s+(?:base\s+)?(?:salary|pay|compensation)(?:\s+range)?(?:\s*\([^)]{0,20}\))?(?:\s+(?:is|of|between))?[\s:]*(?:(?:usd|us)\s*)?$",
+        r"(?i)\b(annual|yearly|monthly)\s+(?:base\s+)?(?:salary|pay|compensation)(?:\s+range)?(?:\s*\([^)]{0,20}\))?(?:\s+(?:is|of|between))?[\s:]*(?:(?:usd|us)\s*)?$",
     )
     .unwrap()
 });
@@ -70,6 +71,19 @@ fn period_after(tail: &str) -> Option<Period> {
     let rest = &tail[end..];
     if rest.starts_with(['-', '\u{2010}', '\u{2013}', '\u{2014}']) {
         return None;
+    }
+    // An adverb (`annually`, `p.a.`) names the pay's period only when it closes the phrase: at the
+    // end of the text or the line, or before punctuation. `annually reviewed` is about something
+    // else.
+    if caps.name("adverb").is_some() {
+        let after = rest.trim_start_matches([' ', '\t']);
+        let closes_the_phrase = after
+            .chars()
+            .next()
+            .is_none_or(|next| matches!(next, '\n' | '\r') || !next.is_alphanumeric());
+        if !closes_the_phrase {
+            return None;
+        }
     }
     let bare = caps.name("bare");
     let same_line = rest.split(['\n', '\r']).next().unwrap_or_default();
@@ -594,6 +608,48 @@ mod tests {
                 "{text:?}"
             );
         }
+    }
+
+    #[test]
+    fn an_adverb_after_the_range_counts_only_when_it_closes_the_phrase() {
+        // `annually reviewed` is about the review: the size of the numbers decides (monthly).
+        for text in [
+            "$4,000 – $6,000, annually reviewed",
+            "$4,000 - $6,000 annually reviewed",
+            "$4,000 - $6,000 p.a. plus bonus",
+        ] {
+            assert_eq!(
+                parse_salary_monthly_usd(text),
+                (Some(4000.0), Some(6000.0)),
+                "{text:?}"
+            );
+        }
+        // At the end of the text or the line, or before punctuation, it is the period.
+        for text in [
+            "$15,000 - $19,000 annually",
+            "$15,000 - $19,000 annually.",
+            "$15,000 - $19,000 annually, plus equity",
+            "$15,000 - $19,000 annually\nRequirements",
+            "$15,000 - $19,000 p.a., plus equity",
+        ] {
+            let (low, high) = parse_salary_monthly_usd(text);
+            assert_eq!(
+                (low.map(f64::round), high.map(f64::round)),
+                (Some(1250.0), Some(1583.0)),
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_period_word_inside_a_longer_word_does_not_introduce_the_range() {
+        // `semiannual` is not `annual`: 4,000 - 6,000 stays monthly by size.
+        assert_eq!(
+            parse_salary_monthly_usd("semiannual salary $4,000 - $6,000"),
+            (Some(4000.0), Some(6000.0))
+        );
+        let (low, _) = parse_salary_monthly_usd("Annual salary $15,000 - $19,000");
+        assert_eq!(low.unwrap().round(), 1250.0);
     }
 
     #[test]
