@@ -819,7 +819,7 @@ const GENERIC_LABELS: &[&str] = &["number", "no", "numero", "nro", "num", "id", 
 /// en su cédula", "según tu pasaporte", on a normalized label: the document a name must match.
 static NAMED_DOCUMENT: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"\b(?:on|in|per|from|according\s+to|en|segun|conforme\s+a|de\s+acuerdo\s+(?:a|con))\s+(?:(?:your|the|my|su|tu|el|la|mi)\s+)?(?:national\s+id(?:\s+card)?|national\s+identity\s+card|identity\s+(?:card|document)|id\s+card|id|passport|dni|cedula(?:\s+de\s+identidad)?|pasaporte|documento(?:\s+de\s+identidad)?|document|carnet(?:\s+de\s+identidad)?)\b",
+        r"\b(?:on|in|per|from|according\s+to|en|segun|conforme\s+a|de\s+acuerdo\s+(?:a|con))\s+(?:(?:your|the|my|su|tu|el|la|mi)\s+)?(?:government(?:\s+issued)?\s+id(?:\s+card)?|driver\s+s\s+licen[cs]e|drivers\s+licen[cs]e|national\s+id(?:\s+card)?|national\s+identity\s+card|identity\s+(?:card|document)|id\s+card|id|passport|dni|cedula(?:\s+de\s+identidad)?|pasaporte|documento(?:\s+de\s+identidad)?|document|carnet(?:\s+de\s+identidad)?)\b",
     )
     .expect("NAMED_DOCUMENT is a valid regex")
 });
@@ -1089,6 +1089,7 @@ mod tests {
         "Name and document number per your national ID card",
         "Nombre y número de cédula",
         "Name as on your passport, and passport number",
+        "ID number as it appears on your government ID",
     ];
 
     /// Labels that are only a generic word: a section caption such as "Passport" may be missing
@@ -1123,6 +1124,10 @@ mod tests {
         "Nombre completo (como aparece en su cédula de identidad)",
         "Nombre según tu pasaporte",
         "Nombre tal como figura en el documento",
+        "Please enter your legal name exactly as shown on your government-issued ID.",
+        "Full name as it appears on your passport",
+        "Name as on your government ID",
+        "Name as shown on your driver's licence",
         // A number-word with no document beside it, or a document word with no number.
         "Number of years of experience with identity management platforms",
         "Number of direct reports",
