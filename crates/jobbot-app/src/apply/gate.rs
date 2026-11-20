@@ -98,18 +98,21 @@ fn decide(
     if stop_file.exists() {
         return Ok(GateDecision::block("stop_file"));
     }
-    if is_manual_only(&job.apply_url) || is_manual_only(&job.url) {
-        return Ok(GateDecision::block(REASON_MANUAL_ONLY));
-    }
-    if is_listing_only(&job.apply_url) {
-        return Ok(GateDecision::block(REASON_LISTING_ONLY));
-    }
+    // First of the rules about the posting itself: an excluded company is withdrawn, whereas the
+    // two checks below send the application to Gonza as a form to fill by hand, which an excluded
+    // company must never be.
     let exclusion = check_exclusion(job, exclusions);
     if exclusion.excluded {
         return Ok(GateDecision::block(format!(
             "excluded:{}",
             exclusion.reason.unwrap_or_default()
         )));
+    }
+    if is_manual_only(&job.apply_url) || is_manual_only(&job.url) {
+        return Ok(GateDecision::block(REASON_MANUAL_ONLY));
+    }
+    if is_listing_only(&job.apply_url) {
+        return Ok(GateDecision::block(REASON_LISTING_ONLY));
     }
     // An old posting is probably filled, and applying would also burn the company cooldown.
     if is_stale_stored(job, tracker, criteria, now)? {

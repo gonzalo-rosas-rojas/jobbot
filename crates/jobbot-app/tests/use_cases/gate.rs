@@ -351,6 +351,20 @@ fn exclusion_is_rechecked() {
     assert!(decision.reason.unwrap().starts_with("excluded:"));
 }
 #[test]
+fn an_excluded_company_is_withdrawn_even_when_its_form_is_one_to_fill_by_hand() {
+    // The reason decides where the application goes: "excluded:" is withdrawn, while a
+    // manual-only host sends the posting to Gonza as a form to fill himself.
+    let (_dir, stop) = no_stop_file();
+    let tracker = Tracker::in_memory().unwrap();
+    let job = make_job_with(|j| {
+        j.company = sample_exclusions().names[0].clone();
+        j.apply_url = "https://www.upwork.com/jobs/1".into();
+    });
+    prepared(&tracker, &job, true, false);
+    let decision = decide(&tracker, &job, &criteria(), &stop, *NOW);
+    assert!(decision.reason.unwrap().starts_with("excluded:"));
+}
+#[test]
 fn daily_cap() {
     let (_dir, stop) = no_stop_file();
     let tracker = Tracker::in_memory().unwrap();

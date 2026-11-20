@@ -385,6 +385,65 @@ fn recently_dated(id: &str, company: &str) -> Job {
     job.posted_at = Some(*NOW - TimeDelta::days(3));
     job
 }
+/// The pruning rules with `company` added to the excluded names.
+fn rules_excluding(company: &str) -> (Criteria, Exclusions) {
+    let (criteria, exclusions) = pruning_rules();
+    let mut names = exclusions.names.clone();
+    names.push(company.into());
+    (
+        criteria,
+        Exclusions {
+            names,
+            ..exclusions
+        },
+    )
+}
+#[tokio::test]
+async fn a_company_excluded_after_its_posting_was_queued_has_the_application_withdrawn() {
+    let first = good("1", "Later Excluded Co");
+    let tracker = stored_by_discovery(vec![first.clone()]).await;
+    let (criteria, exclusions) = rules_excluding("Later Excluded Co");
+
+    // The source still returns the posting (so it is "already seen"); the next run must still act.
+    discover(
+        &[fake(vec![first], &[])],
+        &criteria,
+        &exclusions,
+        &tracker,
+        *NOW,
+    )
+    .await
+    .unwrap();
+
+    let (state, note) = state_and_note(&tracker, "test:1");
+    assert_eq!(state, State::Withdrawn);
+    assert!(note.unwrap().starts_with("excluded:"));
+}
+#[tokio::test]
+async fn rescore_does_not_queue_a_posting_of_a_company_excluded_since_it_was_stored() {
+    let (criteria, exclusions) = pruning_rules();
+    let tracker = Tracker::in_memory().unwrap();
+    let strict = Criteria {
+        apply_threshold: 99.0,
+        ..criteria.clone()
+    };
+    discover(
+        &[fake(vec![good("1", "Later Excluded Co")], &[])],
+        &strict,
+        &exclusions,
+        &tracker,
+        *NOW,
+    )
+    .await
+    .unwrap();
+    let (criteria, exclusions) = rules_excluding("Later Excluded Co");
+
+    assert_eq!(
+        rescore(&criteria, &exclusions, &tracker, *NOW).unwrap(),
+        RescoreReport::default()
+    );
+    assert!(tracker.get_application("test:1").unwrap().is_none());
+}
 #[tokio::test]
 async fn a_stored_posting_that_the_source_now_dates_as_too_old_is_withdrawn() {
     let first = recently_dated("1", "Acme AI");
@@ -964,7 +1023,7 @@ async fn rescore_does_not_queue_an_undated_posting_known_for_over_45_days() {
         .unwrap();
     }
 
-    let report = rescore(&criteria, &tracker, *NOW).unwrap();
+    let report = rescore(&criteria, &exclusions, &tracker, *NOW).unwrap();
 
     assert_eq!((report.rescored, report.newly_queued), (1, 1));
     assert!(tracker.get_application("test:1").unwrap().is_none());
@@ -1020,7 +1079,7 @@ async fn rescore_does_not_queue_a_stored_posting_that_is_out_of_region() {
 
     // Gonza puts the threshold back: a posting nobody could do from Chile is not queued.
     assert_eq!(
-        rescore(&criteria, &tracker, *NOW).unwrap(),
+        rescore(&criteria, &exclusions, &tracker, *NOW).unwrap(),
         RescoreReport::default()
     );
     assert!(tracker.get_application("test:1").unwrap().is_none());
@@ -1083,7 +1142,7 @@ async fn rescore_does_not_queue_a_posting_that_has_become_too_old() {
     // Sixty days later the same posting is 70 days old: it must not enter the queue now.
     let later = *NOW + TimeDelta::days(60);
     assert_eq!(
-        rescore(&criteria, &tracker, later).unwrap(),
+        rescore(&criteria, &exclusions, &tracker, later).unwrap(),
         RescoreReport::default()
     );
     assert!(tracker.get_application("test:1").unwrap().is_none());
@@ -1177,7 +1236,7 @@ async fn rescore_requeues_stored_jobs_after_a_threshold_change() {
     assert!(tracker.get_application("test:1").unwrap().is_none());
 
     // Gonza puts the threshold back: the stored posting is scored again and queued.
-    let report = rescore(&criteria, &tracker, *NOW).unwrap();
+    let report = rescore(&criteria, &exclusions, &tracker, *NOW).unwrap();
     assert_eq!(
         report,
         RescoreReport {
@@ -1194,7 +1253,7 @@ async fn rescore_requeues_stored_jobs_after_a_threshold_change() {
 
     // Nothing is left without an application, so a second pass does nothing.
     assert_eq!(
-        rescore(&criteria, &tracker, *NOW).unwrap(),
+        rescore(&criteria, &exclusions, &tracker, *NOW).unwrap(),
         RescoreReport::default()
     );
 }

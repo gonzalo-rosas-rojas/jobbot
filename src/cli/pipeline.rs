@@ -65,7 +65,7 @@ pub(super) async fn cmd_discover(
     let tracker = Arc::new(open_tracker(paths)?);
     if rescore_first {
         // After a change to criteria.toml: stored jobs without an application get today's score.
-        let r = rescore(&criteria, &*tracker, now)?;
+        let r = rescore(&criteria, &exclusions, &*tracker, now)?;
         writeln!(
             out,
             "Repuntuación: {} avisos revisados · {} nuevos en cola · {} bajo el piso (excepción)",

@@ -42,6 +42,9 @@ pub struct DiscoveryReport {
     pub below_floor_flagged: usize,
     pub below_threshold: usize,
     pub queued: usize,
+    /// Applications withdrawn after the loop because their company or domain is excluded now
+    /// (it was added to the exclusions after the posting was queued).
+    pub pruned_excluded: usize,
     /// Applications withdrawn after the loop because their posting is now too old.
     pub pruned_stale: usize,
     /// Applications withdrawn after the loop because their posting cannot be done from Chile.
@@ -126,7 +129,8 @@ pub async fn discover(
             }
         }
     }
-    let pruned = prune_ineligible(criteria, tracker, &refreshed_keys, now)?;
+    let pruned = prune_ineligible(criteria, exclusions, tracker, &refreshed_keys, now)?;
+    report.pruned_excluded = pruned.excluded;
     report.pruned_stale = pruned.stale;
     report.pruned_region = pruned.out_of_region;
     crate::record_counts(&[
@@ -141,6 +145,7 @@ pub async fn discover(
 /// What a prune pass withdrew, counted by the rule that decided each application.
 #[derive(Debug, Default, PartialEq)]
 pub struct PruneReport {
+    pub excluded: usize,
     pub stale: usize,
     pub out_of_region: usize,
 }
@@ -181,6 +186,10 @@ fn may_have_been_sent(reason: &str) -> bool {
 ///   says the form may have gone out, and minus any application with a submit intent still open
 ///   (a run is clicking it or died clicking it). Everything submitted, answered, finished or
 ///   withdrawn stays.
+/// * A posting whose company, domain or category is excluded now (`check_exclusion`: the rule was
+///   added after the posting was queued) is withdrawn with the gate's own `excluded:<rule>` note,
+///   before any other reason. The submission gate would withdraw it too, but only once the
+///   application reached `prepared` and a run looked at it.
 /// * A stale posting (the gate's `is_stale_stored`: the posting's date, or for a source that
 ///   publishes none, the day it was first seen) is withdrawn with `stale_posting`. The date needs
 ///   no fresh fetch: the submission gate would withdraw the same row anyway.
@@ -192,9 +201,10 @@ fn may_have_been_sent(reason: &str) -> bool {
 ///   Gonza for another reason (missing answers, below the pay floor) is withdrawn too.
 ///
 /// A second pass finds nothing new: withdrawn applications are not looked at again.
-#[tracing::instrument(skip_all, fields(stale = Empty, out_of_region = Empty))]
+#[tracing::instrument(skip_all, fields(excluded = Empty, stale = Empty, out_of_region = Empty))]
 pub fn prune_ineligible(
     criteria: &Criteria,
+    exclusions: &Exclusions,
     tracker: &dyn Store,
     refreshed: &HashSet<String>,
     now: DateTime<Utc>,
@@ -218,7 +228,13 @@ pub fn prune_ineligible(
         let Some(job) = tracker.get_job(&row.job_key)? else {
             continue;
         };
-        let (note, counter) = if is_stale_stored(&job, tracker, criteria, now)? {
+        let exclusion = check_exclusion(&job, exclusions);
+        let (note, counter) = if exclusion.excluded {
+            (
+                format!("excluded:{}", exclusion.reason.unwrap_or_default()),
+                &mut report.excluded,
+            )
+        } else if is_stale_stored(&job, tracker, criteria, now)? {
             (stale_note(criteria), &mut report.stale)
         } else if refreshed.contains(&row.job_key) && !region_ok_for(&job, criteria) {
             (OUT_OF_REGION_NOTE.to_string(), &mut report.out_of_region)
@@ -233,6 +249,7 @@ pub fn prune_ineligible(
         }
     }
     crate::record_counts(&[
+        ("excluded", report.excluded),
         ("stale", report.stale),
         ("out_of_region", report.out_of_region),
     ]);
@@ -318,14 +335,18 @@ pub struct RescoreReport {
 )]
 pub fn rescore(
     criteria: &Criteria,
+    exclusions: &Exclusions,
     tracker: &dyn Store,
     now: DateTime<Utc>,
 ) -> anyhow::Result<RescoreReport> {
     let mut report = RescoreReport::default();
     for job in tracker.jobs_without_application()? {
-        // Too old by now, or not doable from Chile: queueing it would only get it withdrawn. It
-        // stays stored, so a later refresh that fixes its data lets a later rescore queue it.
-        if is_stale_stored(&job, tracker, criteria, now)? || !region_ok_for(&job, criteria) {
+        // Excluded since it was stored, too old by now, or not doable from Chile: queueing it
+        // would only get it withdrawn. It stays stored, so a later refresh that fixes its data lets a later rescore queue it.
+        if check_exclusion(&job, exclusions).excluded
+            || is_stale_stored(&job, tracker, criteria, now)?
+            || !region_ok_for(&job, criteria)
+        {
             continue;
         }
         let scored = score_job(&job, criteria);
