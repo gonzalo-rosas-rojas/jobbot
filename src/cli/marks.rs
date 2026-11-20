@@ -41,10 +41,13 @@ pub(super) fn cmd_resolve(
     paths: &Paths,
     keys: &[String],
     now: DateTime<Utc>,
+    intent: actions::ResolveIntent,
     out: &mut dyn Write,
 ) -> Result<i32> {
     let tracker = open_tracker(paths)?;
-    act_on_each(keys, out, |key| actions::resolve(&tracker, key, now))
+    act_on_each(keys, out, |key| {
+        actions::resolve(&tracker, key, now, intent)
+    })
 }
 
 /// For `unconfirmed_submit` and assisted forms Gonza finished himself.
@@ -225,6 +228,46 @@ mod tests {
                 .state,
             State::Prepared
         );
+    }
+
+    #[tokio::test]
+    async fn resolve_of_a_region_card_needs_the_flag_to_send_it_anyway() {
+        let root = temp_root();
+        seed(root.path(), &make_job(), &[]);
+        tracker_of(root.path())
+            .transition(
+                "test:1",
+                State::NeedsGonza,
+                Some(jobbot_domain::gate::OUT_OF_REGION_NOTE),
+                open_now(),
+            )
+            .unwrap();
+        let state = || {
+            tracker_of(root.path())
+                .get_application("test:1")
+                .unwrap()
+                .unwrap()
+                .state
+        };
+
+        let (code, out) = plain(root.path(), open_now(), &["resolve", "test:1"]).await;
+        assert_eq!(code, 1, "{out}");
+        assert!(out.contains("«Enviar igual»"), "{out}");
+        assert_eq!(state(), State::NeedsGonza);
+
+        let (code, out) = plain(
+            root.path(),
+            open_now(),
+            &["resolve", "test:1", "--send-outside-region"],
+        )
+        .await;
+        assert_eq!(code, 0, "{out}");
+        assert!(
+            out.contains("se enviará sin la revisión de región"),
+            "{out}"
+        );
+        assert_eq!(state(), State::Scored);
+        assert!(tracker_of(root.path()).region_override("test:1").unwrap());
     }
 
     #[tokio::test]

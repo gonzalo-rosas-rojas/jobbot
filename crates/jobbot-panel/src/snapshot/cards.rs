@@ -230,6 +230,15 @@ pub(crate) fn card(row: &ApplicationRow, ctx: &CardContext) -> Card {
     if kind.is_some_and(|(kind, _)| kind == "may_have_sent") {
         actions.sort_by_key(|action| *action != "confirm");
     }
+    // A card parked for its region cannot be sent back with a plain "resolve" (the server refuses it): its first
+    // answer is "send anyway", the one act that clears the region check. No other card has it.
+    if kind.is_some_and(|(kind, _)| kind == "out_of_region") {
+        for action in &mut actions {
+            if *action == "resolve" {
+                *action = "send_anyway";
+            }
+        }
+    }
     // A row always has the event that created it; `updated_at` only covers a history that was lost.
     let state_since = row.state_since.unwrap_or(row.updated_at);
     let unsent = row.submitted_at.is_none()
@@ -387,6 +396,11 @@ mod tests {
 
         let card = card_of(&snap, &job.key());
         assert_eq!(card["reason_kind"], "out_of_region");
+        // Its first answer is "send anyway", never a plain resolve (which the server refuses for it).
+        assert_eq!(
+            card["actions"],
+            serde_json::json!(["send_anyway", "confirm"])
+        );
         assert_eq!(
             card["reason_short"],
             "Fuera de la región con las reglas de hoy: revísala antes de enviar."
@@ -463,6 +477,11 @@ mod tests {
             .collect();
         expected.sort();
         assert_eq!(seen, expected);
+        // Only the region card offers `send_anyway`, and none of these is one; every one keeps `resolve`.
+        for card in &snap.needs_gonza.cards {
+            assert!(!card.actions.contains(&"send_anyway"), "{card:?}");
+            assert!(card.actions.contains(&"resolve"), "{card:?}");
+        }
         let prepared = column(&snap, "prepared");
         assert!(
             prepared.cards[0].reason_kind.is_none() && prepared.cards[0].reason_short.is_none()

@@ -63,13 +63,19 @@ pub fn is_out_of_region_reason(reason: &str) -> bool {
     reason.starts_with(REASON_OUT_OF_REGION)
 }
 
-/// The note of the move that sends a parked out-of-region application back to the queue: Gonza looked at it and
-/// chose to send it anyway. The event keeps it for good, so the region check no longer applies to that application
-/// (`Store::region_override`). Only the region check: every other rule still does.
-pub const REGION_OVERRIDE_NOTE: &str = "region_override: revisada por Gonza, se envía igual";
-
-/// What an event note starts with when it is a region override (`REGION_OVERRIDE_NOTE`).
+/// What an event note starts with when it is a region override (`region_override_note`).
 pub const REGION_OVERRIDE_PREFIX: &str = "region_override:";
+
+/// The note of the move that sends a parked out-of-region application back to the queue: Gonza looked at it and
+/// chose to send it anyway. After the prefix it carries the `location` and `remote` values of the posting as he saw
+/// them, as JSON (so any character in a location survives). The event keeps it for good, but
+/// `Store::region_override` is true only while the stored posting still has those two values: a refresh that moves
+/// the location means he has not seen the new one, and the gate parks it again. Only the region check is cleared:
+/// every other rule still applies.
+pub fn region_override_note(location: &str, remote: bool) -> String {
+    let seen = serde_json::json!({ "location": location, "remote": remote });
+    format!("{REGION_OVERRIDE_PREFIX} {seen}")
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct GateDecision {
@@ -162,5 +168,18 @@ mod tests {
     #[test]
     fn the_out_of_region_note_starts_with_its_reason() {
         assert!(OUT_OF_REGION_NOTE.starts_with(&format!("{REASON_OUT_OF_REGION}:")));
+    }
+
+    #[test]
+    fn the_region_override_note_starts_with_its_prefix_whatever_the_location_holds() {
+        for location in ["Remote - USA", "", "Zürich \"Nord\"\n\t{}", "株式会社 東京"] {
+            let note = region_override_note(location, true);
+            assert!(note.starts_with(REGION_OVERRIDE_PREFIX), "{note}");
+            assert!(!note.contains('\n'), "one line: {note:?}");
+        }
+        assert_ne!(
+            region_override_note("Remote", true),
+            region_override_note("Remote", false)
+        );
     }
 }

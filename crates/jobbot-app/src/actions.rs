@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use chrono::{DateTime, Datelike, Months, NaiveTime, TimeDelta, TimeZone, Utc};
 use chrono_tz::America::Santiago;
-use jobbot_domain::gate::{REGION_OVERRIDE_NOTE, is_out_of_region_reason};
+use jobbot_domain::gate::{is_out_of_region_reason, region_override_note};
 use jobbot_domain::handoff::is_sent_by_hand;
 use jobbot_domain::models::{Job, MANUAL_SOURCE};
 use jobbot_domain::origin::Origin;
@@ -140,14 +140,44 @@ pub fn approve(tracker: &dyn Store, key: &str) -> Result<Outcome> {
     Ok(Outcome::done(format!("Aprobada: {key}")))
 }
 
+/// What a resolve means. `SendOutsideRegion` is the one act that clears the region check of a card parked for its
+/// region; it is chosen by name, by the "Send anyway" action of that card or by `jobbot resolve --send-outside-region`,
+/// and on a card parked for any other reason it behaves exactly like `Plain`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolveIntent {
+    Plain,
+    SendOutsideRegion,
+}
+
+/// The refusal of a plain resolve of a card parked for its region.
+const SEND_ANYWAY_REFUSAL: &str = "Esta postulación está fuera de la región con las reglas de hoy: usa «Enviar igual» en su tarjeta, o retírala.";
+/// What the card answers when it was sent back with the region check cleared.
+const SEND_ANYWAY_DONE: &str = "Vuelve a la cola: se enviará sin la revisión de región.";
+
 /// Takes an application out of `needs_gonza`: to `prepared` when it has its CV, otherwise to
 /// `scored`, where `prepare` makes the PDF. An application that never got its PDF sent to
 /// `prepared` would only be handed straight back by `submit_all`.
+///
+/// A card parked for its region is different: sending it back to the queue means skipping the region check for
+/// good, so it is never done by a plain resolve (a bulk request, an unattended `jobbot resolve`, a stale page). Only
+/// `ResolveIntent::SendOutsideRegion` does it; a plain resolve of such a card is refused and writes nothing.
 #[tracing::instrument(skip_all, fields(ok = Empty))]
-pub fn resolve(tracker: &dyn Store, key: &str, now: DateTime<Utc>) -> Result<Outcome> {
+pub fn resolve(
+    tracker: &dyn Store,
+    key: &str,
+    now: DateTime<Utc>,
+    intent: ResolveIntent,
+) -> Result<Outcome> {
     let Some(row) = tracker.get_application(key)? else {
         return Ok(not_found(key));
     };
+    let region_card = row
+        .needs_reason
+        .as_deref()
+        .is_some_and(is_out_of_region_reason);
+    if region_card && intent == ResolveIntent::Plain {
+        return Ok(Outcome::refused(SEND_ANYWAY_REFUSAL.to_string()));
+    }
     let (target, message) = if row.cv_path.is_some() {
         (State::Prepared, "De vuelta a la cola")
     } else {
@@ -156,18 +186,24 @@ pub fn resolve(tracker: &dyn Store, key: &str, now: DateTime<Utc>) -> Result<Out
             "De vuelta a puntuadas (sin CV, prepare le hará el PDF)",
         )
     };
-    // A card parked for its region: resolving it means "I looked at it, send it anyway". The move's own event
-    // carries that for good (`Store::region_override`), so the next run does not park it again.
-    let note = row
-        .needs_reason
-        .as_deref()
-        .is_some_and(is_out_of_region_reason)
-        .then_some(REGION_OVERRIDE_NOTE);
-    match tracker.transition(key, target, note, now) {
+    // "I looked at it, send it anyway": the move's own event carries what he saw (`region_override_note`), so the
+    // next run does not park it again while the posting still says the same.
+    let note = if region_card {
+        let Some(job) = tracker.get_job(&row.job_key)? else {
+            return Ok(not_found(key));
+        };
+        Some(region_override_note(&job.location, job.remote))
+    } else {
+        None
+    };
+    match tracker.transition(key, target, note.as_deref(), now) {
         Ok(()) => {
             // Gonza fixed what stopped it: the next run fills the form again and takes a fresh
             // screenshot, and an earlier unconfirmed click no longer holds the company.
             tracker.clear_for_retry(key)?;
+            if region_card {
+                return Ok(Outcome::done(SEND_ANYWAY_DONE.to_string()));
+            }
             Ok(Outcome::done(format!("{message}: {key}")))
         }
         // A database failure is a real error; the other variants are just "cannot resolve this one".

@@ -278,7 +278,7 @@ fn resolve_returns_a_prepared_application_to_the_queue_and_forgets_the_attempt()
     let (t, key) = tracker_with(&[State::Prepared, State::NeedsGonza]);
     t.set_cv_path(&key, std::path::Path::new("cv.pdf")).unwrap();
     t.record_attempt(&key, *NOW).unwrap();
-    let outcome = resolve(&t, &key, *NOW).unwrap();
+    let outcome = resolve(&t, &key, *NOW, ResolveIntent::Plain).unwrap();
     assert!(outcome.ok, "{outcome:?}");
     assert_eq!(outcome.message, format!("De vuelta a la cola: {key}"));
     let app = t.get_application(&key).unwrap().unwrap();
@@ -288,16 +288,49 @@ fn resolve_returns_a_prepared_application_to_the_queue_and_forgets_the_attempt()
         "the unconfirmed click no longer holds the company"
     );
 }
-#[test]
-fn resolve_on_an_out_of_region_card_records_that_gonza_cleared_the_region() {
+/// An application parked for its region, as the gate leaves it.
+fn parked_for_region() -> (Tracker, String) {
     let (t, key) = tracker_with(&[]);
     t.transition(&key, State::NeedsGonza, Some(OUT_OF_REGION_NOTE), *NOW)
         .unwrap();
+    (t, key)
+}
+#[test]
+fn a_plain_resolve_of_a_region_card_is_refused_and_writes_nothing() {
+    let (t, key) = parked_for_region();
+    let before = t.get_application(&key).unwrap().unwrap();
+    let events_before = t.events_for(&key).unwrap().len();
+
+    let outcome = resolve(&t, &key, *NOW, ResolveIntent::Plain).unwrap();
+
+    assert!(!outcome.ok, "{outcome:?}");
+    assert_eq!(
+        outcome.message,
+        "Esta postulación está fuera de la región con las reglas de hoy: usa «Enviar igual» en su tarjeta, o retírala."
+    );
+    let after = t.get_application(&key).unwrap().unwrap();
+    assert_eq!(after.state, State::NeedsGonza);
+    assert_eq!(after.needs_reason, before.needs_reason);
+    assert_eq!(after.updated_at, before.updated_at);
+    assert_eq!(t.events_for(&key).unwrap().len(), events_before);
+    assert!(!t.region_override(&key).unwrap());
+}
+#[test]
+fn send_outside_region_clears_the_region_check_and_says_so() {
+    let (t, key) = parked_for_region();
     assert!(!t.region_override(&key).unwrap(), "nothing yet");
 
-    let outcome = resolve(&t, &key, *NOW).unwrap();
+    let outcome = resolve(&t, &key, *NOW, ResolveIntent::SendOutsideRegion).unwrap();
 
     assert!(outcome.ok, "{outcome:?}");
+    assert_eq!(
+        outcome.message,
+        "Vuelve a la cola: se enviará sin la revisión de región."
+    );
+    assert_eq!(
+        t.get_application(&key).unwrap().unwrap().state,
+        State::Scored
+    );
     assert!(t.region_override(&key).unwrap());
     // It sticks through the moves the application makes afterwards.
     t.transition(&key, State::NeedsGonza, Some("captcha"), *NOW)
@@ -305,19 +338,45 @@ fn resolve_on_an_out_of_region_card_records_that_gonza_cleared_the_region() {
     assert!(t.region_override(&key).unwrap());
 }
 #[test]
-fn resolve_on_any_other_reason_sets_no_region_override() {
+fn the_override_applies_only_while_the_posting_says_what_gonza_saw() {
+    let (t, key) = parked_for_region();
+    resolve(&t, &key, *NOW, ResolveIntent::SendOutsideRegion).unwrap();
+    let mut job = t.get_job(&key).unwrap().unwrap();
+    // A refresh that says the same thing changes nothing.
+    assert!(!t.refresh_posting(&job).unwrap());
+    assert!(t.region_override(&key).unwrap(), "same location");
+
+    job.location = "Austin, TX".into();
+    assert!(t.refresh_posting(&job).unwrap());
+
+    assert!(
+        !t.region_override(&key).unwrap(),
+        "he has not seen the new location"
+    );
+}
+#[test]
+fn send_outside_region_on_any_other_reason_is_a_plain_resolve() {
     let (t, key) = tracker_with(&[]);
     t.transition(&key, State::NeedsGonza, Some("captcha"), *NOW)
         .unwrap();
 
-    resolve(&t, &key, *NOW).unwrap();
+    let outcome = resolve(&t, &key, *NOW, ResolveIntent::SendOutsideRegion).unwrap();
 
+    assert!(outcome.ok, "{outcome:?}");
+    assert!(outcome.message.starts_with("De vuelta a puntuadas"));
     assert!(!t.region_override(&key).unwrap());
+    assert!(t.events_for(&key).unwrap().iter().all(|event| {
+        !event
+            .note
+            .as_deref()
+            .unwrap_or("")
+            .starts_with("region_override")
+    }));
 }
 #[test]
 fn resolve_without_a_cv_goes_back_to_scored_and_a_replay_is_refused_in_spanish() {
     let (t, key) = tracker_with(&[State::NeedsGonza]);
-    let first = resolve(&t, &key, *NOW).unwrap();
+    let first = resolve(&t, &key, *NOW, ResolveIntent::Plain).unwrap();
     assert!(
         first.message.starts_with("De vuelta a puntuadas"),
         "{first:?}"
@@ -326,7 +385,7 @@ fn resolve_without_a_cv_goes_back_to_scored_and_a_replay_is_refused_in_spanish()
         t.get_application(&key).unwrap().unwrap().state,
         State::Scored
     );
-    let again = resolve(&t, &key, *NOW).unwrap();
+    let again = resolve(&t, &key, *NOW, ResolveIntent::Plain).unwrap();
     assert!(!again.ok);
     assert!(
         again

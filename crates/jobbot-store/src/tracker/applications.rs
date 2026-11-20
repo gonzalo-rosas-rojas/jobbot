@@ -6,8 +6,9 @@ use chrono::{DateTime, TimeDelta, Utc};
 use rusqlite::types::Value;
 use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params, params_from_iter};
 
-use jobbot_domain::gate::REGION_OVERRIDE_PREFIX;
+use jobbot_domain::gate::region_override_note;
 use jobbot_domain::origin::Origin;
+use jobbot_domain::outbound::plain_line;
 
 use super::{
     ApplicationRow, Result, State, Tracker, TrackerError, from_text, optional_from_text,
@@ -210,17 +211,27 @@ impl Tracker {
         Ok(changed > 0)
     }
 
-    /// Whether Gonza cleared the region of this application: some move of it carries `REGION_OVERRIDE_NOTE`. The fact
-    /// is the event, not a column, so it outlives every later move (the row's own note is overwritten by each).
+    /// Whether Gonza cleared the region of this application as it stands: some move of it carries the note
+    /// `region_override_note` builds from the `location` and `remote` the stored posting has now (the move's note went
+    /// through `plain_line`, so the expected one does too). The fact is the event, not a column, so it outlives every
+    /// later move (the row's own note is overwritten by each); and because the note holds what he saw, a refresh that
+    /// changes the location or the remote flag makes it stop applying.
     pub fn region_override(&self, job_key: &str) -> Result<bool> {
         let conn = self.lock();
+        let seen: Option<(String, bool)> = conn
+            .query_row(
+                "SELECT location, remote FROM jobs WHERE key = ?1",
+                [job_key],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let Some((location, remote)) = seen else {
+            return Ok(false);
+        };
+        let expected = plain_line(&region_override_note(&location, remote));
         Ok(conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM events WHERE job_key = ?1 AND substr(note, 1, ?2) = ?3)",
-            params![
-                job_key,
-                REGION_OVERRIDE_PREFIX.len() as i64,
-                REGION_OVERRIDE_PREFIX
-            ],
+            "SELECT EXISTS(SELECT 1 FROM events WHERE job_key = ?1 AND note = ?2)",
+            params![job_key, expected],
             |row| row.get(0),
         )?)
     }

@@ -226,6 +226,9 @@ enum Command {
     Resolve {
         #[arg(required = true)]
         keys: Vec<String>,
+        /// Para una postulación parada por estar fuera de la región: la revisaste y quieres postular igual, sin la revisión de región. Sin esta opción esa postulación no se devuelve a la cola.
+        #[arg(long)]
+        send_outside_region: bool,
     },
     /// Marca como enviada una postulación en "necesita a Gonza" que enviaste tú o que sí llegó.
     Confirm {
@@ -544,7 +547,17 @@ async fn dispatch(
             cmd_freelance(paths, &deps, now, command, out).await
         }
         Command::Approve { keys } => cmd_approve(paths, &keys, out),
-        Command::Resolve { keys } => cmd_resolve(paths, &keys, now, out),
+        Command::Resolve {
+            keys,
+            send_outside_region,
+        } => {
+            let intent = if send_outside_region {
+                jobbot_app::actions::ResolveIntent::SendOutsideRegion
+            } else {
+                jobbot_app::actions::ResolveIntent::Plain
+            };
+            cmd_resolve(paths, &keys, now, intent, out)
+        }
         Command::Confirm { keys } => cmd_confirm(paths, &keys, now, out),
         Command::Digest => cmd_digest(paths, now, out),
         Command::Top { n } => cmd_top(paths, n, out),

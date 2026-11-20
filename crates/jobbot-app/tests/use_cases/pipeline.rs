@@ -1410,7 +1410,13 @@ async fn parked_then_resolved(env: &Env, crit: &Criteria) -> Job {
     env.tracker.approve("test:1").unwrap();
     env.run(&FakeFiller::new(), crit, SubmitMode::Live).await;
     assert_eq!(env.state("test:1"), State::NeedsGonza, "parked first");
-    let outcome = jobbot_app::actions::resolve(&env.tracker, "test:1", *NOW).unwrap();
+    let outcome = jobbot_app::actions::resolve(
+        &env.tracker,
+        "test:1",
+        *NOW,
+        jobbot_app::actions::ResolveIntent::SendOutsideRegion,
+    )
+    .unwrap();
     assert!(outcome.ok, "{outcome:?}");
     assert_eq!(env.state("test:1"), State::Prepared);
     job
@@ -1433,6 +1439,28 @@ async fn a_resolved_out_of_region_posting_is_sent_by_the_next_run_and_not_parked
     );
     assert_eq!(outcomes[0].status, "submitted");
     assert_eq!(env.state("test:1"), State::Submitted);
+}
+#[tokio::test]
+async fn a_resolved_out_of_region_posting_is_parked_again_when_its_location_changes() {
+    let env = Env::new();
+    let crit = Criteria {
+        first_n_reviewed: 0,
+        ..criteria()
+    };
+    let job = parked_then_resolved(&env, &crit).await;
+    // A later refresh: the posting now names another place, one he has not looked at.
+    let moved = Job {
+        location: "Austin, TX".into(),
+        ..job
+    };
+    assert!(env.tracker.refresh_posting(&moved).unwrap());
+    let filler = FakeFiller::new();
+
+    let outcomes = env.run(&filler, &crit, SubmitMode::Live).await;
+
+    assert!(filler.calls().is_empty(), "nothing is sent");
+    assert_eq!(outcomes[0].reason.as_deref(), Some("fuera_de_region"));
+    assert_eq!(env.state("test:1"), State::NeedsGonza);
 }
 #[tokio::test]
 async fn a_resolved_out_of_region_posting_is_still_stopped_by_an_exclusion() {

@@ -670,32 +670,67 @@ async fn the_prune_follows_region_ok_on_the_fresh_fields() {
 async fn the_prune_leaves_alone_what_is_parked_for_its_region_or_was_cleared_by_gonza() {
     let parked = good("1", "Parked Co");
     let cleared = good("2", "Cleared Co");
-    let ordinary = good("3", "Ordinary Co");
-    let tracker =
-        stored_by_discovery(vec![parked.clone(), cleared.clone(), ordinary.clone()]).await;
-    for key in ["test:1", "test:2"] {
-        tracker
-            .transition(key, State::NeedsGonza, Some(REGION_NOTE), *NOW)
-            .unwrap();
-    }
-    // Gonza looked at the second one and said to send it anyway.
-    jobbot_app::actions::resolve(&tracker, "test:2", *NOW).unwrap();
-    walk(&tracker, "test:3", &[State::Prepared]);
+    let changed = good("3", "Changed Co");
+    let ordinary = good("4", "Ordinary Co");
+    let tracker = stored_by_discovery(vec![
+        parked.clone(),
+        cleared.clone(),
+        changed.clone(),
+        ordinary.clone(),
+    ])
+    .await;
     let in_us = |job: &Job| Job {
         location: "Remote - USA".into(),
         ..job.clone()
     };
+    tracker
+        .transition("test:1", State::NeedsGonza, Some(REGION_NOTE), *NOW)
+        .unwrap();
+    // Gonza looked at these two, outside the region as the posting stood, and said to send them anyway.
+    for (job, key) in [(&cleared, "test:2"), (&changed, "test:3")] {
+        tracker.refresh_posting(&in_us(job)).unwrap();
+        tracker
+            .transition(key, State::NeedsGonza, Some(REGION_NOTE), *NOW)
+            .unwrap();
+        jobbot_app::actions::resolve(
+            &tracker,
+            key,
+            *NOW,
+            jobbot_app::actions::ResolveIntent::SendOutsideRegion,
+        )
+        .unwrap();
+    }
+    walk(&tracker, "test:4", &[State::Prepared]);
+    // The fetch: the parked one says USA, the cleared one says what he saw (and a new link, so it is refreshed),
+    // the changed one now says another place he has not seen, the ordinary one says USA.
+    let new_link = |job: Job| Job {
+        apply_url: "https://job-boards.greenhouse.io/acme/jobs/2".into(),
+        ..in_us(&job)
+    };
+    let elsewhere = Job {
+        location: "San Francisco, CA".into(),
+        ..changed.clone()
+    };
 
     let report = discover_again(
         &tracker,
-        vec![in_us(&parked), in_us(&cleared), in_us(&ordinary)],
+        vec![
+            in_us(&parked),
+            new_link(cleared),
+            elsewhere,
+            in_us(&ordinary),
+        ],
     )
     .await;
 
-    assert_eq!(report.pruned_region, 1, "only the ordinary one");
+    assert_eq!(
+        report.pruned_region, 2,
+        "the changed one and the ordinary one"
+    );
     assert_eq!(state_and_note(&tracker, "test:1").0, State::NeedsGonza);
     assert_eq!(state_and_note(&tracker, "test:2").0, State::Scored);
     assert_eq!(state_and_note(&tracker, "test:3").0, State::Withdrawn);
+    assert_eq!(state_and_note(&tracker, "test:4").0, State::Withdrawn);
 }
 #[tokio::test]
 async fn a_healthy_posting_stays_in_the_queue_and_its_fresh_fields_are_stored() {

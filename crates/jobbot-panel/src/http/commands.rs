@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 
 use super::{Reply, Request};
 use crate::Panel;
-use jobbot_app::actions::{self, Outcome};
+use jobbot_app::actions::{self, Outcome, ResolveIntent};
 use jobbot_app::inbox;
 
 /// How far ahead of the panel's clock a send time may be (the browser's clock drifts a little).
@@ -336,8 +336,25 @@ pub(super) fn post(panel: &Panel, api: &str, req: &Request) -> Result<Reply> {
     match api {
         "approve" => keyed(req, |key| actions::approve(&*panel.tracker, key)),
         "resolve" => keyed(req, |key| {
-            actions::resolve(&*panel.tracker, key, panel.now())
+            actions::resolve(&*panel.tracker, key, panel.now(), ResolveIntent::Plain)
         }),
+        // The one act that clears the region check of a card (`ResolveIntent::SendOutsideRegion`): a single key,
+        // never a batch, and no other route sends the intent.
+        "send-anyway" => {
+            let body: KeysBody = match parse(req) {
+                Ok(body) => body,
+                Err(reply) => return Ok(reply),
+            };
+            match (body.key, body.keys) {
+                (Some(key), None) => Ok(outcome_reply(actions::resolve(
+                    &*panel.tracker,
+                    &key,
+                    panel.now(),
+                    ResolveIntent::SendOutsideRegion,
+                )?)),
+                _ => Ok(Reply::message(400, "Falta key: se envía una por una")),
+            }
+        }
         "confirm" => keyed(req, |key| {
             actions::confirm(&*panel.tracker, key, panel.now())
         }),
