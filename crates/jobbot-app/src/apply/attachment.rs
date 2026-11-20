@@ -76,19 +76,19 @@ pub struct CopyFailure {
 /// Overwrites the readable copies `attachment_for` made of an application's CV with `cv_pdf`, its
 /// freshly rendered tailored PDF. The copies sit in `attachments_folder`, and the handoff sheet
 /// names them, so they must not keep the CV that was replaced. Each copy is kept first in
-/// `keep_in` as `<job key>.<name>.<stamp>.pdf`, the way the main PDF is. Only files already there
-/// are rewritten: nothing is created. A folder that does not exist (`NotFound`) means the
-/// application has no copy; any other failure is returned, never swallowed, and never stops the
-/// run (the same courtesy rule as `attachment_for`).
+/// `keep_in` (created when needed) as `<job key>.<name>.<stamp>.pdf`: unlike the main PDF's kept
+/// copy its name carries the job key, because two jobs can share a copy's name. Only copies
+/// already there are rewritten; the folder `cv_dir` is the one `attachments_folder` takes. A
+/// folder that does not exist (`NotFound`) means the application has no copy; any other failure
+/// is returned, never swallowed, and never stops the run (the same courtesy rule as
+/// `attachment_for`).
 pub fn refresh_attachment_copies(
+    cv_dir: &Path,
     cv_pdf: &Path,
     job_key: &str,
     keep_in: &Path,
     stamp: &str,
 ) -> Vec<CopyFailure> {
-    let Some(cv_dir) = cv_pdf.parent() else {
-        return Vec::new();
-    };
     let folder = attachments_folder(cv_dir, job_key);
     let failure = |file: &Path, err: &std::io::Error| CopyFailure {
         job_key: job_key.to_string(),

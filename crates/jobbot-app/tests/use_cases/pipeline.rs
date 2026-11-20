@@ -202,6 +202,7 @@ async fn refresh_also_replaces_the_readable_copy_a_handoff_sheet_names() {
     refresh_cvs(
         &env.tracker,
         &master,
+        &env.out_dir(),
         &FakeRenderer::default(),
         Relocation {
             places: &[],
@@ -237,7 +238,7 @@ async fn refresh_also_replaces_the_readable_copy_a_handoff_sheet_names() {
 async fn refresh_reports_each_readable_copy_it_could_not_refresh_and_not_a_missing_folder() {
     let env = Env::new();
     let master = env.cv_master(MASTER);
-    let jobs: Vec<Job> = ["unreadable", "readonly", "none"]
+    let jobs: Vec<Job> = ["unreadable", "folder_as_copy", "none"]
         .iter()
         .map(|id| {
             make_job_with(|j| {
@@ -273,6 +274,7 @@ async fn refresh_reports_each_readable_copy_it_could_not_refresh_and_not_a_missi
     let report = refresh_cvs(
         &env.tracker,
         &master,
+        &env.out_dir(),
         &FakeRenderer::default(),
         Relocation {
             places: &[],
@@ -290,7 +292,7 @@ async fn refresh_reports_each_readable_copy_it_could_not_refresh_and_not_a_missi
         .map(|failure| failure.job_key.as_str())
         .collect();
     failed.sort_unstable();
-    assert_eq!(failed, ["test:readonly", "test:unreadable"]);
+    assert_eq!(failed, ["test:folder_as_copy", "test:unreadable"]);
     assert!(
         report
             .copy_failures
@@ -338,6 +340,7 @@ async fn refresh_renders_waiting_cvs_again_keeps_the_old_ones_and_never_touches_
     let refreshed = refresh_cvs(
         &env.tracker,
         &master,
+        &env.out_dir(),
         &renderer,
         Relocation {
             places: &places,

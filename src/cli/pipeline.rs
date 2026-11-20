@@ -175,6 +175,7 @@ pub(super) async fn cmd_prepare_refresh(
     let result = refresh_cvs(
         &tracker,
         &paths.cv_master,
+        &paths.data_dir.join("cv"),
         deps.renderer.as_ref(),
         Relocation::from_criteria(&criteria),
         now,

@@ -330,43 +330,81 @@ pub const REPLACED_CV_DIR: &str = "replaced";
 /// and has one, from the master as it is now (after an edit of `cv/cv-master.md`), tailored as
 /// `prepare` would. No state changes. A sent application is never touched: its PDF is the record of
 /// what went out. Gonza may have sent a waiting one by hand without confirming it, so the PDF being
-/// replaced is first copied to `<its folder>/replaced/<name>.<UTC time>.pdf`. The readable copies
+/// replaced is first copied to `<cv_dir>/replaced/<name>.<UTC time>.pdf`. The readable copies
 /// in `adjuntos/<job key>/` (the files the handoff sheets name) are overwritten with the new PDF
 /// too (each one kept first in `replaced/`), and a copy that could not be replaced is returned in
-/// `copy_failures`. Returns the keys whose CV was rendered again, best score first within each
-/// state.
+/// `copy_failures`. `cv_dir` is the folder of the tailored CVs, `<data_dir>/cv`. Returns the keys
+/// whose CV was rendered again, best score first within each state. When a later row fails, the
+/// copy failures found so far are logged before the error is returned.
 #[tracing::instrument(skip_all, fields(refreshed = Empty, copy_failures = Empty))]
 pub async fn refresh_cvs(
     tracker: &dyn Store,
     cv_master: &Path,
+    cv_dir: &Path,
     renderer: &dyn Renderer,
     relocation: Relocation<'_>,
     now: DateTime<Utc>,
 ) -> Result<RefreshReport, CvError> {
     let master = read_master(cv_master).await?;
     let stamp = now.format("%Y%m%dT%H%M%SZ").to_string();
+    let replaced_dir = cv_dir.join(REPLACED_CV_DIR);
     let mut report = RefreshReport::default();
+    let result = refresh_rows(
+        tracker,
+        &master,
+        renderer,
+        relocation,
+        (cv_dir, &replaced_dir, &stamp),
+        &mut report,
+    )
+    .await;
+    if let Err(err) = result {
+        // Rendering stopped half way: the copies already found stale must not be forgotten.
+        for failure in &report.copy_failures {
+            tracing::warn!(
+                key = %failure.job_key,
+                file = %failure.file.display(),
+                reason = %failure.reason,
+                "a readable CV copy could not be refreshed; the refresh then failed"
+            );
+        }
+        return Err(err);
+    }
+    crate::record_counts(&[
+        ("refreshed", report.refreshed.len()),
+        ("copy_failures", report.copy_failures.len()),
+    ]);
+    Ok(report)
+}
+
+/// The rows of `refresh_cvs`, filling `report` as it goes so that a failure leaves what was done.
+/// `places` is `(cv_dir, replaced_dir, stamp)`.
+async fn refresh_rows(
+    tracker: &dyn Store,
+    master: &str,
+    renderer: &dyn Renderer,
+    relocation: Relocation<'_>,
+    places: (&Path, &Path, &str),
+    report: &mut RefreshReport,
+) -> Result<(), CvError> {
+    let (cv_dir, replaced_dir, stamp) = places;
     for state in [State::Prepared, State::NeedsGonza] {
         for row in tracker.list_by_state(state)? {
             let Some(cv_path) = row.cv_path.as_deref() else {
                 continue;
             };
             let job = job_or_missing(tracker, &row.job_key)?;
-            let variant = tailored_variant(&master, &job, relocation)?;
+            let variant = tailored_variant(master, &job, relocation)?;
             let pdf_path = Path::new(cv_path);
             if pdf_path.exists() {
-                let folder = pdf_path
-                    .parent()
-                    .unwrap_or_else(|| Path::new("."))
-                    .join(REPLACED_CV_DIR);
-                tokio::fs::create_dir_all(&folder)
+                tokio::fs::create_dir_all(replaced_dir)
                     .await
-                    .with_context(|| format!("creating {}", folder.display()))?;
+                    .with_context(|| format!("creating {}", replaced_dir.display()))?;
                 let stem = pdf_path
                     .file_stem()
                     .map(|stem| stem.to_string_lossy().into_owned())
                     .unwrap_or_else(|| safe_key(&row.job_key));
-                let copy = folder.join(format!("{stem}.{stamp}.pdf"));
+                let copy = replaced_dir.join(format!("{stem}.{stamp}.pdf"));
                 tokio::fs::copy(pdf_path, &copy)
                     .await
                     .with_context(|| format!("keeping {}", pdf_path.display()))?;
@@ -375,24 +413,17 @@ pub async fn refresh_cvs(
             // The copy a handoff sheet names is a file of its own: it carries the new CV too,
             // and one that could not be replaced is reported, so nobody attaches it believing
             // it was refreshed.
-            let replaced_dir = pdf_path
-                .parent()
-                .unwrap_or_else(|| Path::new("."))
-                .join(REPLACED_CV_DIR);
             report.copy_failures.extend(refresh_attachment_copies(
+                cv_dir,
                 pdf_path,
                 &row.job_key,
-                &replaced_dir,
-                &stamp,
+                replaced_dir,
+                stamp,
             ));
             report.refreshed.push(row.job_key);
         }
     }
-    crate::record_counts(&[
-        ("refreshed", report.refreshed.len()),
-        ("copy_failures", report.copy_failures.len()),
-    ]);
-    Ok(report)
+    Ok(())
 }
 
 /// What `submit_all` did with one application.
