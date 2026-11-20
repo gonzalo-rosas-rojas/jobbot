@@ -27,10 +27,12 @@ Which direction is safe:
 Whether any of these would really be answered depends on the answer bank having a pattern loose
 enough to match; the gate just does not stop it.
 
-- **"CI" without dots**: "Número de CI", "Nro. CI", "N° CI", "CI (sin puntos ni guión)", and
-  "C.I" without the final dot. Only the dotted "C.I." (or "C.I:") is read as the ID card. Older
-  than this work; it matters for forms from Uruguay, Bolivia and Paraguay. The most useful gap to
-  close next.
+- **"CI" in capitals with no number-word, hint or whole-label role**: "CI" is the ID card of
+  Uruguay, Bolivia, Paraguay, Venezuela and Ecuador, but in forms for software people it is far
+  more often continuous integration. It is read as the ID card only with a number-word beside it
+  ("Número de CI", "Nro. CI", "CI Nro."), with a Spanish format hint ("CI (sin puntos)", "CI
+  (solo números)") or as the whole label. "Cédula CI", "Documento: CI" or "CI del postulante" are
+  not caught.
 - **A format hint as the only number-word**: "Document (numbers only)", "Driver's license (numbers
   only)", "License (numbers only)", "Medicare (numbers only)", "Account (numbers only)", "Card
   (numbers only)". The hint is stripped so that "Years of experience (numbers only)" stays
@@ -61,7 +63,10 @@ Harmless, and none is a common question:
 
 - "C.I." meaning continuous integration with no word that says so: "Describe your C.I. setup",
   "What C.I. do you use?", "Your C.I. stack", "C.I. & C.D.", "Familiarity with C.I. / C.D." (with
-  a space after the slash).
+  a space after the slash). The same words with "CI" (no dots) are answerable.
+- "CI" alone as a whole label, or wrapped only in "your" or "please enter", in a form about
+  continuous integration ("Your CI", "CI:"): read as the ID card, because nothing honest tells the
+  two meanings apart.
 - Yes/no questions about a document: "Do you have a tax ID?", "Do you have a (Chilean) RUT?".
 - Name labels that cite two documents or two languages: "Full name (as on ID) / Nombre completo
   (según cédula)", "Full legal name (as on passport), must match your ID".
