@@ -458,10 +458,6 @@ static CONFINING: LazyLock<RegexSet> = LazyLock::new(|| {
         format!(
             r"\b{candidate}\s+(?:also\s+)?(?:be\s+)?(?:currently\s+|physically\s+|legally\s+)?(?:located|reside|residing|resident|living|live|based|work(?:ing)? from)\s+(?:in|within|from)\s+(?:the\s+)?{CONFINING_PLACES}\b"
         ),
-        // "required location in North American time zones": North America is the US and Canada
-        // (and Mexico), so the job is done on their clock. "North or South American time zones"
-        // has another word between the two and is not matched.
-        r"\b(?:location|located|based|reside|residing|living|working|work)\s+(?:in|within)\s+(?:the\s+)?north\s+americ(?:a|an)\s+time\s*zones?\b".to_string(),
         // "can be based remotely anywhere in the United States", "remote within the US"
         format!(r"\b(?:anywhere|everywhere|remotely|remote)\s+(?:in|within|across)\s+(?:the\s+)?{US_PLACES}\b"),
         // "US-based candidates only", "this is a US-based role", "must be US-based". Candidates
@@ -496,20 +492,72 @@ static CONFINING: LazyLock<RegexSet> = LazyLock::new(|| {
     .expect("CONFINING is a valid set of regexes")
 });
 
+/// A location bound to North American time zones, read after `fold`: "required location in North
+/// American time zones", "must be located in North American time zones". Only the location forms:
+/// "able to work in" or "overlap with" those zones is a working-hours request, not a place, and
+/// "North or South American time zones" has another word between the two and does not match.
+static TIME_ZONE_PLACE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"\b(?:location|located|based|reside|residing)\s+(?:in|within)\s+(?:the\s+)?north\s+americ(?:a|an)\s+time\s*zones?\b",
+    )
+    .expect("TIME_ZONE_PLACE is a valid regex")
+});
+
 /// Sentences that ask for a US government clearance, read after `fold`. Only a citizen can hold
 /// one, so the job cannot be done from Chile. Each pattern names the clearance itself (a bare
-/// "public trust" or "secret" is ordinary English: "we earn the public's trust") and a sentence
-/// with a negation is skipped ("no clearance required", "no active clearance needed").
+/// "public trust" or "secret" is ordinary English: "we earn the public's trust"). A denial counts
+/// only when attached to the clearance (`CLEARANCE_DENIED`).
 static CLEARANCE: LazyLock<RegexSet> = LazyLock::new(|| {
     RegexSet::new([
         r"\bts\s*[/-]\s*sci\b",
         r"\bpolygraph\b",
-        r"\b(?:top\s+)?secret\s+(?:security\s+)?clearance\b",
-        r"\b(?:active|current|valid|existing)\s+(?:security\s+)?clearance\b",
+        // "Secret clearance", "Top Secret/SCI clearance", "Secret-level clearance", "Top Secret
+        // (TS) clearance".
+        r"\b(?:top\s+)?secret(?:\s*[/-]\s*(?:level|sci))?(?:\s*\((?:ts|s)\))?\s+(?:security\s+)?clearance\b",
+        // "Clearance Level: Top Secret".
+        r"\bclearance(?:\s+level)?\s*:\s*(?:top\s+secret|secret|ts|sci)\b",
+        r"\bdod\s+(?:security\s+)?clearance\b",
+        // "active clearance" stands alone; the others need a level (`CLEARANCE_NEEDS_LEVEL`).
+        r"\bactive\s+(?:security\s+)?clearance\b",
+        r"\b(?:active|current|valid|existing)\s+(?:top\s+secret|secret|ts|sci|dod|public\s+trust)\s+clearance\b",
         r"\bpublic\s+trust\s+(?:security\s+)?(?:clearance|investigation|background|position|designation|determination)\b",
+        r"\bbe\s+clearable\b",
+        r"\bcleared\s+(?:candidates?|applicants?)\s+only\b",
+        // "must be eligible for / able to obtain a security clearance"; "ability to obtain one is
+        // a plus" has no "must" and stays open.
+        r"\b(?:must|need\s+to|needs\s+to|required\s+to|have\s+to)\s+(?:be\s+)?(?:able\s+to\s+)?(?:eligible\s+for|obtain|hold|have|possess|maintain)\s+(?:an?\s+|the\s+)?(?:active\s+|current\s+)?(?:u\s?s\s+)?(?:security\s+)?clearance\b",
     ])
     .expect("CLEARANCE is a valid set of regexes")
 });
+
+/// "current clearance", "valid clearance", "existing clearance": clearance procedures for customs
+/// are not a government clearance, so the sentence also needs a level word (`CLEARANCE_LEVEL`).
+static CLEARANCE_NEEDS_LEVEL: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b(?:current|valid|existing)\s+(?:security\s+)?clearance\b")
+        .expect("CLEARANCE_NEEDS_LEVEL is a valid regex")
+});
+
+static CLEARANCE_LEVEL: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b(?:security|secret|ts|sci|dod|public\s+trust)\b")
+        .expect("CLEARANCE_LEVEL is a valid regex")
+});
+
+/// A denial attached to the clearance: "no ... clearance" or "without ... clearance" with at most
+/// three words between, or "clearance (is) not required". A "no" or "not" elsewhere in the
+/// sentence ("which cannot be transferred", "(no interim)") says nothing about it.
+static CLEARANCE_DENIED: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"\b(?:no|not|without)\s+(?:\w+\s+){0,3}?(?:clearance|ts\s*[/-]\s*sci|polygraph)\b|\b(?:clearance|ts\s*[/-]\s*sci|polygraph)\s+(?:is\s+|are\s+)?(?:not|never)\s+(?:be\s+)?(?:required|needed|necessary|mandatory)\b|\b(?:clearance|ts\s*[/-]\s*sci|polygraph)\s+(?:is|are)n't\b",
+    )
+    .expect("CLEARANCE_DENIED is a valid regex")
+});
+
+/// Whether a folded sentence asks for a US government clearance.
+fn needs_clearance(sentence: &str) -> bool {
+    let asked = CLEARANCE.is_match(sentence)
+        || (CLEARANCE_NEEDS_LEVEL.is_match(sentence) && CLEARANCE_LEVEL.is_match(sentence));
+    asked && !CLEARANCE_DENIED.is_match(sentence)
+}
 
 /// Sentences of a posting based in one of the extra places that say the candidate must already
 /// have the right to work there, read after `fold`. They close the job unless the posting also
@@ -660,8 +708,16 @@ fn description_confinement(description: &str, extra: Option<&Regex>) -> Confinem
     let mut found = Confinement::None;
     for sentence in fold(description).split(['.', '!', '?', '\n']) {
         let sentence = CITIZENSHIP_DENIED.replace_all(sentence, " ");
-        let needs_clearance = CLEARANCE.is_match(&sentence) && !NEGATION.is_match(&sentence);
-        if needs_clearance && !has_open_term(&sentence) {
+        // A clearance is a US citizen's, whatever else the sentence says ("As a global leader in
+        // defense we require an active TS/SCI clearance"): an open word does not rescue it.
+        if needs_clearance(&sentence) {
+            return Confinement::Closed;
+        }
+        // A zone-bound place is a confinement unless denied or offered with an open place.
+        if TIME_ZONE_PLACE.is_match(&sentence)
+            && !NEGATION.is_match(&sentence)
+            && !has_open_term(&sentence)
+        {
             return Confinement::Closed;
         }
         if !CONFINING.is_match(&sentence) || has_open_term(&sentence) {
@@ -1120,11 +1176,18 @@ mod tests {
             "required location in North American time zones",
             "Required location in North American time zones.",
             "Must be located in North American time zones.",
+            "Candidates must be based in North American time zones.",
+            "You must reside in North American time zones.",
         ] {
             assert!(!passes_saying(sentence), "{sentence:?} confines the job");
         }
-        // A zone range that spans the Americas, or both of them, does not.
+        // Working hours that overlap are no place; a denial or an open place keeps the job; a
+        // zone range that spans the Americas does not close it.
         for sentence in [
+            "This role is open to LATAM. You must be able to work in North American time zones.",
+            "You don't need to be located in North American time zones.",
+            "overlap with North American time zones",
+            "Required location in North American time zones or LATAM.",
             "North or South America timezones",
             "North or South American time zones",
             "required location in North or South American time zones",
@@ -1162,8 +1225,42 @@ mod tests {
             "Public Trust clearance required.",
             "Applicants must pass a polygraph.",
             "Polygraph required",
+            "Must have an active Top Secret/SCI clearance.",
+            "Top Secret (TS) clearance required",
+            "Secret-level clearance required",
+            "Clearance Level: Top Secret",
+            "DoD clearance required",
+            "Must be clearable",
+            "Cleared candidates only",
+            "Active TS clearance",
+            "Must be eligible for a security clearance",
+            "Must be able to obtain a security clearance",
+            "Active clearance required",
+            "A current security clearance is required.",
+            "Valid TS clearance needed.",
+            // A denial elsewhere in the sentence, not attached to the clearance, does not count.
+            "You must hold an active Secret clearance, which cannot be transferred.",
+            "An active Secret clearance is required; applicants without one will not be considered.",
+            "Don't apply unless you hold an active TS/SCI clearance.",
+            "Active TS/SCI clearance required (no interim).",
+            // An open place in the same sentence does not rescue a clearance requirement.
+            "As a global leader in defense we require an active TS/SCI clearance",
         ] {
             assert!(!passes_saying(sentence), "{sentence:?} needs a clearance");
+        }
+    }
+
+    #[test]
+    fn a_clearance_that_is_denied_or_only_a_plus_leaves_the_job_open() {
+        for sentence in [
+            "An active Secret clearance is not required.",
+            "Active TS/SCI clearance is not needed for this role.",
+            "No active Secret clearance necessary.",
+            "ability to obtain a security clearance is a plus",
+            "Knowledge of current clearance procedures for customs",
+            "Experience with valid clearance certificates for imports",
+        ] {
+            assert!(passes_saying(sentence), "{sentence:?} leaves the job open");
         }
     }
 
