@@ -139,6 +139,9 @@ impl ApplicationRepo for Tracker {
     fn set_origin(&self, job_key: &str, origin: Origin) -> StoreResult<bool> {
         Tracker::set_origin(self, job_key, origin).map_err(StoreError::from)
     }
+    fn region_override(&self, job_key: &str) -> StoreResult<bool> {
+        Tracker::region_override(self, job_key).map_err(StoreError::from)
+    }
     fn approve(&self, job_key: &str) -> StoreResult<()> {
         Tracker::approve(self, job_key).map_err(StoreError::from)
     }

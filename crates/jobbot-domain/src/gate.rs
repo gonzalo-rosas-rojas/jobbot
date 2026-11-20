@@ -58,6 +58,19 @@ pub const REASON_OUT_OF_REGION: &str = "fuera_de_region";
 /// text before the colon is the rule.
 pub const OUT_OF_REGION_NOTE: &str = "fuera_de_region: no se puede hacer desde Chile";
 
+/// Whether a `needs_reason` is the one the region check parks an application with (`OUT_OF_REGION_NOTE`).
+pub fn is_out_of_region_reason(reason: &str) -> bool {
+    reason.starts_with(REASON_OUT_OF_REGION)
+}
+
+/// The note of the move that sends a parked out-of-region application back to the queue: Gonza looked at it and
+/// chose to send it anyway. The event keeps it for good, so the region check no longer applies to that application
+/// (`Store::region_override`). Only the region check: every other rule still does.
+pub const REGION_OVERRIDE_NOTE: &str = "region_override: revisada por Gonza, se envía igual";
+
+/// What an event note starts with when it is a region override (`REGION_OVERRIDE_NOTE`).
+pub const REGION_OVERRIDE_PREFIX: &str = "region_override:";
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct GateDecision {
     pub allowed: bool,

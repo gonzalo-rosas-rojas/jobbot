@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use chrono::{DateTime, Datelike, Months, NaiveTime, TimeDelta, TimeZone, Utc};
 use chrono_tz::America::Santiago;
+use jobbot_domain::gate::{REGION_OVERRIDE_NOTE, is_out_of_region_reason};
 use jobbot_domain::handoff::is_sent_by_hand;
 use jobbot_domain::models::{Job, MANUAL_SOURCE};
 use jobbot_domain::origin::Origin;
@@ -155,7 +156,14 @@ pub fn resolve(tracker: &dyn Store, key: &str, now: DateTime<Utc>) -> Result<Out
             "De vuelta a puntuadas (sin CV, prepare le hará el PDF)",
         )
     };
-    match tracker.transition(key, target, None, now) {
+    // A card parked for its region: resolving it means "I looked at it, send it anyway". The move's own event
+    // carries that for good (`Store::region_override`), so the next run does not park it again.
+    let note = row
+        .needs_reason
+        .as_deref()
+        .is_some_and(is_out_of_region_reason)
+        .then_some(REGION_OVERRIDE_NOTE);
+    match tracker.transition(key, target, note, now) {
         Ok(()) => {
             // Gonza fixed what stopped it: the next run fills the form again and takes a fresh
             // screenshot, and an earlier unconfirmed click no longer holds the company.

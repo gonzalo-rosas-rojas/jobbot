@@ -455,6 +455,9 @@ pub trait ApplicationRepo {
     /// Sets how the application came about. False when there is no application for `job_key` (nothing written).
     /// Nothing else of the row changes: not `updated_at`, not the state, no event.
     fn set_origin(&self, job_key: &str, origin: Origin) -> StoreResult<bool>;
+    /// Whether Gonza cleared the region of this application (`resolve` on a card parked for its region): the region
+    /// check no longer applies to it, and nothing else about it changes.
+    fn region_override(&self, job_key: &str) -> StoreResult<bool>;
     /// Marks an application as reviewed and approved by Gonza.
     fn approve(&self, job_key: &str) -> StoreResult<()>;
     /// Applications in `state`, best score first.

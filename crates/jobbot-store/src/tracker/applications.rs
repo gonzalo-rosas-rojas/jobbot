@@ -6,6 +6,7 @@ use chrono::{DateTime, TimeDelta, Utc};
 use rusqlite::types::Value;
 use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params, params_from_iter};
 
+use jobbot_domain::gate::REGION_OVERRIDE_PREFIX;
 use jobbot_domain::origin::Origin;
 
 use super::{
@@ -211,6 +212,21 @@ impl Tracker {
             params![origin.as_str(), job_key],
         )?;
         Ok(changed > 0)
+    }
+
+    /// Whether Gonza cleared the region of this application: some move of it carries `REGION_OVERRIDE_NOTE`. The fact
+    /// is the event, not a column, so it outlives every later move (the row's own note is overwritten by each).
+    pub fn region_override(&self, job_key: &str) -> Result<bool> {
+        let conn = self.lock();
+        Ok(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM events WHERE job_key = ?1 AND substr(note, 1, ?2) = ?3)",
+            params![
+                job_key,
+                REGION_OVERRIDE_PREFIX.len() as i64,
+                REGION_OVERRIDE_PREFIX
+            ],
+            |row| row.get(0),
+        )?)
     }
 
     /// Marks an application as reviewed and approved by Gonza.

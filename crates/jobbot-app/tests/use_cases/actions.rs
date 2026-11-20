@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, TimeDelta, TimeZone, Utc};
 
 use jobbot_app::actions::*;
+use jobbot_domain::gate::OUT_OF_REGION_NOTE;
 use jobbot_domain::origin::Origin;
 use jobbot_domain::prep::Question;
 use jobbot_domain::state::State;
@@ -286,6 +287,32 @@ fn resolve_returns_a_prepared_application_to_the_queue_and_forgets_the_attempt()
         !t.company_in_cooldown(&app.company_norm, 90, *NOW).unwrap(),
         "the unconfirmed click no longer holds the company"
     );
+}
+#[test]
+fn resolve_on_an_out_of_region_card_records_that_gonza_cleared_the_region() {
+    let (t, key) = tracker_with(&[]);
+    t.transition(&key, State::NeedsGonza, Some(OUT_OF_REGION_NOTE), *NOW)
+        .unwrap();
+    assert!(!t.region_override(&key).unwrap(), "nothing yet");
+
+    let outcome = resolve(&t, &key, *NOW).unwrap();
+
+    assert!(outcome.ok, "{outcome:?}");
+    assert!(t.region_override(&key).unwrap());
+    // It sticks through the moves the application makes afterwards.
+    t.transition(&key, State::NeedsGonza, Some("captcha"), *NOW)
+        .unwrap();
+    assert!(t.region_override(&key).unwrap());
+}
+#[test]
+fn resolve_on_any_other_reason_sets_no_region_override() {
+    let (t, key) = tracker_with(&[]);
+    t.transition(&key, State::NeedsGonza, Some("captcha"), *NOW)
+        .unwrap();
+
+    resolve(&t, &key, *NOW).unwrap();
+
+    assert!(!t.region_override(&key).unwrap());
 }
 #[test]
 fn resolve_without_a_cv_goes_back_to_scored_and_a_replay_is_refused_in_spanish() {

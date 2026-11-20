@@ -667,6 +667,37 @@ async fn the_prune_follows_region_ok_on_the_fresh_fields() {
     }
 }
 #[tokio::test]
+async fn the_prune_leaves_alone_what_is_parked_for_its_region_or_was_cleared_by_gonza() {
+    let parked = good("1", "Parked Co");
+    let cleared = good("2", "Cleared Co");
+    let ordinary = good("3", "Ordinary Co");
+    let tracker =
+        stored_by_discovery(vec![parked.clone(), cleared.clone(), ordinary.clone()]).await;
+    for key in ["test:1", "test:2"] {
+        tracker
+            .transition(key, State::NeedsGonza, Some(REGION_NOTE), *NOW)
+            .unwrap();
+    }
+    // Gonza looked at the second one and said to send it anyway.
+    jobbot_app::actions::resolve(&tracker, "test:2", *NOW).unwrap();
+    walk(&tracker, "test:3", &[State::Prepared]);
+    let in_us = |job: &Job| Job {
+        location: "Remote - USA".into(),
+        ..job.clone()
+    };
+
+    let report = discover_again(
+        &tracker,
+        vec![in_us(&parked), in_us(&cleared), in_us(&ordinary)],
+    )
+    .await;
+
+    assert_eq!(report.pruned_region, 1, "only the ordinary one");
+    assert_eq!(state_and_note(&tracker, "test:1").0, State::NeedsGonza);
+    assert_eq!(state_and_note(&tracker, "test:2").0, State::Scored);
+    assert_eq!(state_and_note(&tracker, "test:3").0, State::Withdrawn);
+}
+#[tokio::test]
 async fn a_healthy_posting_stays_in_the_queue_and_its_fresh_fields_are_stored() {
     let first = recently_dated("1", "Acme AI");
     let tracker = stored_by_discovery(vec![first.clone()]).await;

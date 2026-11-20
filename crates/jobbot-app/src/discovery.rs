@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use chrono::{DateTime, TimeDelta, Utc};
 use jobbot_domain::exclusion::{check_exclusion, exclusion_note};
-use jobbot_domain::gate::{OUT_OF_REGION_NOTE, is_stale, stale_note};
+use jobbot_domain::gate::{OUT_OF_REGION_NOTE, is_out_of_region_reason, is_stale, stale_note};
 use jobbot_domain::handoff::{form_may_have_gone_out, may_have_been_sent};
 use jobbot_domain::models::{FetchError, Job};
 use jobbot_domain::origin::Origin;
@@ -237,12 +237,19 @@ pub fn prune_ineligible(
         let Some(job) = tracker.get_job(&row.job_key)? else {
             continue;
         };
+        // Parked for its region, or cleared by Gonza after he looked at it: a false positive of the region rule must
+        // not undo either (the gate parks instead of withdrawing for the same reason).
+        let region_decided = waiting_reason.is_some_and(is_out_of_region_reason)
+            || tracker.region_override(&row.job_key)?;
         let exclusion = check_exclusion(&job, exclusions);
         // Age and region first, whether or not the company is also excluded: the reason that
         // needs no rule is the one that goes on record.
         let (note, counter) = if !may_be_sent && is_stale_stored(&job, tracker, criteria, now)? {
             (stale_note(criteria), &mut report.stale)
-        } else if !may_be_sent && refreshed.contains(&row.job_key) && !region_ok_for(&job, criteria)
+        } else if !may_be_sent
+            && !region_decided
+            && refreshed.contains(&row.job_key)
+            && !region_ok_for(&job, criteria)
         {
             (OUT_OF_REGION_NOTE.to_string(), &mut report.out_of_region)
         } else if exclusion.excluded && gone_out {

@@ -1400,6 +1400,77 @@ async fn a_prepared_posting_outside_the_region_is_parked_with_gonza_and_not_sent
 async fn an_approved_posting_outside_the_region_is_parked_too_not_withdrawn() {
     parked_for_region(true).await;
 }
+/// A prepared posting outside the region that the run parked, which Gonza then resolved.
+async fn parked_then_resolved(env: &Env, crit: &Criteria) -> Job {
+    let job = make_job_with(|j| {
+        j.location = "San Francisco, CA".into();
+        j.remote = true;
+    });
+    env.prepared(&job, 90.0);
+    env.tracker.approve("test:1").unwrap();
+    env.run(&FakeFiller::new(), crit, SubmitMode::Live).await;
+    assert_eq!(env.state("test:1"), State::NeedsGonza, "parked first");
+    let outcome = jobbot_app::actions::resolve(&env.tracker, "test:1", *NOW).unwrap();
+    assert!(outcome.ok, "{outcome:?}");
+    assert_eq!(env.state("test:1"), State::Prepared);
+    job
+}
+#[tokio::test]
+async fn a_resolved_out_of_region_posting_is_sent_by_the_next_run_and_not_parked_again() {
+    let env = Env::new();
+    let crit = Criteria {
+        first_n_reviewed: 0,
+        ..criteria()
+    };
+    parked_then_resolved(&env, &crit).await;
+    let filler = FakeFiller::new();
+
+    let outcomes = env.run(&filler, &crit, SubmitMode::Live).await;
+
+    assert_eq!(
+        filler.calls(),
+        vec![("test:1".to_string(), SubmitMode::Live)]
+    );
+    assert_eq!(outcomes[0].status, "submitted");
+    assert_eq!(env.state("test:1"), State::Submitted);
+}
+#[tokio::test]
+async fn a_resolved_out_of_region_posting_is_still_stopped_by_an_exclusion() {
+    let env = Env::new();
+    let crit = Criteria {
+        first_n_reviewed: 0,
+        ..criteria()
+    };
+    let job = parked_then_resolved(&env, &crit).await;
+    let exclusions = Exclusions {
+        names: vec![job.company.clone()],
+        ..exclusions()
+    };
+    let filler = FakeFiller::new();
+
+    submit_all_while(
+        &env.tracker,
+        &crit,
+        &exclusions,
+        &AnswerBank::default(),
+        &filler,
+        None,
+        None,
+        SubmitMode::Live,
+        env.dir.path(),
+        &env.stop_file(),
+        *NOW,
+        &|| true,
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        filler.calls().is_empty(),
+        "the region was cleared, nothing else"
+    );
+    assert_eq!(env.state("test:1"), State::Withdrawn);
+}
 #[tokio::test]
 async fn a_hand_recorded_posting_with_no_location_passes_the_region_check() {
     // Why this exists: `record` stores its posting remote with the location as typed (maybe none). Such a row

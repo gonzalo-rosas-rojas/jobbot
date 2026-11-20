@@ -110,7 +110,11 @@ fn decide(
     // the region note) instead of withdrawing it: withdrawal is terminal and this check runs before the approval
     // check, so a false positive of a rule that is still being tuned would destroy an approved application.
     // Placed before the by-hand checks so that a posting he cannot take is not offered as a form to send by hand.
-    if !region_ok_with(job, &criteria.extra_open_places) {
+    // Unless Gonza already looked at this one and said to send it anyway (`resolve` on its parked card): that clears
+    // this check and no other.
+    if !region_ok_with(job, &criteria.extra_open_places)
+        && !tracker.region_override(&app.job_key)?
+    {
         return Ok(GateDecision::block(REASON_OUT_OF_REGION));
     }
     if is_manual_only_posting(job) {
