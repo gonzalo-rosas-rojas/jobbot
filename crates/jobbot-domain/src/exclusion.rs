@@ -37,14 +37,23 @@ pub const EXCLUDED_NOTE_PREFIX: &str = "excluded:";
 /// name a former client and would end up in the history and in what `submit` prints. A reason of
 /// another shape is `excluded:other`, so every reader of the prefix still recognises it.
 pub fn exclusion_note(result: &ExclusionResult) -> String {
-    let kind = result
+    format!("{EXCLUDED_NOTE_PREFIX}{}", exclusion_kind(result))
+}
+
+/// The kind of rule that matched (`domain`, `name` or `category`), or `other` for a reason of
+/// another shape. Never the rule's text: anything that is printed or stored uses this.
+pub fn exclusion_kind(result: &ExclusionResult) -> &'static str {
+    result
         .reason
         .as_deref()
         .and_then(|reason| reason.split_once(':'))
         .map(|(kind, _)| kind)
-        .filter(|kind| matches!(*kind, "domain" | "name" | "category"))
-        .unwrap_or("other");
-    format!("{EXCLUDED_NOTE_PREFIX}{kind}")
+        .and_then(|kind| {
+            ["domain", "name", "category"]
+                .into_iter()
+                .find(|known| *known == kind)
+        })
+        .unwrap_or("other")
 }
 
 /// Checks, in order, the apply and posting URL hosts (domains), the company name and

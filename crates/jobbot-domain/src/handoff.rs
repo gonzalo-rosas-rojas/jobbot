@@ -36,8 +36,9 @@ pub fn is_handoff_reason(reason: &str) -> bool {
 
 /// True when `reason` says the form is Gonza's to send by hand: an Ashby handoff, or a posting
 /// whose platform or listing the bot never opens (`manual_only_platform`, `listing_only`). Such a
-/// row may already have gone out when he has not yet run `confirm`, so nothing withdraws it, and
-/// confirming it proves nothing about the form filler.
+/// row may already have gone out when he has not yet run `confirm`, so staleness and region do not
+/// withdraw it (the exclusion prune does, see `prune_ineligible`), and confirming it proves nothing
+/// about the form filler.
 pub fn is_sent_by_hand(reason: &str) -> bool {
     is_handoff_reason(reason)
         || reason.starts_with(REASON_MANUAL_ONLY)
@@ -74,8 +75,9 @@ pub fn form_may_have_gone_out(reason: &str) -> bool {
 
 /// True when the form of an application waiting for Gonza with this `needs_gonza` reason may have
 /// gone out: it is his to send by hand (`is_sent_by_hand`) or a click may have gone through
-/// (`form_may_have_gone_out`). The one rule behind "nothing withdraws it, nothing moves another
-/// application in its place": discovery's prune, the mailbox cut-off and the mailbox matcher.
+/// (`form_may_have_gone_out`). The one rule behind "staleness and region do not withdraw it, nothing
+/// moves another application in its place": discovery's age and region prune, the mailbox cut-off
+/// and the mailbox matcher. The exclusion prune uses the narrower `form_may_have_gone_out`.
 pub fn may_have_been_sent(reason: &str) -> bool {
     is_sent_by_hand(reason) || form_may_have_gone_out(reason)
 }

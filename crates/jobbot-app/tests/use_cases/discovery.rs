@@ -941,6 +941,48 @@ async fn a_form_waiting_for_gonza_to_send_by_hand_is_never_withdrawn() {
     }
 }
 #[tokio::test]
+async fn a_stale_listing_only_card_is_kept_unless_its_company_is_excluded() {
+    // Two rules, both pinned: age does not withdraw a card the owner sends by hand, but an
+    // exclusion does (such a card is an invitation to send; see `prune_ineligible`).
+    let kept = recently_dated("1", "Kept Co");
+    let excluded = recently_dated("2", "Later Excluded Co");
+    let tracker = stored_by_discovery(vec![kept.clone(), excluded.clone()]).await;
+    for key in ["test:1", "test:2"] {
+        tracker
+            .transition(
+                key,
+                State::NeedsGonza,
+                Some("listing_only: envíalo tú"),
+                *NOW,
+            )
+            .unwrap();
+    }
+    let now_old: Vec<Job> = [kept, excluded]
+        .into_iter()
+        .map(|job| Job {
+            posted_at: Some(*NOW - TimeDelta::days(60)),
+            ..job
+        })
+        .collect();
+    let (criteria, exclusions) = rules_excluding("Later Excluded Co");
+
+    let report = discover(
+        &[fake(now_old, &[])],
+        &criteria,
+        &exclusions,
+        &tracker,
+        *NOW,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(report.pruned_stale, 0);
+    assert_eq!(state_and_note(&tracker, "test:1").0, State::NeedsGonza);
+    let (state, note) = state_and_note(&tracker, "test:2");
+    assert_eq!(state, State::Withdrawn);
+    assert_eq!(note.unwrap(), "excluded:name");
+}
+#[tokio::test]
 async fn a_role_posted_again_after_the_old_one_went_stale_is_a_new_posting() {
     let (criteria, exclusions) = pruning_rules();
     let tracker = Tracker::in_memory().unwrap();

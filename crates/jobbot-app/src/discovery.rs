@@ -173,7 +173,8 @@ pub use jobbot_domain::handoff::MAY_HAVE_BEEN_SENT;
 ///
 /// * Only `Scored`, `Prepared` and `NeedsGonza` applications with no submission and no unconfirmed
 ///   click are looked at (`Tracker::unsent_applications`), minus the `NeedsGonza` ones whose reason
-///   says the form may have gone out, and minus any application with a submit intent still open
+///   says the form may have gone out (for the stale and region rules, the broad
+///   `may_have_been_sent`, which includes the cards he sends by hand), and minus any application with a submit intent still open
 ///   (a run is clicking it or died clicking it). Everything submitted, answered, finished or
 ///   withdrawn stays.
 /// * A posting whose company, domain or category is excluded now (`check_exclusion`: the rule was
@@ -186,7 +187,12 @@ pub use jobbot_domain::handoff::MAY_HAVE_BEEN_SENT;
 ///   assisted form closed or left open, an open submit intent, or a form recorded as sent by
 ///   hand: `handoff::form_may_have_gone_out`) is kept and its key listed in `excluded_waiting`, so
 ///   he does not send it again. A plain by-hand card (`listing_only`, `manual_only_platform`,
-///   `handoff`) is not that: nothing says it was sent, so it is withdrawn like any other.
+///   `handoff`) is not that: it is withdrawn like any other, even though the owner may have sent
+///   it by hand without confirming. The trade-off is decided: such a card is an invitation to
+///   send, and never inviting a send to an excluded company outranks keeping the record of a
+///   send nobody confirmed; a reply from that company then shows up as an unmatched e-mail.
+///   The stale and region rules below use the broader `handoff::may_have_been_sent`, which
+///   keeps those cards.
 /// * A stale posting (the gate's `is_stale_stored`: the posting's date, or for a source that
 ///   publishes none, the day it was first seen) is withdrawn with `stale_posting`. The date needs
 ///   no fresh fetch: the submission gate would withdraw the same row anyway.

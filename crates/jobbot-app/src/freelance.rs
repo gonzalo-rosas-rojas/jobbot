@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use chrono::{DateTime, Utc};
 use chrono_tz::America::Santiago;
-use jobbot_domain::exclusion::check_exclusion;
+use jobbot_domain::exclusion::{check_exclusion, exclusion_kind};
 use jobbot_domain::models::Job;
 use jobbot_domain::outbound::{clean, redact_contact, slug, squash, strip_excluded_entries};
 use jobbot_domain::rules::Exclusions;
@@ -101,20 +101,23 @@ impl FreelanceConfig {
     }
 }
 
-/// The exclusion reason (`name:Harbor Light`, `category:freight forwarding`, ...) when `text` touches the list.
-pub fn forbidden_in(text: &str, rules: &Exclusions) -> Option<String> {
+/// The kind of exclusion rule (`name`, `domain`, `category`) when `text` touches the list; never
+/// the rule's own text, which can name a former client.
+pub fn forbidden_in(text: &str, rules: &Exclusions) -> Option<&'static str> {
     let probe = Job {
         description: text.to_string(),
         ..Job::default()
     };
     let result = check_exclusion(&probe, rules);
-    if result.excluded { result.reason } else { None }
+    result.excluded.then(|| exclusion_kind(&result))
 }
 
 /// Fails when the text of a draft touches the exclusion list: such a draft is never saved.
 fn ensure_draft_allowed(text: &str, rules: &Exclusions) -> Result<()> {
     match forbidden_in(text, rules) {
-        Some(reason) => bail!("el borrador toca la lista de exclusión ({reason}): no se guarda"),
+        Some(kind) => {
+            bail!("el borrador toca la lista de exclusión (regla por {kind}): no se guarda")
+        }
         None => Ok(()),
     }
 }
@@ -470,8 +473,8 @@ pub async fn draft_proposal(
         bail!("el archivo del aviso está vacío");
     }
     let rules = config.guard_rules(exclusions);
-    if let Some(reason) = forbidden_in(posting, &rules) {
-        bail!("El aviso cae en la lista de exclusión ({reason}): no se redacta propuesta.");
+    if let Some(kind) = forbidden_in(posting, &rules) {
+        bail!("El aviso cae en la lista de exclusión (regla por {kind}): no se redacta propuesta.");
     }
     let cv = freelance_cv(cv_md, &rules);
     let request = ClaudeRequest {
