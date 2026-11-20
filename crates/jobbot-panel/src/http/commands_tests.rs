@@ -219,7 +219,9 @@ fn an_application_sent_by_hand_can_be_recorded_from_the_page() {
         .rsplit('(')
         .next()
         .unwrap()
-        .trim_end_matches(')')
+        .split(')')
+        .next()
+        .unwrap()
         .to_string();
     let row = p.tracker.get_application(&key).unwrap().unwrap();
     assert_eq!(row.state, State::Submitted);
@@ -275,6 +277,57 @@ fn an_application_sent_by_hand_can_be_recorded_from_the_page() {
     assert_eq!(
         handle(&p, &guard(), &request("GET", "/api/record", "")).status,
         405
+    );
+}
+
+#[test]
+fn an_application_sent_by_hand_can_be_recorded_from_the_page_with_its_origin() {
+    let (p, _d) = panel();
+    let reply = post_value(
+        &p,
+        "/api/record",
+        serde_json::json!({
+            "company": "Acme",
+            "title": "Backend Engineer",
+            "url": "https://jobs.example.com/acme/42",
+            "origin": "agency",
+        }),
+    );
+    assert_eq!(reply.status, 200, "{}", text(&reply));
+    let key = p.tracker.list_by_state(State::Submitted).unwrap()[0]
+        .job_key
+        .clone();
+    assert_eq!(
+        p.tracker.origin_of(&key).unwrap(),
+        Some(jobbot_domain::origin::Origin::Agency)
+    );
+}
+
+#[test]
+fn a_record_from_the_page_with_an_unknown_origin_is_a_409() {
+    let (p, _d) = panel();
+    let reply = post_value(
+        &p,
+        "/api/record",
+        serde_json::json!({
+            "company": "Acme",
+            "title": "Backend Engineer",
+            "url": "https://jobs.example.com/acme/42",
+            "origin": "amigo",
+        }),
+    );
+    assert_eq!(reply.status, 409, "{}", text(&reply));
+    assert!(
+        json_of(&reply)["message"]
+            .as_str()
+            .unwrap()
+            .starts_with("Origen no válido: amigo."),
+        "{}",
+        text(&reply)
+    );
+    assert!(
+        p.tracker.counts().unwrap().is_empty(),
+        "nothing was written"
     );
 }
 

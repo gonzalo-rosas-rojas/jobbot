@@ -61,6 +61,8 @@ struct RecordBody {
     location: Option<String>,
     salary_min: Option<f64>,
     salary_max: Option<f64>,
+    /// As `jobbot record --origin`.
+    origin: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -295,7 +297,7 @@ fn record(panel: &Panel, req: &Request) -> Result<Reply> {
         salary_min_monthly_usd: body.salary_min,
         salary_max_monthly_usd: body.salary_max,
         note: body.note,
-        origin: None,
+        origin: body.origin,
     };
     Ok(outcome_reply(actions::record(&*panel.tracker, &spec, at)?))
 }
