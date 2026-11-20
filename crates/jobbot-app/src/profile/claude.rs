@@ -127,15 +127,15 @@ pub enum ConfigError {
     Merge(#[source] toml::ser::Error),
     /// A value of the right type that breaks one of the rules of `parse_claude_config`.
     #[error("{0}")]
-    Rule(&'static str),
+    Rule(String),
 }
 
 /// `Err(ConfigError::Rule(message))` unless `holds`.
-fn rule(holds: bool, message: &'static str) -> Result<(), ConfigError> {
+fn rule(holds: bool, message: impl Into<String>) -> Result<(), ConfigError> {
     if holds {
         Ok(())
     } else {
-        Err(ConfigError::Rule(message))
+        Err(ConfigError::Rule(message.into()))
     }
 }
 
@@ -178,7 +178,7 @@ pub fn parse_claude_config(text: &str) -> Result<ClaudeConfig, ConfigError> {
             .effort
             .as_deref()
             .is_none_or(|level| EFFORT_LEVELS.contains(&level)),
-        "effort must be one of low, medium, high, xhigh, max", // kept in step with EFFORT_LEVELS
+        format!("effort must be one of {}", EFFORT_LEVELS.join(", ")),
     )?;
     Ok(config)
 }
