@@ -137,12 +137,12 @@ const NEVER_FILLED_TERMS: &[&str] = &[
 /// "n" is deliberately not here: it is also an answer ("If no, please explain", "(Y/N)") or "nor".
 /// The one other place where "no" is read as a number is the very end of the label
 /// (`ends_with_no_after_a_document`). The plural is a number-word too ("Document numbers"); a
-/// salary field's "numbers only" is kept out by `TAX_BASIS`, not by dropping the plural.
+/// field's "numbers only" is kept out by `NUMBER_HINT`, not by dropping the plural.
 const NUMBER_WORDS: &[&str] = &["number", "numbers", "nro", "num", "numero"];
 
 /// The words that may stand between "tax" and its number-word: "Tax payer number", "Tax residence
-/// number", "Tax Reg. No.", "Tax reference No". One word at most, so "tax software, No. of years"
-/// is not a tax ID.
+/// number", "Tax Reg. No.", "Tax reference No". Only these words, and `MAX_TAX_QUALIFIERS` of them
+/// at most, so "tax software, No. of years" is not a tax ID.
 const TAX_QUALIFIERS: &[&str] = &[
     "payer",
     "identifier",
@@ -171,8 +171,9 @@ enum Kind {
     Weak,
     /// An acronym or code, an anchor of a documents-only label and, for "dni", of the name
     /// exemption. It is never filled alone only through `NEVER_FILLED_TERMS` (dni, rut, cpf, curp,
-    /// ssn, nin, nif, nie, cuit, cuil, tfn, itin) or, for RUN, in capitals
-    /// (`capital_token_is_an_id`). The rows of this table do not add EIN, PAN or SIN.
+    /// ssn, nin, nif, nie, cuit, cuil, tfn, itin) or as a token in capitals (RUN, NIT, RFC, TIN,
+    /// CBU, CUIT, CUIL, under the conditions of `capital_token_is_an_id`; not all of them are rows
+    /// here). The rows of this table do not add EIN, PAN or SIN.
     Code,
     /// A document phrase that only the name exemption needs ("id card").
     NameOnly,
@@ -331,7 +332,9 @@ fn is_anchor(word: &str) -> bool {
         .any(|document| document.anchor && document.term == word)
 }
 
-fn is_document_glue(word: &str) -> bool {
+/// Whether `word` may stand beside an anchor in a documents-only label without being one: a glue
+/// word of `DOCUMENT_GLUE_WORDS` or a document marked `companion` ("Document ID").
+fn may_stand_beside_an_anchor(word: &str) -> bool {
     DOCUMENT_GLUE_WORDS.contains(&word)
         || DOCUMENTS
             .iter()
@@ -411,8 +414,9 @@ static YES_NO: LazyLock<Regex> = LazyLock::new(|| {
 /// is counted on, never a tax ID. Taken out of the label so that "salary (AUD, pre-tax)? Numbers
 /// only" does not read as "tax numbers". It only strips words that cannot ask for a number.
 ///
-/// Capture 1 is the word after "tax". When it is one that asks for a tax ID (`TAX_ID_WORDS`),
-/// nothing is stripped: "Full name, including tax ID" is not a salary.
+/// Capture 1 is the word after "tax". When it is one that asks for a tax ID (`TAX_ID_WORDS` or
+/// `TAX_QUALIFIERS`), nothing is stripped: "Full name, including tax ID" is not a salary. Any
+/// other word after "tax" is kept in the label; only the basis wording goes (`read_label`).
 static TAX_BASIS: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?i)\b(?:pre|post|before|after|incl|including|inclusive\s+of|excl|excluding|exclusive\s+of|net\s+of|gross\s+of)[\s.-]*tax(?:es)?\b(?:\s+([\p{L}#]+))?",
@@ -499,8 +503,19 @@ static CAPITAL_TOKENS: LazyLock<Regex> = LazyLock::new(|| {
 /// style their labels in uppercase ("HOW DO YOU RUN TESTS?") would otherwise read as an ID.
 const WORDS_BEFORE_AN_ID_TOKEN: &[&str] = &[
     "your", "su", "tu", "ingrese", "ingresa", "indique", "digite", "escriba", "enter", "del", "de",
+];
+
+/// "number" and its abbreviations as they stand right beside an ID token in the raw label ("NRO
+/// RUN", "Nº C.I.", "C.I. number"). Here a plain "no" is the abbreviation: nothing else fits
+/// between a label's words and its ID token.
+const NUMBER_WORDS_BESIDE_AN_ID_TOKEN: &[&str] = &[
     "numero", "número", "number", "n", "nº", "no", "nr", "nro", "num",
 ];
+
+/// Whether `word`, lowercased, is one of `NUMBER_WORDS_BESIDE_AN_ID_TOKEN`.
+fn is_number_word_beside_an_id_token(word: &str) -> bool {
+    NUMBER_WORDS_BESIDE_AN_ID_TOKEN.contains(&word)
+}
 
 /// A label written in capitals of at most this many words is read for its token wherever it is:
 /// "CHILEAN RUN", "VALID TIN". Longer ones are sentences ("HOW DO YOU RUN TESTS?").
@@ -535,9 +550,27 @@ fn capital_token_is_an_id(label: &str) -> bool {
         if !all_capitals || word_count <= MAX_WORDS_WHERE_A_CAPITAL_TOKEN_COUNTS_ANYWHERE {
             return true;
         }
-        word_before(&label[..token.start()])
-            .is_none_or(|word| WORDS_BEFORE_AN_ID_TOKEN.contains(&word.as_str()))
+        word_before(&label[..token.start()]).is_none_or(|word| {
+            WORDS_BEFORE_AN_ID_TOKEN.contains(&word.as_str())
+                || is_number_word_beside_an_id_token(&word)
+        })
     })
+}
+
+/// The first word of `after`, lowercased: the word that follows an ID token.
+fn word_after(after: &str) -> Option<String> {
+    after
+        .split(|c: char| !c.is_alphanumeric())
+        .find(|word| !word.is_empty())
+        .map(str::to_lowercase)
+}
+
+/// Whether a number-word stands right beside an ID token: the word before it ("Nro. C.I."), the
+/// word after it ("C.I. number") or a "#" after it.
+fn number_word_is_beside(before: &str, after: &str) -> bool {
+    word_before(before).is_some_and(|word| is_number_word_beside_an_id_token(&word))
+        || word_after(after).is_some_and(|word| is_number_word_beside_an_id_token(&word))
+        || after.trim_start().starts_with('#')
 }
 
 /// A "/" that opens another abbreviation ("C.I./C.D."), not a word ("C.I./Pasaporte").
@@ -560,12 +593,18 @@ fn has_continuous_integration_context(label: &str) -> bool {
 
 /// Whether "C.I." (or "C.I:") in the raw label is the Chilean ID card. A standalone one is,
 /// unless it is glued to another abbreviation ("C.I./C.D.") or the label talks about continuous
-/// integration. "U.S.C.I.S." never matches: `CARNET_ABBREVIATION` wants no letter or dot before.
+/// integration. A number-word right beside it ("C.I. number", "Nro. C.I.") makes it the ID card
+/// whatever else the label talks about: nothing may make answerable a label that asks for a
+/// number. "U.S.C.I.S." never matches: `CARNET_ABBREVIATION` wants no letter or dot before.
 fn carnet_abbreviation_is_an_id(label: &str) -> bool {
-    CARNET_ABBREVIATION
-        .find_iter(label)
-        .any(|found| !glued_to_another_abbreviation(&label[found.end()..]))
-        && !has_continuous_integration_context(label)
+    let talks_about_continuous_integration = has_continuous_integration_context(label);
+    CARNET_ABBREVIATION.find_iter(label).any(|found| {
+        // The match starts on the character before "C.I.", so `before` ends ahead of it.
+        let before = &label[..found.start()];
+        let after = &label[found.end()..];
+        !glued_to_another_abbreviation(after)
+            && (number_word_is_beside(before, after) || !talks_about_continuous_integration)
+    })
 }
 
 /// "Nº", "N°", "N˚": the ordinal sign makes the "N" an abbreviation of "number".
@@ -738,15 +777,16 @@ fn spanish_no_de_a_document(words: &[&str]) -> bool {
     })
 }
 
-/// A label made only of document words and glue words ("Your ID", "Passport or ID") has no word of its
-/// own that would say it is not the document's number, as "LinkedIn ID" and "Job ID" do. It needs
-/// at least one anchor: "Tax" or "Document" alone could be anything.
+/// A label made only of anchors and the words that may stand beside one ("Your ID", "Passport or
+/// ID", "Document ID") has no word of its own that would say it is not the document's number, as
+/// "LinkedIn ID" and "Job ID" do. It needs at least one anchor: "Tax" or "Document" alone could be
+/// anything.
 fn only_document_words(words: &[&str]) -> bool {
     // "Pasaporte (opcional)" is the document: the marker is not a word of the label.
     let words = without_markers(words);
     words
         .iter()
-        .all(|word| is_anchor(word) || is_document_glue(word))
+        .all(|word| is_anchor(word) || may_stand_beside_an_anchor(word))
         && words.iter().any(|word| is_anchor(word))
 }
 
@@ -989,7 +1029,7 @@ mod tests {
         "IFSC",
         "CLABE",
         "Tax code",
-        // The word "tax", at most one qualifier, then a number-word.
+        // The word "tax", up to two qualifiers, then a number-word.
         "Tax identification (TIN/SSN)",
         "Tax Nr",
         "Tax reference number",
@@ -1063,9 +1103,10 @@ mod tests {
     /// engineering document. Tried as written.
     const SHORT_RFC_LABELS: &[&str] = &["RFC", "RFC (con homoclave)", "Ingrese su RFC"];
 
-    /// Never filled only as the whole label (after a required/optional marker): "account details"
-    /// inside a longer label is a social profile.
-    const WHOLE_LABEL_TERMS: &[&str] = &["Account details", "Account details (required)"];
+    /// "Account details" as the whole label (after a required/optional marker). Beside a bank word
+    /// it is never filled too (those labels are in `NEVER_FILLED_LABELS`); inside any other longer
+    /// label it is a social profile.
+    const ACCOUNT_DETAILS_ALONE: &[&str] = &["Account details", "Account details (required)"];
 
     /// Never filled through a token written in capitals or with dots in the RAW label ("RUN",
     /// "C.I."): lowercase "run" is a verb, so these are tried as written, not lowercased.
@@ -1101,6 +1142,12 @@ mod tests {
         "Documento: C.I.",
         "Identificación (C.I.)",
         "C.I: 12345678",
+        // A number-word right beside "C.I." makes it the ID card whatever else the label says:
+        // a word of continuous integration elsewhere ("experience", "test") does not undo it.
+        "Enter your C.I. number and years of experience",
+        "C.I. number (needed for the background test)",
+        "Nro. C.I. (no experience needed)",
+        "C.I. Nº, as on the document used for the build pass",
         // A label of at most three words written in capitals: the token counts wherever it is.
         "CHILEAN RUN",
         "INDIQUE RUN",
@@ -1409,8 +1456,8 @@ mod tests {
     }
 
     #[test]
-    fn account_details_are_never_filled_only_as_the_whole_label() {
-        for label in WHOLE_LABEL_TERMS {
+    fn account_details_alone_are_never_filled() {
+        for label in ACCOUNT_DETAILS_ALONE {
             let bank = loose_and_exact_bank(label);
             assert!(bank.lookup(label).is_none(), "answered {label:?}");
         }
