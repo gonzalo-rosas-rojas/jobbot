@@ -75,6 +75,10 @@ const FIELD_NEVER: &[&str] = &[
     "sin number",
     "tax id",
     "tax identification",
+    "tax number",
+    "tax nr",
+    "tax reference number",
+    "tax registration number",
     "taxpayer id",
     "taxpayer identification",
     "tax payer id",
@@ -118,7 +122,11 @@ const FIELD_NEVER: &[&str] = &[
 /// "N.", "Nº", "N°" and "#" are turned into "number" before that (`read_label`), because a plain
 /// "no" or "n" is also an answer ("If no, please explain", "(Y/N)") or "nor"; the one other place
 /// where "no" is read as a number is the very end of the label (`ends_with_no_after_a_document`).
-const NUMBER_WORDS: &[&str] = &["number", "numbers", "nro", "num", "numero"];
+const NUMBER_WORDS: &[&str] = &["number", "nro", "num", "numero"];
+
+/// Words that are not document words in general ("tax software") but are one when the label ends
+/// in "No" right after them ("Tax No"): used only by `ends_with_no_after_a_document`.
+const DOCUMENT_BEFORE_FINAL_NO: &[&str] = &["tax"];
 
 /// Strong document terms: a real number-word ANYWHERE in the label with one of them holds ("Enter
 /// the number exactly as it appears on your passport"). They name a government document and
@@ -152,7 +160,6 @@ const DOCUMENT_WORDS: &[&str] = &[
     "document",
     "documento",
     "cedula",
-    "tax",
     "taxpayer",
     "tributario",
     "contribuyente",
@@ -256,6 +263,12 @@ static YES_NO: LazyLock<Regex> = LazyLock::new(|| {
         .expect("YES_NO is a valid regex")
 });
 
+/// "pre-tax", "before tax", "after tax": says what a salary is counted on, never a tax ID. Taken
+/// out of the label so that "salary (AUD, pre-tax)? Numbers only" does not read as "tax numbers".
+static TAX_BASIS: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\b(?:pre|post|before|after)[\s-]*tax(?:es)?\b").expect("TAX_BASIS is valid")
+});
+
 /// "Nº", "N°", "N˚": the ordinal sign makes the "N" an abbreviation of "number".
 static ORDINAL_NUMBER: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)\bn[º°˚]").expect("ORDINAL_NUMBER is a valid regex"));
@@ -270,7 +283,8 @@ static DOTTED_NUMBER: LazyLock<Regex> = LazyLock::new(|| {
 /// question lists ("(Y/N)") removed, accents folded (`normalize` alone would turn "cédula" into
 /// "c dula") and everything else as `normalize` reads it.
 fn read_label(label: &str) -> String {
-    let text = ORDINAL_NUMBER.replace_all(label, " number ");
+    let text = TAX_BASIS.replace_all(label, " ");
+    let text = ORDINAL_NUMBER.replace_all(&text, " number ");
     let text = text.replace(['º', '°', '˚'], ".").replace('#', " number ");
     let text = YES_NO.replace_all(&text, " ");
     let text = DOTTED_NUMBER.replace_all(&text, "$1 number ");
@@ -333,6 +347,7 @@ fn ends_with_no_after_a_document(words: &[&str]) -> bool {
     let ends_a_document_term = || {
         DOCUMENT_WORDS
             .iter()
+            .chain(DOCUMENT_BEFORE_FINAL_NO)
             .chain(STRONG_DOCUMENT_TERMS)
             .any(|term| term.rsplit(' ').next() == Some(*before))
     };
@@ -537,6 +552,11 @@ mod tests {
         "IFSC",
         "CLABE",
         "Tax code",
+        // Tax IDs held by phrase, now that the bare word "tax" is not a document word.
+        "Tax identification (TIN/SSN)",
+        "Tax Nr",
+        "Tax reference number",
+        "Tax registration number",
     ];
 
     /// Held on purpose although they could be read as ordinary: holding is the safe side. "Job ID
@@ -606,6 +626,22 @@ mod tests {
         "Card games you like",
         "Experience writing RFCs",
         "sin experiencia",
+        // A salary field with a tax hint, and tax talk with no tax ID in it.
+        "What are your salary expectations (AUD, pre-tax)? Numbers only",
+        "Expected salary before tax (number)",
+        "What is your expected annual base salary (pre-tax)? Please enter numbers only.",
+        "Describe your experience with tax software, No. of years",
+        "Number of tax returns you have prepared",
+        "Expected salary (USD, numbers only)",
+        // Number-words and ID words that are not a document number.
+        "No. of years",
+        "Years of experience with ID systems",
+        "Identity and access management: number of years",
+        "Mobile no.",
+        "Nº de teléfono",
+        "Skype ID",
+        "Employee referral ID",
+        "Licencia de conducir (S/N)",
         "Are you a U.S. taxpayer?",
         "Do you have a valid passport? (Yes/No)",
         "Do you have a valid passport? Yes or No",
