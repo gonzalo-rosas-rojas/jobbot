@@ -250,10 +250,14 @@ const GENERIC_LABELS: &[&str] = &["number", "no", "numero", "nro", "num", "id", 
 /// "as on your national ID", "as shown on your passport", "in your identity card", "como aparece
 /// en su cédula", "según tu pasaporte", on a normalized label: the document a name must match.
 static NAMED_DOCUMENT: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"\b(?:on|in|per|from|according\s+to|must\s+match|matches|matching|match|tal\s+cual|igual\s+que|igual\s+a|en|segun|conforme\s+a|de\s+acuerdo\s+(?:a|con))\s+(?:(?:your|the|my|su|tu|el|la|mi)\s+)?(?:government(?:\s+issued)?\s+id(?:\s+card)?|driver\s+s\s+licen[cs]e|drivers\s+licen[cs]e|national\s+id(?:\s+card)?|national\s+identity\s+card|identity\s+(?:card|document)|id\s+card|id|passport|dni|cedula(?:\s+de\s+identidad)?|pasaporte|documento(?:\s+de\s+identidad)?|document|carnet(?:\s+de\s+identidad)?)\b",
-    )
-    .expect("NAMED_DOCUMENT is a valid regex")
+    let prep = r"(?:on|in|per|from|according\s+to|must\s+match|matches|matching|match|tal\s+cual|igual\s+que|igual\s+a|en|segun|conforme\s+a|de\s+acuerdo\s+(?:a|con))";
+    let article = r"(?:(?:your|the|my|su|tu|el|la|mi)\s+)?";
+    let document = r"(?:government(?:\s+issued)?\s+id(?:\s+card)?|driver\s+s\s+licen[cs]e|drivers\s+licen[cs]e|national\s+id(?:\s+card)?|national\s+identity\s+(?:card|document)|identity\s+(?:card|document)|id\s+card|id|passport|dni|cedula(?:\s+de\s+identidad)?|pasaporte|documento(?:\s+de\s+identidad)?|document|carnet(?:\s+de\s+identidad)?)";
+    // Several documents: "passport/ID" (the slash is a space once normalized), "passport or
+    // national ID", "cédula o pasaporte".
+    let more = format!(r"(?:\s+(?:(?:or|o|and|y)\s+)?{article}{document})*");
+    Regex::new(&format!(r"\b{prep}\s+{article}{document}{more}\b"))
+        .expect("NAMED_DOCUMENT is valid")
 });
 
 /// "Yes/No", "Y/N", "Sí/No", "yes or no", with an optional "/N/A": the answers a question lists,
@@ -539,6 +543,7 @@ mod tests {
         "Name and document number per your national ID card",
         "Nombre y número de cédula",
         "Name as on your passport, and passport number",
+        "Name and passport number as on passport",
         "ID number as it appears on your government ID",
         "Name and ID as on your national ID",
         "Nombre y RUN según cédula",
@@ -658,6 +663,10 @@ mod tests {
         "Full name, matching your national ID",
         "Nombre completo (tal cual tu cédula)",
         "Surname (as in your national ID)",
+        "Full name (as shown on your passport/ID)",
+        "Full legal name (as it appears on your passport or national ID)",
+        "Nombre completo (como aparece en tu cédula o pasaporte)",
+        "Name as on your national identity document",
         "Apellidos según documento de identidad",
     ];
 
@@ -671,6 +680,7 @@ mod tests {
         "Full name as it appears on your passport",
         "Name as shown on your driver's licence",
         "Name as on your passport (no nicknames)",
+        "Name (as on ID/passport)",
     ];
 
     /// "no" and "n" are plain words here (an answer, a negation, "ni" is "nor"): none of them is
