@@ -148,6 +148,16 @@ fn back_up_before_migrating(conn: &Connection, db_path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Whether SQLite refused a write because of where the database is right now (another connection holds the lock, or
+/// the file is read-only), not because of what was asked.
+fn cannot_write_now(error: &rusqlite::Error) -> bool {
+    use rusqlite::ErrorCode::{DatabaseBusy, DatabaseLocked, ReadOnly};
+    matches!(
+        error.sqlite_error_code(),
+        Some(DatabaseBusy | DatabaseLocked | ReadOnly)
+    )
+}
+
 impl Tracker {
     /// Opens (creating it and its parent directory if needed) the database at `path`. The file runs
     /// in WAL mode with every commit durable. A database made by an earlier version, one that
@@ -193,7 +203,7 @@ impl Tracker {
         conn.execute_batch(SCHEMA)?;
         Self::add_missing_columns(&conn)?;
         Self::add_origin_column(&mut conn)?;
-        Self::repair_blank_company_norms_if_possible(&mut conn);
+        Self::repair_blank_company_norms_if_possible(&mut conn)?;
         conn.execute_batch(INDEXES_ON_ADDED_COLUMNS)?;
         Ok(Tracker {
             conn: Mutex::new(conn),
@@ -248,12 +258,20 @@ impl Tracker {
         Ok(())
     }
 
-    /// `give_blank_company_norms_their_identity` as the open runs it: a failure is swallowed. The repair is cosmetic
-    /// (those rows were just as blank before this build), so the write lock not coming within the busy timeout, or a
-    /// file that is read-only, must never be the reason the panel or the CLI cannot open the tracker. The rows are
-    /// still blank, so the next open tries again.
-    fn repair_blank_company_norms_if_possible(conn: &mut Connection) {
-        let _ = Self::give_blank_company_norms_their_identity(conn);
+    /// `give_blank_company_norms_their_identity` as the open runs it: not being able to write is not a failure. The
+    /// repair is cosmetic (those rows were just as blank before this build), so the write lock not coming within the
+    /// busy timeout, or a file that is read-only, must never be the reason the panel or the CLI cannot open the
+    /// tracker. The rows are still blank, so the next open tries again. Any other error is a defect of the repair
+    /// itself and is returned: swallowed, nobody would ever see it.
+    fn repair_blank_company_norms_if_possible(conn: &mut Connection) -> Result<()> {
+        match Self::give_blank_company_norms_their_identity(conn) {
+            Err(TrackerError::Db(error) | TrackerError::DbAt { source: error, .. })
+                if cannot_write_now(&error) =>
+            {
+                Ok(())
+            }
+            other => other,
+        }
     }
 
     /// Rows stored before `company_identity` existed kept `company_norm = ''` when `normalize` could not fold the
@@ -955,7 +973,8 @@ mod tests {
         )
         .unwrap();
 
-        Tracker::repair_blank_company_norms_if_possible(&mut read_only);
+        Tracker::repair_blank_company_norms_if_possible(&mut read_only)
+            .expect("not being able to write is not a failure");
 
         drop(read_only);
         let unchanged = Connection::open(&path).unwrap();
@@ -972,6 +991,16 @@ mod tests {
         assert!(
             company_norms(&later).contains(&("job blank:1".to_string(), "жк строй".to_string()))
         );
+    }
+
+    #[test]
+    fn a_repair_that_fails_for_any_other_reason_is_not_swallowed() {
+        // A database with no tables: the repair's own query is wrong here, which is a defect, not a busy file.
+        let mut empty = Connection::open_in_memory().unwrap();
+
+        let outcome = Tracker::repair_blank_company_norms_if_possible(&mut empty);
+
+        assert!(outcome.is_err(), "a defect of the repair must be seen");
     }
 
     #[test]
