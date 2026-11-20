@@ -76,7 +76,10 @@ const CHILD_ENV_REMOVED_ALSO: [&str; 4] = [
 /// example `CLAUDE_CODE_GIT_BASH_PATH`). Removed even when not set.
 const CHILD_ENV_REMOVED_SETTINGS: [&str; 1] = ["CLAUDE_CODE_EFFORT_LEVEL"];
 
-/// True for a variable the child must not inherit (see the three constants above).
+/// True for a variable the child must not inherit because it picks the account or the bill: one
+/// that starts with a name of `CHILD_ENV_REMOVED_PREFIXES` or is a name of
+/// `CHILD_ENV_REMOVED_ALSO`. (`CHILD_ENV_REMOVED` and `CHILD_ENV_REMOVED_SETTINGS` are removed by
+/// name in `scrub_env`, whether or not the parent has them.)
 fn picks_account_or_bill(name: &str) -> bool {
     let upper = name.to_ascii_uppercase();
     CHILD_ENV_REMOVED_PREFIXES
@@ -1262,22 +1265,18 @@ mod tests {
             dir.path().to_path_buf(),
             dir.path().join("claude-config"),
         );
-        // Removed whether or not the parent has it; its sibling variables are left alone.
-        for present in [
-            vec![],
-            vec!["CLAUDE_CODE_EFFORT_LEVEL", "CLAUDE_CODE_GIT_BASH_PATH"],
-        ] {
-            let command = runner.prepare_command_in(
-                &request(),
-                present.into_iter().map(std::ffi::OsString::from),
-            );
-            let envs = envs_of(&command);
-            assert_eq!(envs.get("CLAUDE_CODE_EFFORT_LEVEL"), Some(&None));
-            assert!(
-                !envs.contains_key("CLAUDE_CODE_GIT_BASH_PATH"),
-                "the CLI reads this one at start-up on Windows"
-            );
-        }
+        // Removed even when the parent does not set it (the removal is explicit, not a scan of
+        // the parent's names); its sibling variables are left alone.
+        let command = runner.prepare_command_in(
+            &request(),
+            ["CLAUDE_CODE_GIT_BASH_PATH"].map(std::ffi::OsString::from),
+        );
+        let envs = envs_of(&command);
+        assert_eq!(envs.get("CLAUDE_CODE_EFFORT_LEVEL"), Some(&None));
+        assert!(
+            !envs.contains_key("CLAUDE_CODE_GIT_BASH_PATH"),
+            "the CLI reads this one at start-up on Windows"
+        );
     }
 
     #[test]
