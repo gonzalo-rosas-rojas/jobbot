@@ -150,7 +150,7 @@ pub enum ResolveIntent {
 }
 
 /// The refusal of a plain resolve of a card parked for its region.
-const SEND_ANYWAY_REFUSAL: &str = "Esta postulación está fuera de la región con las reglas de hoy: usa «Enviar igual» en su tarjeta, o retírala.";
+pub const SEND_ANYWAY_REFUSAL: &str = "Esta postulación está fuera de la región con las reglas de hoy: usa «Enviar igual» en su tarjeta, o retírala.";
 /// What the card answers when it was sent back with the region check cleared.
 const SEND_ANYWAY_DONE: &str = "Vuelve a la cola: se enviará sin la revisión de región.";
 

@@ -44,10 +44,32 @@ pub(super) fn cmd_resolve(
     intent: actions::ResolveIntent,
     out: &mut dyn Write,
 ) -> Result<i32> {
+    // The panel never sends this intent for a batch: it is one decision per application, here too.
+    if intent == actions::ResolveIntent::SendOutsideRegion && keys.len() != 1 {
+        writeln!(
+            out,
+            "--send-outside-region va con una sola clave: es una decisión por postulación."
+        )?;
+        return Ok(EXIT_ERROR);
+    }
     let tracker = open_tracker(paths)?;
-    act_on_each(keys, out, |key| {
-        actions::resolve(&tracker, key, now, intent)
-    })
+    let mut code = EXIT_OK;
+    for key in keys {
+        let outcome = actions::resolve(&tracker, key, now, intent)?;
+        // Every line names its key, so the lines of several keys can be told apart.
+        writeln!(out, "{key}: {}", outcome.message)?;
+        if outcome.message == actions::SEND_ANYWAY_REFUSAL {
+            // The refusal text is the panel's (it must not carry a command line); the terminal gets its way out here.
+            writeln!(
+                out,
+                "Desde la terminal: jobbot resolve {key} --send-outside-region"
+            )?;
+        }
+        if !outcome.ok {
+            code = EXIT_ERROR;
+        }
+    }
+    Ok(code)
 }
 
 /// For `unconfirmed_submit` and assisted forms Gonza finished himself.
@@ -252,7 +274,14 @@ mod tests {
 
         let (code, out) = plain(root.path(), open_now(), &["resolve", "test:1"]).await;
         assert_eq!(code, 1, "{out}");
-        assert!(out.contains("«Enviar igual»"), "{out}");
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines.len(), 2, "{out}");
+        assert!(lines[0].starts_with("test:1: "), "{out}");
+        assert!(lines[0].contains("«Enviar igual»"), "{out}");
+        assert_eq!(
+            lines[1],
+            "Desde la terminal: jobbot resolve test:1 --send-outside-region"
+        );
         assert_eq!(state(), State::NeedsGonza);
 
         let (code, out) = plain(
@@ -262,12 +291,46 @@ mod tests {
         )
         .await;
         assert_eq!(code, 0, "{out}");
+        assert!(out.starts_with("test:1: "), "{out}");
         assert!(
             out.contains("se enviará sin la revisión de región"),
             "{out}"
         );
         assert_eq!(state(), State::Scored);
         assert!(tracker_of(root.path()).region_override("test:1").unwrap());
+    }
+
+    #[tokio::test]
+    async fn send_outside_region_with_several_keys_is_refused_before_touching_anything() {
+        let root = temp_root();
+        seed(root.path(), &make_job(), &[]);
+        tracker_of(root.path())
+            .transition(
+                "test:1",
+                State::NeedsGonza,
+                Some(jobbot_domain::gate::OUT_OF_REGION_NOTE),
+                open_now(),
+            )
+            .unwrap();
+
+        let (code, out) = plain(
+            root.path(),
+            open_now(),
+            &["resolve", "test:1", "test:2", "--send-outside-region"],
+        )
+        .await;
+
+        assert_eq!(code, 1, "{out}");
+        assert_eq!(
+            out.trim(),
+            "--send-outside-region va con una sola clave: es una decisión por postulación."
+        );
+        let tracker = tracker_of(root.path());
+        assert_eq!(
+            tracker.get_application("test:1").unwrap().unwrap().state,
+            State::NeedsGonza
+        );
+        assert!(!tracker.region_override("test:1").unwrap());
     }
 
     #[tokio::test]
