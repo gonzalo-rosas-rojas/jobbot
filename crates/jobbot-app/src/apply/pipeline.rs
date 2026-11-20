@@ -8,7 +8,10 @@ use anyhow::Context;
 use chrono::{DateTime, Utc};
 use jobbot_domain::answers::{AnswerBank, australian_salary_ask};
 use jobbot_domain::form::{SubmitMode, SubmitStatus};
-use jobbot_domain::gate::{REASON_LISTING_ONLY, REASON_MANUAL_ONLY, REASON_STALE, stale_note};
+use jobbot_domain::gate::{
+    OUT_OF_REGION_NOTE, REASON_LISTING_ONLY, REASON_MANUAL_ONLY, REASON_OUT_OF_REGION,
+    REASON_STALE, stale_note,
+};
 use jobbot_domain::handoff::{
     FormInspection, FormTally, HANDOFF_REASON_PREFIX, is_handoff_job, missing_labels,
     report_from_result,
@@ -476,7 +479,8 @@ fn outcome(job_key: &str, status: &str, reason: Option<&str>) -> SubmitOutcome {
 ///
 /// * A STOP file returns immediately. `stop_file` and `daily_cap` from the gate end the run.
 /// * `manual_only_platform` and `listing_only` move the application to `needs_gonza`; an
-///   `excluded:*` company and a `stale_posting` move it to `withdrawn`; `company_cooldown` and
+///   `excluded:*` company, a posting outside the region (`fuera_de_region`) and a `stale_posting`
+///   move it to `withdrawn`; `company_cooldown` and
 ///   `warmup_hold` leave it as it is. All of them are reported with status `blocked`.
 /// * The mode is decided per application: `Assist` stays `Assist` (Gonza's click is the review,
 ///   so a submission also approves the application); `DryRun` stays `DryRun`; `Live` becomes
@@ -603,6 +607,16 @@ pub async fn submit_all_while(
             }
             Some(why) if why.starts_with("excluded:") => {
                 tracker.transition(&row.job_key, State::Withdrawn, Some(why), now)?;
+                outcomes.push(outcome(&row.job_key, "blocked", gate_reason));
+                continue;
+            }
+            Some(REASON_OUT_OF_REGION) => {
+                tracker.transition(
+                    &row.job_key,
+                    State::Withdrawn,
+                    Some(OUT_OF_REGION_NOTE),
+                    now,
+                )?;
                 outcomes.push(outcome(&row.job_key, "blocked", gate_reason));
                 continue;
             }

@@ -51,12 +51,19 @@ pub const REASON_LISTING_ONLY: &str = "listing_only";
 /// The gate's reason for a posting older than the age limit.
 pub const REASON_STALE: &str = "stale_posting";
 
+/// The gate's reason for a posting outside the region (`region::region_ok_with`).
+pub const REASON_OUT_OF_REGION: &str = "fuera_de_region";
+
+/// The note of an application withdrawn for a region the job cannot be done from, by the prune or the gate. The
+/// text before the colon is the rule.
+pub const OUT_OF_REGION_NOTE: &str = "fuera_de_region: no se puede hacer desde Chile";
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct GateDecision {
     pub allowed: bool,
     /// Set when `allowed` is false: `stop_file`, `manual_only_platform`, `listing_only`,
     /// `excluded:<kind>` (the kind of rule, never its text: `domain`, `name` or `category`),
-    /// `stale_posting`, `daily_cap`, `company_cooldown`, `warmup_hold` or
+    /// `fuera_de_region`, `stale_posting`, `daily_cap`, `company_cooldown`, `warmup_hold` or
     /// `review_required`.
     pub reason: Option<String>,
 }
@@ -133,4 +140,14 @@ pub fn is_stale_since(
     job.posted_at
         .or(first_seen)
         .is_some_and(|since| now - since > TimeDelta::days(criteria.max_posting_age_days))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_out_of_region_note_starts_with_its_reason() {
+        assert!(OUT_OF_REGION_NOTE.starts_with(&format!("{REASON_OUT_OF_REGION}:")));
+    }
 }

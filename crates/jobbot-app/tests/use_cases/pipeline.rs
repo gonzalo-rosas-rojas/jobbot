@@ -12,7 +12,8 @@ use jobbot_app::ports::{FillMode, FormFiller};
 use jobbot_app::ports::{OpenChecker, OpenStatus};
 use jobbot_domain::answers::AnswerBank;
 use jobbot_domain::form::SubmitStatus;
-use jobbot_domain::models::Job;
+use jobbot_domain::gate::OUT_OF_REGION_NOTE;
+use jobbot_domain::models::{Job, MANUAL_SOURCE};
 use jobbot_domain::rules::{Criteria, Exclusions};
 use jobbot_domain::state::State;
 use jobbot_domain::text::safe_key;
@@ -1361,6 +1362,62 @@ async fn stale_posting_is_withdrawn() {
     assert_eq!(outcomes[0].status, "blocked");
     assert_eq!(outcomes[0].reason.as_deref(), Some("stale_posting"));
     assert_eq!(env.state("test:1"), State::Withdrawn);
+}
+#[tokio::test]
+async fn a_prepared_posting_outside_the_region_is_withdrawn_with_the_prune_note() {
+    let env = Env::new();
+    let job = make_job_with(|j| {
+        j.location = "San Francisco, CA".into();
+        j.remote = true;
+    });
+    env.prepared(&job, 90.0);
+    let filler = FakeFiller::new();
+    let crit = Criteria {
+        first_n_reviewed: 0,
+        ..criteria()
+    };
+    let outcomes = env.run(&filler, &crit, SubmitMode::Live).await;
+    assert!(filler.calls().is_empty());
+    assert_eq!(outcomes[0].status, "blocked");
+    assert_eq!(outcomes[0].reason.as_deref(), Some("fuera_de_region"));
+    assert_eq!(env.state("test:1"), State::Withdrawn);
+    let events = env.tracker.events_for("test:1").unwrap();
+    assert_eq!(
+        events.last().unwrap().note.as_deref(),
+        Some(OUT_OF_REGION_NOTE)
+    );
+}
+#[tokio::test]
+async fn a_hand_recorded_posting_back_in_the_queue_with_no_location_passes_the_region_check() {
+    // `record` writes the posting remote, with the location as typed (maybe none): a silent location
+    // passes, a closed one does not.
+    let env = Env::new();
+    let silent = make_job_with(|j| {
+        j.source = MANUAL_SOURCE.into();
+        j.external_id = "silent".into();
+        j.location = String::new();
+        j.remote = true;
+    });
+    let closed = make_job_with(|j| {
+        j.source = MANUAL_SOURCE.into();
+        j.external_id = "closed".into();
+        j.company = "Other Co".into();
+        j.location = "Remote - US".into();
+        j.remote = true;
+    });
+    env.prepared(&silent, 0.0);
+    env.prepared(&closed, 0.0);
+    let filler = FakeFiller::new();
+    let crit = Criteria {
+        first_n_reviewed: 0,
+        ..criteria()
+    };
+
+    env.run(&filler, &crit, SubmitMode::Live).await;
+
+    let called: Vec<String> = filler.calls().into_iter().map(|(key, _)| key).collect();
+    assert_eq!(called, vec![silent.key()]);
+    assert_eq!(env.state(&closed.key()), State::Withdrawn);
 }
 /// Answers each posting with what the test says (open when it says nothing) and remembers who
 /// it was asked about.

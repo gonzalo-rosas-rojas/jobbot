@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use chrono::{DateTime, TimeDelta, Utc};
 use jobbot_domain::exclusion::{check_exclusion, exclusion_note};
-use jobbot_domain::gate::{is_stale, stale_note};
+use jobbot_domain::gate::{OUT_OF_REGION_NOTE, is_stale, stale_note};
 use jobbot_domain::handoff::{form_may_have_gone_out, may_have_been_sent};
 use jobbot_domain::models::{FetchError, Job};
 use jobbot_domain::rules::{Criteria, Exclusions};
@@ -157,11 +157,6 @@ pub struct PruneReport {
     pub out_of_region: usize,
 }
 
-/// The note of an application withdrawn for a region the job cannot be done from. The text before
-/// the colon is the rule that decided it; the stale note is the submission gate's own
-/// (`gate::stale_note`, `stale_posting: aviso de más de N días`).
-const OUT_OF_REGION_NOTE: &str = "fuera_de_region: no se puede hacer desde Chile";
-
 /// The reasons under which a form may have gone out although the application never reached
 /// `Submitted` live in the domain (`handoff::MAY_HAVE_BEEN_SENT`, `may_have_been_sent`,
 /// `form_may_have_gone_out`). The panel sorts a waiting card by the same prefixes (`reason_kind`
@@ -199,7 +194,15 @@ pub use jobbot_domain::handoff::MAY_HAVE_BEEN_SENT;
 /// * A posting outside the region (`region_ok`) is withdrawn with `fuera_de_region`, but only when
 ///   its key is in `refreshed`: the source returned it in this run, so its location and remote
 ///   flag are what the source says now. A row the sources no longer return keeps the location it
-///   was stored with, which an older version of a source may have read badly.
+///   was stored with, which an older version of a source may have read badly. The submission gate
+///   checks the region of every `prepared` application before a click, on the stored fields
+///   (`gate::decide`), and withdraws it with the same note, so this limit only decides what the
+///   prune itself closes. The trade is deliberate: a posting that reaches the gate and fails the
+///   region rule either was refreshed in the same run (then this pass withdrew it first) or is no
+///   longer returned by its source, which in practice means it closed (the open check right after
+///   the gate would withdraw it as `posting_closed`). What is left is a stricter rule applied to
+///   text an older parser stored, where sending an application to a closed region is worse than
+///   withdrawing one that was really open.
 /// * Eligibility beats the reason an application waits: a `NeedsGonza` application that waits for
 ///   Gonza for another reason (missing answers, below the pay floor) is withdrawn too.
 ///
@@ -303,7 +306,8 @@ fn detail_with_floor(scored: &ScoreResult) -> BTreeMap<String, f64> {
 }
 
 /// True when `job` is in a region Gonza takes: his own, or one of the criteria's extra places.
-fn region_ok_for(job: &Job, criteria: &Criteria) -> bool {
+/// The submission gate uses it too (`apply::gate`), so the two cannot read the region differently.
+pub(crate) fn region_ok_for(job: &Job, criteria: &Criteria) -> bool {
     region_ok_with(job, &criteria.extra_open_places)
 }
 

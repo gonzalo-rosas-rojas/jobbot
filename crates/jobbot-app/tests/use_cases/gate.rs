@@ -365,6 +365,60 @@ fn an_excluded_company_is_withdrawn_even_when_its_form_is_one_to_fill_by_hand() 
     assert_eq!(decision.reason.unwrap(), "excluded:name");
 }
 #[test]
+fn a_posting_outside_the_region_is_blocked_as_fuera_de_region() {
+    let (_dir, stop) = no_stop_file();
+    let tracker = Tracker::in_memory().unwrap();
+    let job = make_job_with(|j| {
+        j.location = "San Francisco, CA".into();
+        j.remote = true;
+    });
+    prepared(&tracker, &job, true, false);
+    let decision = decide(&tracker, &job, &criteria(), &stop, *NOW);
+    assert_eq!(decision.reason.as_deref(), Some("fuera_de_region"));
+}
+#[test]
+fn a_posting_in_an_extra_place_passes_the_region_check() {
+    let (_dir, stop) = no_stop_file();
+    let tracker = Tracker::in_memory().unwrap();
+    let job = make_job_with(|j| {
+        j.location = "Sydney, Australia".into();
+        j.remote = true;
+    });
+    prepared(&tracker, &job, true, false);
+    let crit = Criteria {
+        extra_open_places: vec!["Australia".to_string()],
+        ..criteria()
+    };
+    let decision = decide(&tracker, &job, &crit, &stop, *NOW);
+    assert_ne!(decision.reason.as_deref(), Some("fuera_de_region"));
+}
+#[test]
+fn an_excluded_posting_outside_the_region_is_blocked_as_excluded() {
+    let (_dir, stop) = no_stop_file();
+    let tracker = Tracker::in_memory().unwrap();
+    let job = make_job_with(|j| {
+        j.company = sample_exclusions().names[0].clone();
+        j.location = "San Francisco, CA".into();
+    });
+    prepared(&tracker, &job, true, false);
+    let decision = decide(&tracker, &job, &criteria(), &stop, *NOW);
+    assert_eq!(decision.reason.as_deref(), Some("excluded:name"));
+}
+#[test]
+fn a_listing_only_posting_outside_the_region_is_withdrawn_not_handed_to_gonza() {
+    // `listing_only` would send the posting to Gonza as a form to fill by hand; a posting he cannot
+    // take from Chile must not become that card.
+    let (_dir, stop) = no_stop_file();
+    let tracker = Tracker::in_memory().unwrap();
+    let job = make_job_with(|j| {
+        j.apply_url = "https://remotive.com/remote-jobs/software-dev/x-123".into();
+        j.location = "San Francisco, CA".into();
+    });
+    prepared(&tracker, &job, true, false);
+    let decision = decide(&tracker, &job, &criteria(), &stop, *NOW);
+    assert_eq!(decision.reason.as_deref(), Some("fuera_de_region"));
+}
+#[test]
 fn daily_cap() {
     let (_dir, stop) = no_stop_file();
     let tracker = Tracker::in_memory().unwrap();
