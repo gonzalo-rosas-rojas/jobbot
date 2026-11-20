@@ -965,9 +965,25 @@ fn only_document_words(words: &[&str]) -> bool {
         && words.iter().any(|w| DOCUMENT_ONLY_ANCHORS.contains(w))
 }
 
+/// Words a form adds after a label to say whether the field is required.
+const REQUIRED_MARKERS: &[&str] = &[
+    "required",
+    "optional",
+    "obligatorio",
+    "opcional",
+    "requerido",
+];
+
 /// "Passport No", "ID No", "Account no": a "no" or "n" that closes the label right after a
 /// document or banking word is the abbreviation. Anywhere else it is a plain word.
 fn ends_with_no_after_a_document(words: &[&str]) -> bool {
+    // A "(required)" or "*" after the label moves the "no" off the end; only for this check the
+    // marker words are dropped ("*" and brackets are already gone after `normalize`).
+    let kept = words
+        .iter()
+        .rposition(|w| !REQUIRED_MARKERS.contains(w))
+        .map_or(0, |last| last + 1);
+    let words = &words[..kept];
     let [.., before, last] = words else {
         return false;
     };
@@ -1459,6 +1475,24 @@ mod tests {
             let bank = loose_and_exact_bank(label);
             assert!(bank.lookup(label).is_some(), "{label:?} was held back");
         }
+    }
+
+    #[test]
+    fn a_required_or_optional_marker_after_the_label_does_not_hide_the_final_no() {
+        for label in [
+            "Passport No (required)",
+            "Account no *",
+            "Card no (optional)",
+            "Licence no (obligatorio)",
+            "ID No (opcional)",
+            "Passport No - required",
+            "ID No: REQUERIDO",
+        ] {
+            let bank = loose_and_exact_bank(label);
+            assert!(bank.lookup(label).is_none(), "answered {label:?}");
+        }
+        let phone = "Phone no (required)";
+        assert!(loose_and_exact_bank(phone).lookup(phone).is_some());
     }
 
     #[test]
