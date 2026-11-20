@@ -750,6 +750,36 @@ async fn a_cleared_application_whose_posting_moved_is_parked_again_not_withdrawn
     );
 }
 #[tokio::test]
+async fn a_cleared_application_that_waits_for_him_again_keeps_its_card_when_its_posting_moves() {
+    const BY_HAND: &str = "listing_only: envíalo tú";
+    let moved = good("1", "Moved Co");
+    let tracker = stored_by_discovery(vec![moved.clone()]).await;
+    cleared_outside_the_region(&tracker, &moved, "test:1");
+    // Later it stopped again, this time for a form he sends by hand.
+    tracker
+        .transition("test:1", State::NeedsGonza, Some(BY_HAND), *NOW)
+        .unwrap();
+    let events_before = tracker.events_for("test:1").unwrap().len();
+    let elsewhere = Job {
+        location: "San Francisco, CA".into(),
+        ..moved
+    };
+
+    let report = discover_again(&tracker, vec![elsewhere]).await;
+
+    // Not withdrawn (that would undo his decision with no card) and not moved: he reads the
+    // posting when he works the card he already has.
+    let row = tracker.get_application("test:1").unwrap().unwrap();
+    assert_eq!(row.state, State::NeedsGonza);
+    assert_eq!(row.needs_reason.as_deref(), Some(BY_HAND));
+    assert_eq!(
+        tracker.events_for("test:1").unwrap().len(),
+        events_before,
+        "nothing is written"
+    );
+    assert_eq!(report.pruned_region, 0);
+}
+#[tokio::test]
 async fn an_override_written_by_an_older_build_is_parked_again_too() {
     let old = good("1", "Old Co");
     let tracker = stored_by_discovery(vec![old.clone()]).await;

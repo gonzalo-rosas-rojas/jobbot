@@ -208,7 +208,9 @@ pub use jobbot_domain::handoff::MAY_HAVE_BEEN_SENT;
 ///   no longer says what he saw it is parked again, with a card, never withdrawn (`parked_region`, not counted in
 ///   `out_of_region`).
 /// * Eligibility beats the reason an application waits: a `NeedsGonza` application that waits for
-///   Gonza for another reason (missing answers, below the pay floor) is withdrawn too.
+///   Gonza for another reason (missing answers, below the pay floor) is withdrawn too. The one
+///   exception is the application he sent on past the region check: when its posting moves while
+///   it waits for him for another reason, it keeps that card and nothing is written.
 ///
 /// A second pass finds nothing new: withdrawn applications are not looked at again.
 #[tracing::instrument(skip_all, fields(excluded = Empty, stale = Empty, out_of_region = Empty, parked_region = Empty))]
@@ -260,16 +262,20 @@ pub fn prune_ineligible(
         let (note, counter) = if !may_be_sent && is_stale_stored(&job, tracker, criteria, now)? {
             (stale_note(criteria), &mut report.stale)
         } else if parks_again {
-            match tracker.transition(
-                &row.job_key,
-                State::NeedsGonza,
-                Some(OUT_OF_REGION_NOTE),
-                now,
-            ) {
-                Ok(()) => report.parked_region += 1,
-                // It waits for Gonza already, or was moved since the list was read: that stands.
-                Err(StoreError::IllegalTransition { .. }) => {}
-                Err(other) => return Err(other.into()),
+            // One that already waits for Gonza for another reason keeps the card it has: he reads the posting when he
+            // works that card, and a withdrawal would undo his decision with no card at all.
+            if row.state != State::NeedsGonza {
+                match tracker.transition(
+                    &row.job_key,
+                    State::NeedsGonza,
+                    Some(OUT_OF_REGION_NOTE),
+                    now,
+                ) {
+                    Ok(()) => report.parked_region += 1,
+                    // The panel or `mark` moved it since the list was read: that decision stands.
+                    Err(StoreError::IllegalTransition { .. }) => {}
+                    Err(other) => return Err(other.into()),
+                }
             }
             continue;
         } else if region_closed && !had_override {
