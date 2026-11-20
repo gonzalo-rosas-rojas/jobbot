@@ -1101,28 +1101,45 @@ mod tests {
         }
     }
 
-    /// Every signal, listed by hand: `slot` below has no `_` arm, so a new variant does not compile until it gets
-    /// a slot there, and `every_region_signal_is_listed_once` then fails until it is listed here too.
-    const ALL: [RegionSignal; 3] = [
+    /// How many variants `RegionSignal` has, as `slot` numbers them. Raise it together with `ALL` and `slot`.
+    const VARIANTS: usize = 3;
+
+    /// Every signal, listed by hand.
+    const ALL: [RegionSignal; VARIANTS] = [
         RegionSignal::NamesOpen,
         RegionSignal::Silent,
         RegionSignal::Other,
     ];
 
-    /// The position of a signal among the variants; the match is exhaustive on purpose.
+    /// The position of a signal among the variants. The match has no `_` arm, so a new variant does not compile
+    /// until it gets a slot here; a slot at or past `VARIANTS` is refused on the spot.
     fn slot(signal: RegionSignal) -> usize {
-        match signal {
+        let slot = match signal {
             RegionSignal::NamesOpen => 0,
             RegionSignal::Silent => 1,
             RegionSignal::Other => 2,
-        }
+        };
+        assert!(slot < VARIANTS, "raise VARIANTS and list {signal:?} in ALL");
+        slot
     }
 
+    /// What this checks: after a variant is added and given a slot, `VARIANTS`, `ALL` and the slots must agree (the
+    /// slots of `ALL` are exactly `0..VARIANTS`, each once, and match the declaration order), so raising one of them
+    /// and not the others fails here. What it cannot see is a variant nobody lists anywhere; `slot` refuses that one
+    /// as soon as it is called with it, and the match in `slot` stops the build before that.
     #[test]
     fn every_region_signal_is_listed_once() {
+        assert_eq!(ALL.len(), VARIANTS);
         let mut slots: Vec<usize> = ALL.into_iter().map(slot).collect();
         slots.sort_unstable();
-        assert_eq!(slots, (0..=2).collect::<Vec<_>>());
+        assert_eq!(slots, (0..VARIANTS).collect::<Vec<_>>());
+        for signal in ALL {
+            assert_eq!(
+                signal as usize,
+                slot(signal),
+                "slot follows the declaration order"
+            );
+        }
     }
 
     #[test]
