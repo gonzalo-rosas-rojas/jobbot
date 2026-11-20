@@ -21,8 +21,9 @@ let S = null;
 
 const batchOf = (ctx) => (ctx.settings && typeof ctx.settings.get === "function" ? ctx.settings.get("batchMin") : null);
 
-// The sheet holds the page without scrolling (the wheel belongs to the camera, spec §3.5). What has no fixed size is the two lists, boards and
-// errors; when the page does not fit, they give way, one row at a time, and the rest is said as "y N más". Boards first, down to three, then
+// The sheet holds the page without scrolling (the wheel belongs to the camera, spec §3.5). What has no fixed size is the two lists, the funnel (its
+// rows are boards, origins or regions, whichever view is pressed) and the errors; when the page does not fit, they give way, one row at a time, and
+// the rest is said as "y N más". The funnel first, down to three, then
 // errors down to two, then the keys of the foot (they are also in the palette), then both lists to the floor. The count in the title of the
 // errors stays the whole one.
 const FLOOR = { funnel: 2, errors: 1 };
