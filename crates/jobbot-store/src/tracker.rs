@@ -25,15 +25,15 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use rusqlite::Connection;
 use rusqlite::types::Type;
 
-// The state machine lives in the pure domain crate; the tracker stores the states.
 use jobbot_domain::origin::Origin;
+// The state machine lives in the pure domain crate; the tracker stores the states.
 pub use jobbot_domain::state::{SUBMITTED_STATES, State};
 
 // The records the tracker reads and writes are the application's port types.
 pub use jobbot_app::ports::store::{
     ApplicationRow, AttemptStart, CohortRow, EmailAdded, EmailKind, EmailRow, EventRow, FunnelRow,
-    INTENT_SUBMIT, INTERRUPTED_PREFIX, Intent, MoveRow, NewEmail, NewTask, StoredPage, TaskAdded,
-    TaskCompletion, TaskRow, UndoRefusal, UndoableMark,
+    Funnels, INTENT_SUBMIT, INTERRUPTED_PREFIX, Intent, MoveRow, NewEmail, NewTask, StoredPage,
+    TaskAdded, TaskCompletion, TaskRow, UndoRefusal, UndoableMark,
 };
 
 /// Everything the tracker can fail with. The first two are answers about the data (the caller

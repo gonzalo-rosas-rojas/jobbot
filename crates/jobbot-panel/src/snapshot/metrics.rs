@@ -138,15 +138,17 @@ pub(super) fn metrics(panel: &Panel, now: DateTime<Utc>) -> Result<Metrics> {
 pub(super) fn funnel(panel: &Panel) -> Result<Funnel> {
     let t = &panel.tracker;
     let ever = all_time_from();
+    // One read of the applications for the three splits.
+    let splits = t.funnels()?;
     Ok(Funnel {
         sent: t.submitted_since(ever)?,
         answered: t.jobs_reaching(&ANSWERED_STATES, ever)?,
         tests: t.jobs_reaching(&[State::TechnicalTest], ever)?,
         interviews: t.jobs_reaching(&[State::Interview], ever)?,
         offers: t.jobs_reaching(&[State::Offer], ever)?,
-        by_source: groups(t.funnel_by_source()?),
-        by_origin: groups(t.funnel_by_origin()?),
-        by_region: groups(t.funnel_by_region()?),
+        by_source: groups(splits.by_source),
+        by_origin: groups(splits.by_origin),
+        by_region: groups(splits.by_region),
     })
 }
 
@@ -154,20 +156,35 @@ pub(super) fn funnel(panel: &Panel) -> Result<Funnel> {
 fn groups(rows: Vec<FunnelRow>) -> BTreeMap<String, FunnelGroup> {
     rows.into_iter()
         .map(|row| {
-            (
-                row.group,
-                FunnelGroup {
-                    n: row.n,
-                    sent: row.sent,
-                    answered: row.answered,
-                    rejected: row.rejected,
-                    tests: row.tests,
-                    interviews: row.interviews,
-                    offers: row.offers,
-                },
-            )
+            let group = row.group.clone();
+            (group, FunnelGroup::from(row))
         })
         .collect()
+}
+
+impl From<FunnelRow> for FunnelGroup {
+    /// Every counter named, no `..`: a new counter of the store's row does not compile until the page's line has it.
+    fn from(row: FunnelRow) -> FunnelGroup {
+        let FunnelRow {
+            group: _,
+            n,
+            sent,
+            answered,
+            rejected,
+            tests,
+            interviews,
+            offers,
+        } = row;
+        FunnelGroup {
+            n,
+            sent,
+            answered,
+            rejected,
+            tests,
+            interviews,
+            offers,
+        }
+    }
 }
 
 /// The weekly pipeline. The layers nest by construction: only an application can have a CV, a

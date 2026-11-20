@@ -120,6 +120,14 @@ pub struct FunnelRow {
     pub offers: i64,
 }
 
+/// The three splits of the funnel, from one read of the applications (`HistoryRepo::funnels`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Funnels {
+    pub by_source: Vec<FunnelRow>,
+    pub by_origin: Vec<FunnelRow>,
+    pub by_region: Vec<FunnelRow>,
+}
+
 /// A stored posting with the application made for it, when there is one: one row of the weekly
 /// pipeline (`cohort_since`).
 #[derive(Debug, Clone, PartialEq)]
@@ -621,6 +629,8 @@ pub trait HistoryRepo {
     /// The same funnel split by what the posting names about its region (`region::region_signal`: `open`,
     /// `silent`, `other`), read from each posting now. Nothing is stored.
     fn funnel_by_region(&self) -> StoreResult<Vec<FunnelRow>>;
+    /// The three funnels from one read of the applications (the panel's poll).
+    fn funnels(&self) -> StoreResult<Funnels>;
     /// Every posting first seen at or after `since`, with its application when it has one
     /// (`jobs LEFT JOIN applications`, one query). Withdrawn applications are in too.
     fn cohort_since(&self, since: DateTime<Utc>) -> StoreResult<Vec<CohortRow>>;

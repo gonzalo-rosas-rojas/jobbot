@@ -215,14 +215,9 @@ fn an_application_sent_by_hand_can_be_recorded_from_the_page() {
         message.starts_with("Registrada como enviada: Acme — Backend Engineer (manual:"),
         "{message}"
     );
-    let key = message
-        .rsplit('(')
-        .next()
-        .unwrap()
-        .split(')')
-        .next()
-        .unwrap()
-        .to_string();
+    let key = p.tracker.list_by_state(State::Submitted).unwrap()[0]
+        .job_key
+        .clone();
     let row = p.tracker.get_application(&key).unwrap().unwrap();
     assert_eq!(row.state, State::Submitted);
     assert_eq!(

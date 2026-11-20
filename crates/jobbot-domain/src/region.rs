@@ -862,12 +862,6 @@ pub enum RegionSignal {
 }
 
 impl RegionSignal {
-    pub const ALL: [RegionSignal; 3] = [
-        RegionSignal::NamesOpen,
-        RegionSignal::Silent,
-        RegionSignal::Other,
-    ];
-
     /// The name the funnel groups by.
     pub fn as_str(self) -> &'static str {
         match self {
@@ -882,6 +876,10 @@ impl RegionSignal {
 /// this with three columns, and a `&Job` built from three fields would silently give wrong answers the day
 /// someone makes the function read the description. It reuses the lists and the place reading of
 /// `region_ok_with`, so the two cannot drift: every `NamesOpen` posting passes the filter.
+///
+/// Known limit: it knows no extra places (`criteria.extra_open_places`, which `region_ok_with` can take), because
+/// the store that calls it does not know the criteria. A posting in one of those places passes the filter but is
+/// `Other` here, so the funnel by region shows it as "otro lugar", next to the closed regions.
 pub fn region_signal(title: &str, location: &str, remote: bool) -> RegionSignal {
     if !remote {
         let location = location.to_lowercase();
@@ -974,21 +972,18 @@ mod tests {
 
     #[test]
     fn region_signal_names_are_open_silent_and_other() {
-        assert_eq!(
-            RegionSignal::ALL.map(RegionSignal::as_str),
-            ["open", "silent", "other"]
-        );
-    }
-
-    #[test]
-    fn every_region_signal_is_listed_in_all_once() {
+        // The match has no `_` arm, so a new signal does not compile until its name is decided here.
         for signal in [
             RegionSignal::NamesOpen,
             RegionSignal::Silent,
             RegionSignal::Other,
         ] {
-            let listed = RegionSignal::ALL.iter().filter(|s| **s == signal).count();
-            assert_eq!(listed, 1, "{signal:?}");
+            let expected = match signal {
+                RegionSignal::NamesOpen => "open",
+                RegionSignal::Silent => "silent",
+                RegionSignal::Other => "other",
+            };
+            assert_eq!(signal.as_str(), expected);
         }
     }
 

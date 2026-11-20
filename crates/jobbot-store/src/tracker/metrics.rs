@@ -9,8 +9,8 @@ use jobbot_domain::state::ANSWERED_STATES;
 use rusqlite::{params, params_from_iter};
 
 use super::{
-    CohortRow, EventRow, FunnelRow, MoveRow, Result, State, Tracker, from_text, optional_from_text,
-    origin_from_text, placeholders, state_from_text, to_text,
+    CohortRow, EventRow, FunnelRow, Funnels, MoveRow, Result, State, Tracker, from_text,
+    optional_from_text, origin_from_text, placeholders, state_from_text, to_text,
 };
 
 /// The span the state changes of `moves_between` are read from (`?1` from, `?2` until), with the
@@ -280,14 +280,14 @@ impl Tracker {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    /// The funnel of `reached_per_application` grouped by `group`, sorted by group name. The stages mean what
+    /// The funnel of `reached` grouped by `group`, sorted by group name. The stages mean what
     /// `submitted_since` and `jobs_reaching` mean for the whole funnel: `sent` is a submission stamp, the rest
     /// "reached that state at least once"; `n` is every application of the group, sent or not, so the page can
     /// show a base with each count.
-    fn funnel_grouped(&self, group: impl Fn(&Reached) -> String) -> Result<Vec<FunnelRow>> {
+    fn grouped(reached: &[Reached], group: impl Fn(&Reached) -> String) -> Vec<FunnelRow> {
         let mut groups: BTreeMap<String, FunnelRow> = BTreeMap::new();
-        for reached in self.reached_per_application()? {
-            let name = group(&reached);
+        for reached in reached {
+            let name = group(reached);
             let line = groups.entry(name.clone()).or_insert_with(|| FunnelRow {
                 group: name,
                 n: 0,
@@ -306,27 +306,50 @@ impl Tracker {
             line.interviews += i64::from(reached.interviews);
             line.offers += i64::from(reached.offers);
         }
-        Ok(groups.into_values().collect())
+        groups.into_values().collect()
+    }
+
+    fn by_source_of(reached: &[Reached]) -> Vec<FunnelRow> {
+        Self::grouped(reached, |r| r.source.clone())
+    }
+
+    fn by_origin_of(reached: &[Reached]) -> Vec<FunnelRow> {
+        Self::grouped(reached, |r| r.origin.as_str().to_string())
+    }
+
+    fn by_region_of(reached: &[Reached]) -> Vec<FunnelRow> {
+        Self::grouped(reached, |r| {
+            region_signal(&r.title, &r.location, r.remote)
+                .as_str()
+                .to_string()
+        })
     }
 
     /// The all-time funnel split by the source the posting came from, sorted by source name.
     pub fn funnel_by_source(&self) -> Result<Vec<FunnelRow>> {
-        self.funnel_grouped(|reached| reached.source.clone())
+        Ok(Self::by_source_of(&self.reached_per_application()?))
     }
 
     /// The all-time funnel split by how each application came about (`Origin`), sorted by stored name. Only
     /// the origins that have applications appear.
     pub fn funnel_by_origin(&self) -> Result<Vec<FunnelRow>> {
-        self.funnel_grouped(|reached| reached.origin.as_str().to_string())
+        Ok(Self::by_origin_of(&self.reached_per_application()?))
     }
 
     /// The all-time funnel split by `region::region_signal` of the posting's title, location and remote flag.
-    /// Nothing is stored: a change to the region rules changes this split for every application at once.
+    /// Nothing is stored: a change to the region rules changes this split for every application at once. A
+    /// posting in one of the criteria's extra open places shows as `other`: the store does not know the criteria.
     pub fn funnel_by_region(&self) -> Result<Vec<FunnelRow>> {
-        self.funnel_grouped(|reached| {
-            region_signal(&reached.title, &reached.location, reached.remote)
-                .as_str()
-                .to_string()
+        Ok(Self::by_region_of(&self.reached_per_application()?))
+    }
+
+    /// The three funnels from one read of the applications: what the panel asks on every poll.
+    pub fn funnels(&self) -> Result<Funnels> {
+        let reached = self.reached_per_application()?;
+        Ok(Funnels {
+            by_source: Self::by_source_of(&reached),
+            by_origin: Self::by_origin_of(&reached),
+            by_region: Self::by_region_of(&reached),
         })
     }
 
@@ -788,25 +811,6 @@ mod tests {
         t
     }
 
-    fn sums(rows: &[FunnelRow]) -> [i64; 7] {
-        let mut total = [0; 7];
-        for row in rows {
-            let line = [
-                row.n,
-                row.sent,
-                row.answered,
-                row.rejected,
-                row.tests,
-                row.interviews,
-                row.offers,
-            ];
-            for (sum, value) in total.iter_mut().zip(line) {
-                *sum += value;
-            }
-        }
-        total
-    }
-
     #[test]
     fn a_rejection_counts_as_answered_and_as_rejected_once() {
         let t = Tracker::in_memory().unwrap();
@@ -880,12 +884,42 @@ mod tests {
     }
 
     #[test]
-    fn the_three_funnels_split_the_same_applications() {
+    fn the_three_funnels_count_each_group_as_the_seeded_rows_say() {
+        // mixed_funnel_data seeds four applications; the expected lines are counted by hand from them:
+        //   1 ashby   LATAM   cold      sent
+        //   2 ashby   Remote  referral  sent, rejected
+        //   3 lever   US      cold      sent, interview, offer
+        //   4 lever   Remote  unknown   not sent
         let t = mixed_funnel_data();
-        let by_source = sums(&t.funnel_by_source().unwrap());
-        assert_eq!(by_source[0], 4);
-        assert_eq!(sums(&t.funnel_by_origin().unwrap()), by_source);
-        assert_eq!(sums(&t.funnel_by_region().unwrap()), by_source);
+        let line = |rows: &[FunnelRow], group: &str| -> [i64; 7] {
+            let row = rows.iter().find(|r| r.group == group).expect(group);
+            [
+                row.n,
+                row.sent,
+                row.answered,
+                row.rejected,
+                row.tests,
+                row.interviews,
+                row.offers,
+            ]
+        };
+        let source = t.funnel_by_source().unwrap();
+        assert_eq!(line(&source, "ashby"), [2, 2, 1, 1, 0, 0, 0]);
+        assert_eq!(line(&source, "lever"), [2, 1, 1, 0, 0, 1, 1]);
+        let origin = t.funnel_by_origin().unwrap();
+        assert_eq!(line(&origin, "cold"), [2, 2, 1, 0, 0, 1, 1]);
+        assert_eq!(line(&origin, "referral"), [1, 1, 1, 1, 0, 0, 0]);
+        assert_eq!(line(&origin, "unknown"), [1, 0, 0, 0, 0, 0, 0]);
+        let region = t.funnel_by_region().unwrap();
+        assert_eq!(line(&region, "open"), [1, 1, 0, 0, 0, 0, 0]);
+        assert_eq!(line(&region, "silent"), [2, 1, 1, 1, 0, 0, 0]);
+        assert_eq!(line(&region, "other"), [1, 1, 1, 0, 0, 1, 1]);
+        // And the one-read version gives the same three.
+        let all = t.funnels().unwrap();
+        assert_eq!(
+            (all.by_source, all.by_origin, all.by_region),
+            (source, origin, region)
+        );
     }
 
     #[test]

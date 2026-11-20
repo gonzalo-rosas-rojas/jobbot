@@ -329,6 +329,9 @@ impl HistoryRepo for Tracker {
     fn funnel_by_origin(&self) -> StoreResult<Vec<FunnelRow>> {
         Tracker::funnel_by_origin(self).map_err(StoreError::from)
     }
+    fn funnels(&self) -> StoreResult<Funnels> {
+        Tracker::funnels(self).map_err(StoreError::from)
+    }
     fn funnel_by_region(&self) -> StoreResult<Vec<FunnelRow>> {
         Tracker::funnel_by_region(self).map_err(StoreError::from)
     }
