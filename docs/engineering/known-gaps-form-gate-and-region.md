@@ -66,6 +66,9 @@ Harmless, and none is a common question:
 - Name labels that cite two documents or two languages: "Full name (as on ID) / Nombre completo
   (según cédula)", "Full legal name (as on passport), must match your ID".
 - "RFC writing experience" (mixed case, four words at most, reads as the Mexican tax ID).
+- A number-word or an answer right after "C.I." meaning continuous integration: "Experience with
+  C.I.? No", "C.I. N/A", "C.I. number of builds per day", "C.I. #1 tool you use". A number-word
+  beside "C.I." always makes it the ID card.
 
 ## Region: sentences that close a job and arguably should not
 
@@ -78,8 +81,15 @@ Harmless, and none is a common question:
   Secret clearance", "Bonus if you hold an active Secret clearance", "Extra credit for an active
   Secret clearance", and a "Nice to have:" header on its own line (sentences are split at line
   breaks, so the header and its list are read apart).
-- An adjective outside the closed list between the article and "plus", "bonus" or "advantage" ("a
-  welcome plus"): the wish is not seen.
+- An adjective outside the closed list between the article and "plus", "bonus", "advantage" or
+  "asset" ("a welcome plus"), or a wish said with a word the list does not have: the wish is not
+  seen. This family has no end; each one found goes into `WISH_WORDS` with its sentence in the
+  tests.
+- A place that belongs to a party the candidate works with, said with a verb or a shape the rule
+  does not know: "You must be comfortable working with clients in the US, most of whom are based
+  in US time zones" ("whom", and words between the party and the verb). The verbs known today are
+  with, alongside, support, serve, help, assist, "work for", "report to", "available to" and
+  "responsive to".
 
 ## Region: sentences that leave a job open and should close it
 
@@ -88,8 +98,8 @@ The person still sees these before anything is sent.
 - "Ideally you will hold an active TS/SCI clearance, which is required for this role": the wish
   before the clearance is taken out before the requirement is read.
 - "Preferred: polygraph; active TS/SCI clearance": the whole sentence is read as a wish.
-- A place that belongs to a party the candidate works with, when the candidate is in fact required
-  to be there too and the sentence only says so by implication.
+- A requirement on the candidate whose modal is more than six words before the verb, with another
+  party in between: "You must work for our clients and be based in North American time zones".
 
 ## Limits of the method
 

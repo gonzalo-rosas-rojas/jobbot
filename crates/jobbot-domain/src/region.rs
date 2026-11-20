@@ -517,12 +517,13 @@ static OTHER_PARTY: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// A clause that ends on a party the candidate works with: "...comfortable working with clients",
-/// "...to support customers who are". The place that follows is that party's, whatever the clause
-/// opened with. The party must END the clause: in "must support users and be based in..." the
-/// candidate is still the one who must be there.
+/// "...to support customers who are", "...work for clients mostly". The place that follows is that
+/// party's, whatever the clause opened with. The party must END the clause (an adverb in "-ly" may
+/// follow it): in "must support users and be based in..." the candidate is still the one who must
+/// be there. A bare "for" is not here: "looking for engineers located in..." is about the candidate.
 static WORKS_WITH_OTHER_PARTY: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(&format!(
-        r"\b(?:with|alongside|support(?:s|ing)?|serv(?:e|es|ing)|help(?:s|ing)?|assist(?:s|ing)?)\s+(?:\S+\s+){{0,2}}?{OTHER_PARTY_WORDS}\W+(?:(?:who|that|which)\s+)?(?:(?:are|is)\s+)?$"
+        r"\b(?:with|alongside|support(?:s|ing)?|serv(?:e|es|ing)|help(?:s|ing)?|assist(?:s|ing)?|work(?:s|ing)?\s+for|report(?:s|ing)?\s+to|(?:available|responsive)\s+to)\s+(?:\S+\s+){{0,2}}?{OTHER_PARTY_WORDS}\W+(?:(?:who|that|which)\s+)?(?:(?:are|is)\s+)?(?:\w+ly\s+)?$"
     ))
     .expect("WORKS_WITH_OTHER_PARTY is a valid regex")
 });
@@ -550,11 +551,12 @@ fn time_zone_place_is_the_candidates(sentence: &str) -> bool {
 }
 
 /// The words of a wish, shared by the time-zone hedge and the clearance rules: "preferred",
-/// "preferable", "nice to have", "a plus". "plus", "bonus" and "advantage" count only with an
-/// article ("a plus", "a big plus", "an added bonus"), as "bonus points" or as "bonus:": "an
-/// active clearance plus 5 years of AWS" is not a wish. The adjectives between the article and the
-/// noun are a closed list, so "plus a strong AWS background" is not one either.
-const WISH_WORDS: &str = r"(?:(?:prefer(?:red|ably|able)?|ideally|nice\s+to\s+have|desirable|beneficial|an?\s+(?:(?:big|huge|great|strong|major|definite|real|added|significant|distinct|nice)\s+)?(?:plus|bonus|advantage)|bonus\s+points?)\b|bonus\s*:)";
+/// "preferable", "nice to have", "helpful", "a plus". "plus", "bonus", "advantage" and "asset"
+/// count only with an article ("a plus", "a very big plus", "an added bonus", "an asset"), as
+/// "bonus points" or as "bonus:": "an active clearance plus 5 years of AWS" is not a wish. The
+/// adjectives between the article and the noun are a closed list, so "plus a strong AWS
+/// background" is not one either.
+const WISH_WORDS: &str = r"(?:(?:prefer(?:red|ably|able)?|ideally|nice\s+to\s+have|desirable|beneficial|advantageous|helpful|an?\s+(?:(?:very\s+)?(?:big|huge|great|strong|major|definite|real|added|additional|extra|key|important|significant|distinct|nice)\s+)?(?:plus|bonus|advantage|asset)|bonus\s+points?)\b|bonus\s*:)";
 
 /// A wish or an alternative in a time-zone sentence, not a requirement: "Preferably based in North
 /// American time zones", "...or willing to work those hours".
@@ -1428,6 +1430,7 @@ mod tests {
             // Another party in the middle of the clause does not own the place: the candidate
             // is still the one who must be there.
             "Must support users and be based in North American time zones",
+            "Must work for clients and be based in North American time zones",
         ] {
             assert!(!passes_saying(sentence), "{sentence:?} confines the job");
         }
@@ -1461,6 +1464,21 @@ mod tests {
             "Candidates will collaborate with clients based in US time zones.",
             "You should be comfortable working with a team based in North American time zones",
             "You must work with our clients, who are located in US time zones",
+            "You'll need to work for clients based in US time zones.",
+            "You will need to work for US clients located in North American time zones.",
+            "You'll need to collaborate with clients mostly located in US time zones.",
+            "You must work with clients currently located in US time zones.",
+            "You must be available to clients located in US time zones",
+            "You must be responsive to customers based in US time zones",
+            "You will need to report to a manager based in US time zones",
+            // A wish said with another noun or adjective.
+            "Being located in North American time zones is an asset.",
+            "Being located in US time zones is a key advantage.",
+            "Being located in US time zones is an additional plus.",
+            "Being located in US time zones is an extra bonus.",
+            "Being located in US time zones is a very big plus.",
+            "Location in US time zones is advantageous.",
+            "Being located in US time zones would be helpful.",
             // A wish with an adjective, or "preferable".
             "Being located in North American time zones is a big plus.",
             "Based in US time zones is a strong plus.",
@@ -1588,6 +1606,7 @@ mod tests {
             "An active Secret clearance is a big plus.",
             "Active TS/SCI clearance is a huge plus.",
             "TS/SCI clearance would be a strong plus.",
+            "An active Secret clearance is an asset.",
             // A sentence with a wish word and no requirement word is a wish.
             "Bonus points for an active clearance",
             "Bonus: active Secret clearance",
