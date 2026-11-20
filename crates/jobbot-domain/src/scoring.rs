@@ -93,15 +93,7 @@ fn stated_period(text: &str, start: usize, tail: &str) -> Option<Period> {
     if let Some(period) = period_after(tail) {
         return Some(period);
     }
-    let before: String = {
-        let mut chars: Vec<char> = text[..start]
-            .chars()
-            .rev()
-            .take(PERIOD_BEFORE_CHARS)
-            .collect();
-        chars.reverse();
-        chars.into_iter().collect()
-    };
+    let before = chars_before(text, start, PERIOD_BEFORE_CHARS);
     PERIOD_BEFORE
         .captures(&before)
         .and_then(|caps| caps.get(1))
@@ -183,25 +175,35 @@ const MONTHLY_FLOOR: f64 = 1000.0;
 /// How many characters after a range are read for "per hour" and the like.
 const RATE_TAIL_CHARS: usize = 24;
 
-static PER_TASK: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)\bper[- ]task\b|\btask[- ]based\b").unwrap());
+/// Pay per piece of work: "per task", "per completed task", "per tasks completed", "per
+/// submission", "piece rate"... and "task-based" only when it qualifies the pay ("task-based
+/// rate"), not a duty ("task-based scheduling"). A separator is a space (a non-breaking one
+/// included, `\s` covers it), a hyphen or a non-breaking hyphen.
+static PER_PIECE: LazyLock<Regex> = LazyLock::new(|| {
+    let sep = r"[\s\x{2010}\x{2011}-]+";
+    Regex::new(&format!(
+        r"(?i)\bper{sep}(?:(?:completed|approved|accepted){sep})?(?:tasks?|submissions?|assignments?|items?|units?|projects?)\b|\bpiece{sep}?rate\b|\btask{sep}based{sep}(?:pay|rate|compensation|payment)\b"
+    ))
+    .expect("PER_PIECE is a valid regex")
+});
 
 /// How many characters on each side of a range are read for "per task" and the like.
 const TASK_WINDOW_CHARS: usize = 60;
 
-/// Whether the text right around the range (`start..end`) says the pay is per task or
-/// task-based. Only a window is read, so a duty elsewhere in a long description does not count.
+/// The `count` characters of `text` that end at byte `offset`.
+fn chars_before(text: &str, offset: usize, count: usize) -> String {
+    let mut chars: Vec<char> = text[..offset].chars().rev().take(count).collect();
+    chars.reverse();
+    chars.into_iter().collect()
+}
+
+/// Whether the text right around the range (`start..end`) says the pay is per piece of work. Only
+/// a window is read, so a duty elsewhere in a long description does not count.
 fn paid_per_task(text: &str, start: usize, end: usize) -> bool {
-    let before: String = text[..start]
-        .chars()
-        .rev()
-        .take(TASK_WINDOW_CHARS)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect();
+    let before = chars_before(text, start, TASK_WINDOW_CHARS);
     let after: String = text[end..].chars().take(TASK_WINDOW_CHARS).collect();
-    PER_TASK.is_match(&format!("{before} {after}"))
+    // A `|` between the two sides: "per" before the range and "task" after it are not "per task".
+    PER_PIECE.is_match(&format!("{before}|{after}"))
 }
 
 /// Reads the first pay range in `text` as `(min, max)` US dollars per month: hourly
@@ -500,10 +502,60 @@ mod tests {
         for text in [
             "$20 - $30 per hour, paid per task",
             "Paid per task: $20 - $30/hr equivalent",
-            "Task-based contract, $20 - $30 per hour",
-            "$20 - $30/hr (task based work)",
+            "Task-based pay, $20 - $30 per hour",
+            "$20 - $30/hr (task based rate)",
         ] {
             assert_eq!(parse_salary_monthly_usd(text), (None, None), "{text:?}");
+        }
+    }
+
+    #[test]
+    fn every_way_of_saying_pay_per_piece_leaves_an_hourly_looking_range_unread() {
+        for phrase in [
+            "paid per completed task",
+            "per approved task",
+            "per tasks completed",
+            "per submission",
+            "per assignment",
+            "per item",
+            "per unit",
+            "per project",
+            "piece rate",
+            "piece-rate",
+            "per\u{a0}task",
+            "per\u{2011}task",
+            "task\u{2011}based pay",
+            "task-based rate",
+            "Task-based compensation",
+            "task based payment",
+        ] {
+            let text = format!("$20 - $30 per hour equivalent, {phrase}");
+            assert_eq!(parse_salary_monthly_usd(&text), (None, None), "{text:?}");
+        }
+    }
+
+    #[test]
+    fn a_bare_task_based_word_that_is_not_about_pay_does_not_stop_the_reading() {
+        assert_eq!(
+            parse_salary_monthly_usd(
+                "$40 - $60/hr. Experience with task-based scheduling (Celery)."
+            ),
+            (Some(6400.0), Some(9600.0))
+        );
+    }
+
+    #[test]
+    fn a_per_task_phrase_beyond_the_window_does_not_count() {
+        let gap = "a ".repeat(40);
+        for text in [
+            format!("$20 - $30 per hour {gap}paid per task"),
+            format!("paid per task {gap}$20 - $30 per hour"),
+        ] {
+            assert_eq!(
+                parse_salary_monthly_usd(&text),
+                (Some(3200.0), Some(4800.0)),
+                "{text:?}"
+            );
         }
     }
 
