@@ -42,10 +42,10 @@ enough to match; the gate just does not stop it.
 - **"Tax No (if any)"**, "Tax reference no (if any)": a final "No" after a bracketed remark is read
   as a number only after a document word, and "tax" is not one.
 - **"Full name and ID (as on passport)"**: a weak "ID" with no number-word, in a name label.
-- **Bank name and account type on their own**: "Banco", "Bank name", "Tipo de cuenta" are
-  answerable. Alone they cannot be told from an ordinary question ("Tipo de cuenta" also opens
-  "Tipo de cuenta de GitHub"), and the tests keep them answerable. "Nombre del banco" and "Account
-  type (checking/savings)" are never filled.
+- **Bank name and account type on their own**: "Banco", "Bank name", "Nombre del banco" and "Tipo
+  de cuenta" are answerable. Alone they cannot be told from an ordinary question ("Tipo de cuenta"
+  also opens "Tipo de cuenta de GitHub"), and the tests keep them answerable. "Account type
+  (checking/savings)" is never filled.
 - **Banking blocks worded another way**: only the whole label counts ("Bank information", "Payment
   details", "Datos de pago", "Wire transfer details" and the others of `BANK_DETAILS_BLOCKS`). A
   longer label that still asks for the details ("Please provide your bank information for

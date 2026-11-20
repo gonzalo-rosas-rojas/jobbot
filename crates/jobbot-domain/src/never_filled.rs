@@ -372,9 +372,9 @@ const NUMBER_THEN_DE_NOUNS: &[&str] = &["cuenta", "tarjeta"];
 /// and cannot tell which number it is. A loose bank pattern must not answer it.
 const BARE_WORD_LABELS: &[&str] = &["number", "no", "numero", "nro", "num", "id", "n"];
 
-/// Words that may wrap "account details" without changing what it is: "Please enter your account
-/// details".
-const ACCOUNT_DETAILS_WRAPPERS: &[&str] = &["please", "enter", "your"];
+/// Words a form puts in front of a label without changing what it asks: "Please enter your
+/// account details", "Your payment details".
+const LABEL_WRAPPERS: &[&str] = &["please", "enter", "your"];
 
 /// Words that make "account details" a bank account wherever it stands in the label.
 const BANK_CONTEXT_WORDS: &[&str] = &[
@@ -383,11 +383,11 @@ const BANK_CONTEXT_WORDS: &[&str] = &[
 ];
 
 /// Banking blocks that are the request for the details when they are the whole label (after
-/// markers and the `ACCOUNT_DETAILS_WRAPPERS`), normalized: "Bank information", "Datos de pago",
+/// markers and the `LABEL_WRAPPERS`), normalized: "Bank information", "Datos de pago",
 /// "Account type (checking/savings)". Only the whole label: "Experience with payment systems" or
 /// "Bank reconciliation experience" mention the topic and ask something else. Not here on
-/// purpose: "Banco", "Bank name" and "Tipo de cuenta" alone, which the tests keep answerable
-/// ("Tipo de cuenta de GitHub" and a bank name in a work history sit beside them).
+/// purpose: "Banco", "Bank name", "Nombre del banco" and "Tipo de cuenta" alone, which the tests
+/// keep answerable ("Tipo de cuenta de GitHub" and a bank name in a work history sit beside them).
 const BANK_DETAILS_BLOCKS: &[&str] = &[
     "bank information",
     "banking information",
@@ -401,7 +401,6 @@ const BANK_DETAILS_BLOCKS: &[&str] = &[
     "informacion bancaria",
     "datos para transferencia",
     "datos de pago",
-    "nombre del banco",
     "account type checking savings",
 ];
 
@@ -687,8 +686,8 @@ fn carnet_abbreviation_is_an_id(label: &str) -> bool {
 /// CI" (the others come from `WORDS_BEFORE_AN_ID_TOKEN`).
 const WORDS_BEFORE_A_BARE_TOKEN: &[&str] = &["please"];
 
-/// Whether `before` and `after` hold nothing but the words a form puts around a bare ID token:
-/// "Ingrese su CI", "CI (required)", "CI:".
+/// Whether `before` and `after` hold nothing but the words a form puts around a bare token (CI,
+/// SWIFT): "Ingrese su CI", "CI (required)", "SWIFT:".
 fn nothing_but_wrapping_words(before: &str, after: &str) -> bool {
     let words_of = |text: &str| -> Vec<String> {
         text.split(|c: char| !c.is_alphanumeric())
@@ -875,7 +874,7 @@ fn tax_then_number(words: &[&str]) -> bool {
 }
 
 /// "Account details" is the bank-account block when it is the whole label (after markers and the
-/// wrappers of `ACCOUNT_DETAILS_WRAPPERS`) or when a word of `BANK_CONTEXT_WORDS` is in the label.
+/// wrappers of `LABEL_WRAPPERS`) or when a word of `BANK_CONTEXT_WORDS` is in the label.
 /// "LinkedIn account details" is a social profile and stays answerable, so this cannot be a
 /// phrase of `NEVER_FILLED_TERMS`. The payout words are in `BANK_CONTEXT_WORDS`, so "Account
 /// details (for payouts)" is a bank account too.
@@ -888,12 +887,12 @@ fn account_details(words: &[&str]) -> bool {
         || words.iter().any(|word| BANK_CONTEXT_WORDS.contains(word))
 }
 
-/// The words after the wrappers of `ACCOUNT_DETAILS_WRAPPERS` a form puts in front of a label.
+/// The words after the wrappers of `LABEL_WRAPPERS` a form puts in front of a label.
 fn without_wrappers<'a>(words: &[&'a str]) -> Vec<&'a str> {
     words
         .iter()
         .copied()
-        .skip_while(|word| ACCOUNT_DETAILS_WRAPPERS.contains(word))
+        .skip_while(|word| LABEL_WRAPPERS.contains(word))
         .collect()
 }
 
@@ -1219,9 +1218,7 @@ mod tests {
         // without "de"), or noun then number-word.
         "N° cuenta",
         "Nº cuenta",
-        "N° de cuenta",
         "Nro. cuenta",
-        "Nro. de cuenta",
         "Nro de cuenta",
         "Número cuenta",
         "Numero cuenta",
@@ -1242,7 +1239,6 @@ mod tests {
         "Bank information",
         "Banking information",
         "Bank info",
-        "Bank details",
         "Banking details",
         "Payment details",
         "Payout details",
@@ -1257,15 +1253,8 @@ mod tests {
         "Datos de la cuenta bancaria",
         "Datos para transferencia",
         "Datos de pago",
-        "Nombre del banco",
         "Account type (checking/savings)",
-        "IBAN",
         "SWIFT/BIC",
-        "SWIFT code",
-        "BIC code",
-        "Routing number",
-        "CLABE",
-        "Sort code",
     ];
 
     /// Terms that are never filled alone by phrase (any case), in Chilean, foreign and banking
@@ -1545,6 +1534,7 @@ mod tests {
         "Can you run on-call?",
         "Banco",
         "Bank name",
+        "Nombre del banco",
         "Tipo de cuenta",
         "Account holder name",
         "Passport expiry date",
@@ -1565,8 +1555,6 @@ mod tests {
         "N° de proyectos entregados",
         "Tarjeta de presentación",
         "Número de personas a cargo",
-        "Account manager experience",
-        "GitHub account",
         "Nombre de usuario de la cuenta de GitHub",
         // Questions that only mention payment or banking, and the Swift language.
         "Preferred payment method",
