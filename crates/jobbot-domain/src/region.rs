@@ -729,10 +729,149 @@ pub fn region_ok_with(job: &Job, extra_places_open: &[String]) -> bool {
     !(in_extra_place && demands_work_rights(&job.description))
 }
 
+/// What the posting itself names about where it can be done, for the funnel by region. It measures and decides
+/// nothing: the filter is `region_ok_with`. It reads the title, the location and the remote flag only, never the
+/// description, and knows no extra places.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum RegionSignal {
+    /// It names a region open to Chile: a LATAM title, an open place in the location, or an on-site job in Chile.
+    NamesOpen,
+    /// A remote posting whose location names no place the lists know ("Remote", "", "Springfield").
+    Silent,
+    /// Anything else: a closed place, an on-site job outside Chile.
+    Other,
+}
+
+impl RegionSignal {
+    pub const ALL: [RegionSignal; 3] = [
+        RegionSignal::NamesOpen,
+        RegionSignal::Silent,
+        RegionSignal::Other,
+    ];
+
+    /// The name the funnel groups by.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RegionSignal::NamesOpen => "open",
+            RegionSignal::Silent => "silent",
+            RegionSignal::Other => "other",
+        }
+    }
+}
+
+/// The signal a posting gives about its region. Explicit arguments instead of `&Job` on purpose: the store calls
+/// this with three columns, and a `&Job` built from three fields would silently give wrong answers the day
+/// someone makes the function read the description. It reuses the lists and the place reading of
+/// `region_ok_with`, so the two cannot drift: every `NamesOpen` posting passes the filter.
+pub fn region_signal(title: &str, location: &str, remote: bool) -> RegionSignal {
+    if !remote {
+        let location = location.to_lowercase();
+        return if CHILE_TERMS.iter().any(|term| location.contains(term)) {
+            RegionSignal::NamesOpen
+        } else {
+            RegionSignal::Other
+        };
+    }
+    if LATAM_TITLE.is_match(&fold(title)) {
+        return RegionSignal::NamesOpen;
+    }
+    let mut silent = true;
+    for place in location.split([';', '|', '/', '\n']) {
+        match classify(place, None) {
+            Place::Open => return RegionSignal::NamesOpen,
+            Place::Neutral => {}
+            Place::Extra | Place::Closed => silent = false,
+        }
+    }
+    if silent {
+        RegionSignal::Silent
+    } else {
+        RegionSignal::Other
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::region_ok_with;
+    use super::{RegionSignal, region_ok_with, region_signal};
     use crate::fixtures::make_job_with;
+
+    const NAMES_OPEN_CASES: [(&str, &str, bool); 5] = [
+        ("Backend Engineer (LATAM)", "Remote", true),
+        ("Engineer", "Remote - Latin America", true),
+        ("Engineer", "Worldwide", true),
+        ("Engineer", "USA; Mexico", true),
+        ("Engineer", "Santiago, Chile", false),
+    ];
+
+    #[test]
+    fn region_signal_names_open_for_a_latam_title_or_an_open_place() {
+        for (title, location, remote) in NAMES_OPEN_CASES {
+            assert_eq!(
+                region_signal(title, location, remote),
+                RegionSignal::NamesOpen,
+                "{title} / {location}"
+            );
+        }
+    }
+
+    #[test]
+    fn region_signal_is_silent_when_the_location_names_no_known_place() {
+        for location in ["Remote", "", "Springfield"] {
+            assert_eq!(
+                region_signal("Engineer", location, true),
+                RegionSignal::Silent,
+                "{location:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn region_signal_is_other_for_a_closed_place_or_an_on_site_job_outside_chile() {
+        for (location, remote) in [
+            ("Remote - US", true),
+            ("Toronto, Canada", true),
+            ("Sydney", false),
+            ("", false),
+        ] {
+            assert_eq!(
+                region_signal("Engineer", location, remote),
+                RegionSignal::Other,
+                "{location:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_posting_that_names_an_open_region_always_passes_the_filter() {
+        for (title, location, remote) in NAMES_OPEN_CASES {
+            let job = make_job_with(|job| {
+                job.title = title.into();
+                job.location = location.into();
+                job.remote = remote;
+            });
+            assert!(region_ok_with(&job, &[]), "{title} / {location}");
+        }
+    }
+
+    #[test]
+    fn region_signal_names_are_open_silent_and_other() {
+        assert_eq!(
+            RegionSignal::ALL.map(RegionSignal::as_str),
+            ["open", "silent", "other"]
+        );
+    }
+
+    #[test]
+    fn every_region_signal_is_listed_in_all_once() {
+        for signal in [
+            RegionSignal::NamesOpen,
+            RegionSignal::Silent,
+            RegionSignal::Other,
+        ] {
+            let listed = RegionSignal::ALL.iter().filter(|s| **s == signal).count();
+            assert_eq!(listed, 1, "{signal:?}");
+        }
+    }
 
     /// Whether a job with this title, location, remote flag and description passes the filter.
     fn passes(title: &str, location: &str, remote: bool, description: &str) -> bool {

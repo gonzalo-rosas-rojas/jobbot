@@ -51,7 +51,9 @@ impl Origin {
     /// The origin whose stored name is exactly `text`; `None` for anything else (no trimming, no case
     /// folding: the store reads it back with this, and callers that take typed text normalise it first).
     pub fn parse(text: &str) -> Option<Origin> {
-        Origin::ALL.into_iter().find(|origin| origin.as_str() == text)
+        Origin::ALL
+            .into_iter()
+            .find(|origin| origin.as_str() == text)
     }
 }
 
