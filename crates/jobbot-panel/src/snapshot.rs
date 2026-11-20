@@ -45,7 +45,7 @@ use controls::controls;
 pub use controls::{ClaudeAccount, Controls, ScheduledTask};
 pub use learn::{GapView, Learn, WeakTopic};
 use learn::{gap_view, learn};
-pub use metrics::{Funnel, Metrics, Pipeline, SourceFunnel, Trust};
+pub use metrics::{Funnel, FunnelGroup, Metrics, Pipeline, Trust};
 use metrics::{funnel, metrics, pipeline, trust};
 use today::today;
 pub use today::{Today, TodayEmail, TodayInbox, TodayTask};
@@ -326,6 +326,8 @@ mod tests {
                 interviews: 0,
                 offers: 0,
                 by_source: BTreeMap::new(),
+                by_origin: BTreeMap::new(),
+                by_region: BTreeMap::new(),
             })
         );
         assert_eq!(snap.snoozed.total, 0);
