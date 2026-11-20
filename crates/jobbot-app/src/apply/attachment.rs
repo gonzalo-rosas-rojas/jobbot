@@ -8,9 +8,6 @@ use jobbot_domain::answers::AnswerBank;
 use jobbot_domain::models::Job;
 use jobbot_domain::text::safe_key;
 
-/// Under the data directory: one folder per application, so two jobs with the same title never
-/// share a copy.
-const ATTACHMENTS_DIR: &str = "cv/adjuntos";
 /// A title longer than this is cut, so the name stays well inside Windows' path limit.
 const MAX_TITLE_CHARS: usize = 100;
 
@@ -59,35 +56,86 @@ fn clean_title(title: &str) -> String {
     }
 }
 
+/// The folder that holds the readable copies of one application's CV: `adjuntos/<job key>/` inside
+/// the folder of the tailored CVs (`<data_dir>/cv`). The one place that says where they live, for
+/// `attachment_for` (which makes them) and `refresh_attachment_copies` (which replaces them).
+pub fn attachments_folder(cv_dir: &Path, job_key: &str) -> PathBuf {
+    cv_dir.join("adjuntos").join(safe_key(job_key))
+}
+
+/// A readable CV copy that could not be refreshed: it still holds the CV that was replaced, and
+/// whoever attaches it must be told.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CopyFailure {
+    pub job_key: String,
+    /// The copy, or the folder that could not be read.
+    pub file: PathBuf,
+    pub reason: String,
+}
+
 /// Overwrites the readable copies `attachment_for` made of an application's CV with `cv_pdf`, its
-/// freshly rendered tailored PDF. The copies sit in `adjuntos/<job key>/` next to the CVs (the
-/// folder `cv_pdf` is in, `<data_dir>/cv`), and the handoff sheet names them, so they must not
-/// keep the CV that was replaced. Only files already there are rewritten: nothing is created, and
-/// a failure is logged, never fatal (the same courtesy rule as `attachment_for`).
-pub fn refresh_attachment_copies(cv_pdf: &Path, job_key: &str) {
+/// freshly rendered tailored PDF. The copies sit in `attachments_folder`, and the handoff sheet
+/// names them, so they must not keep the CV that was replaced. Each copy is kept first in
+/// `keep_in` as `<job key>.<name>.<stamp>.pdf`, the way the main PDF is. Only files already there
+/// are rewritten: nothing is created. A folder that does not exist (`NotFound`) means the
+/// application has no copy; any other failure is returned, never swallowed, and never stops the
+/// run (the same courtesy rule as `attachment_for`).
+pub fn refresh_attachment_copies(
+    cv_pdf: &Path,
+    job_key: &str,
+    keep_in: &Path,
+    stamp: &str,
+) -> Vec<CopyFailure> {
     let Some(cv_dir) = cv_pdf.parent() else {
-        return;
+        return Vec::new();
     };
-    let dir = cv_dir.join("adjuntos").join(safe_key(job_key));
-    let Ok(entries) = std::fs::read_dir(&dir) else {
-        return;
+    let folder = attachments_folder(cv_dir, job_key);
+    let failure = |file: &Path, err: &std::io::Error| CopyFailure {
+        job_key: job_key.to_string(),
+        file: file.to_path_buf(),
+        reason: err.to_string(),
     };
-    for entry in entries.flatten() {
-        let path = entry.path();
+    let entries = match std::fs::read_dir(&folder) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+        Err(err) => return vec![failure(&folder, &err)],
+    };
+    let mut failures = Vec::new();
+    for entry in entries {
+        let path = match entry {
+            Ok(entry) => entry.path(),
+            Err(err) => {
+                failures.push(failure(&folder, &err));
+                continue;
+            }
+        };
         let is_pdf = path
             .extension()
             .is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"));
-        if is_pdf && let Err(err) = std::fs::copy(cv_pdf, &path) {
+        if !is_pdf {
+            continue;
+        }
+        let stem = path
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let kept = keep_in.join(format!("{}.{stem}.{stamp}.pdf", safe_key(job_key)));
+        let replaced = std::fs::create_dir_all(keep_in)
+            .and_then(|()| std::fs::copy(&path, &kept))
+            .and_then(|_| std::fs::copy(cv_pdf, &path));
+        if let Err(err) = replaced {
             tracing::warn!(error = %err, file = %path.display(), "the readable CV copy could not be refreshed");
+            failures.push(failure(&path, &err));
         }
     }
+    failures
 }
 
 /// Copies `cv_pdf` to `<data_dir>/cv/adjuntos/<job key>/<attachment_name>` and returns the copy.
 /// The name is a courtesy, never a reason to stop a run: if the copy fails the form gets the
 /// tailored PDF as it is.
 pub fn attachment_for(cv_pdf: &Path, job: &Job, bank: &AnswerBank, data_dir: &Path) -> PathBuf {
-    let dir = data_dir.join(ATTACHMENTS_DIR).join(safe_key(&job.key()));
+    let dir = attachments_folder(&data_dir.join("cv"), &job.key());
     let target = dir.join(attachment_name(&job.title, bank));
     let copied = std::fs::create_dir_all(&dir).and_then(|()| std::fs::copy(cv_pdf, &target));
     match copied {

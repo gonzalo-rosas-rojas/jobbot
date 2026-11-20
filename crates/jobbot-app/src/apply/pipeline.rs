@@ -18,7 +18,7 @@ use jobbot_domain::rules::{Criteria, Exclusions};
 use jobbot_domain::state::State;
 use jobbot_domain::text::safe_key;
 
-use crate::apply::attachment::{attachment_for, refresh_attachment_copies};
+use crate::apply::attachment::{CopyFailure, attachment_for, refresh_attachment_copies};
 use crate::apply::cv::{
     CvError, Renderer, assert_no_new_skills, ensure_ready, relocating_to, tailor,
 };
@@ -314,6 +314,15 @@ pub async fn prepare_report_relocating(
     Ok(PrepareReport { prepared, skipped })
 }
 
+/// What `refresh_cvs` did.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RefreshReport {
+    /// The keys whose CV was rendered again.
+    pub refreshed: Vec<String>,
+    /// Readable copies (`adjuntos/`) that still hold the replaced CV.
+    pub copy_failures: Vec<CopyFailure>,
+}
+
 /// Folder, next to the CVs, that keeps every CV `refresh_cvs` replaced.
 pub const REPLACED_CV_DIR: &str = "replaced";
 
@@ -323,19 +332,20 @@ pub const REPLACED_CV_DIR: &str = "replaced";
 /// what went out. Gonza may have sent a waiting one by hand without confirming it, so the PDF being
 /// replaced is first copied to `<its folder>/replaced/<name>.<UTC time>.pdf`. The readable copies
 /// in `adjuntos/<job key>/` (the files the handoff sheets name) are overwritten with the new PDF
-/// too. Returns the keys whose
-/// CV was rendered again, best score first within each state.
-#[tracing::instrument(skip_all, fields(refreshed = Empty))]
+/// too (each one kept first in `replaced/`), and a copy that could not be replaced is returned in
+/// `copy_failures`. Returns the keys whose CV was rendered again, best score first within each
+/// state.
+#[tracing::instrument(skip_all, fields(refreshed = Empty, copy_failures = Empty))]
 pub async fn refresh_cvs(
     tracker: &dyn Store,
     cv_master: &Path,
     renderer: &dyn Renderer,
     relocation: Relocation<'_>,
     now: DateTime<Utc>,
-) -> Result<Vec<String>, CvError> {
+) -> Result<RefreshReport, CvError> {
     let master = read_master(cv_master).await?;
     let stamp = now.format("%Y%m%dT%H%M%SZ").to_string();
-    let mut refreshed = Vec::new();
+    let mut report = RefreshReport::default();
     for state in [State::Prepared, State::NeedsGonza] {
         for row in tracker.list_by_state(state)? {
             let Some(cv_path) = row.cv_path.as_deref() else {
@@ -362,13 +372,27 @@ pub async fn refresh_cvs(
                     .with_context(|| format!("keeping {}", pdf_path.display()))?;
             }
             renderer.render(&variant, pdf_path).await?;
-            // The copy a handoff sheet names is a file of its own: it carries the new CV too.
-            refresh_attachment_copies(pdf_path, &row.job_key);
-            refreshed.push(row.job_key);
+            // The copy a handoff sheet names is a file of its own: it carries the new CV too,
+            // and one that could not be replaced is reported, so nobody attaches it believing
+            // it was refreshed.
+            let replaced_dir = pdf_path
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join(REPLACED_CV_DIR);
+            report.copy_failures.extend(refresh_attachment_copies(
+                pdf_path,
+                &row.job_key,
+                &replaced_dir,
+                &stamp,
+            ));
+            report.refreshed.push(row.job_key);
         }
     }
-    crate::record_counts(&[("refreshed", refreshed.len())]);
-    Ok(refreshed)
+    crate::record_counts(&[
+        ("refreshed", report.refreshed.len()),
+        ("copy_failures", report.copy_failures.len()),
+    ]);
+    Ok(report)
 }
 
 /// What `submit_all` did with one application.

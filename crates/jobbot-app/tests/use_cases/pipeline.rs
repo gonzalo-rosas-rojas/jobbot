@@ -221,6 +221,89 @@ async fn refresh_also_replaces_the_readable_copy_a_handoff_sheet_names() {
         std::fs::read(other.join("cv_name_Title.pdf")).unwrap(),
         b"%PDF-before"
     );
+    // The copy that was replaced is kept under replaced/, as the main PDF is, and carries its
+    // job key so two jobs with the same title cannot overwrite each other's.
+    let kept: Vec<_> = std::fs::read_dir(env.out_dir().join(REPLACED_CV_DIR))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name.contains("cv_name_Title"))
+        .collect();
+    assert_eq!(kept.len(), 1, "{kept:?}");
+    assert!(kept[0].starts_with(&safe_key(&job.key())), "{kept:?}");
+    let kept_path = env.out_dir().join(REPLACED_CV_DIR).join(&kept[0]);
+    assert_eq!(std::fs::read(kept_path).unwrap(), b"%PDF-before");
+}
+#[tokio::test]
+async fn refresh_reports_each_readable_copy_it_could_not_refresh_and_not_a_missing_folder() {
+    let env = Env::new();
+    let master = env.cv_master(MASTER);
+    let jobs: Vec<Job> = ["unreadable", "readonly", "none"]
+        .iter()
+        .map(|id| {
+            make_job_with(|j| {
+                j.external_id = (*id).into();
+                j.company = format!("Company {id}");
+            })
+        })
+        .collect();
+    for (job, score) in jobs.iter().zip([80.0, 70.0, 60.0]) {
+        env.scored(job, score);
+    }
+    prepare_all(
+        &env.tracker,
+        &master,
+        &env.out_dir(),
+        &FakeRenderer::default(),
+        *NOW,
+    )
+    .await
+    .unwrap();
+    let copies = env.out_dir().join("adjuntos");
+    std::fs::create_dir_all(&copies).unwrap();
+    // A file where the folder should be: it cannot be read as a folder.
+    std::fs::write(copies.join(safe_key(&jobs[0].key())), b"in the way").unwrap();
+    // A copy that refuses to be overwritten.
+    let readonly_dir = copies.join(safe_key(&jobs[1].key()));
+    std::fs::create_dir_all(&readonly_dir).unwrap();
+    let stuck = readonly_dir.join("cv_name_Title.pdf");
+    std::fs::write(&stuck, b"%PDF-before").unwrap();
+    let mut permissions = std::fs::metadata(&stuck).unwrap().permissions();
+    permissions.set_readonly(true);
+    std::fs::set_permissions(&stuck, permissions).unwrap();
+    // jobs[2] never had a copy: no folder at all.
+
+    let report = refresh_cvs(
+        &env.tracker,
+        &master,
+        &FakeRenderer::default(),
+        Relocation {
+            places: &[],
+            to: None,
+        },
+        *NOW,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(report.refreshed.len(), 3);
+    let mut failed: Vec<&str> = report
+        .copy_failures
+        .iter()
+        .map(|failure| failure.job_key.as_str())
+        .collect();
+    failed.sort_unstable();
+    assert_eq!(failed, ["test:readonly", "test:unreadable"]);
+    assert!(
+        report
+            .copy_failures
+            .iter()
+            .all(|failure| !failure.reason.is_empty())
+    );
+    // The stale copy is still there, and now it is on record.
+    assert_eq!(std::fs::read(&stuck).unwrap(), b"%PDF-before");
+    let mut permissions = std::fs::metadata(&stuck).unwrap().permissions();
+    permissions.set_readonly(false);
+    std::fs::set_permissions(&stuck, permissions).unwrap();
 }
 #[tokio::test]
 async fn refresh_renders_waiting_cvs_again_keeps_the_old_ones_and_never_touches_sent_ones() {
@@ -269,7 +352,8 @@ async fn refresh_renders_waiting_cvs_again_keeps_the_old_ones_and_never_touches_
         *NOW + TimeDelta::nanoseconds(999_999_999),
     )
     .await
-    .unwrap();
+    .unwrap()
+    .refreshed;
 
     assert!(refreshed.contains(&sydney.key()), "{refreshed:?}");
     assert!(refreshed.contains(&latam.key()), "{refreshed:?}");

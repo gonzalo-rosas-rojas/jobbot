@@ -8,6 +8,8 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use jobbot_app::reporting::status::describe_auto_approve;
 
+use jobbot_app::apply::attachment::CopyFailure;
+
 use super::{Deps, EXIT_CV_NOT_READY, EXIT_ERROR, EXIT_OK, open_tracker};
 use crate::actions;
 use crate::cv::CvError;
@@ -186,15 +188,28 @@ pub(super) async fn cmd_prepare_refresh(
         now,
     )
     .await;
-    let Some(keys) = cv_ready(result)? else {
+    let Some(report) = cv_ready(result)? else {
         return cv_not_ready(out);
     };
     writeln!(
         out,
         "{} CV generados de nuevo desde el CV maestro (los anteriores quedan en data/cv/{REPLACED_CV_DIR})",
-        keys.len()
+        report.refreshed.len()
     )?;
+    for failure in &report.copy_failures {
+        writeln!(out, "{}", copy_failure_line(failure))?;
+    }
     Ok(EXIT_OK)
+}
+
+/// One line for a readable CV copy that could not be refreshed: it still holds the old CV.
+fn copy_failure_line(failure: &CopyFailure) -> String {
+    format!(
+        "No se pudo actualizar la copia {} de {}: {}; todavía tiene el CV anterior, no la adjuntes",
+        failure.file.display(),
+        failure.job_key,
+        failure.reason
+    )
 }
 
 /// The auto-approval threshold (see `actions::set_auto_approve_min`): shown with no argument, set
@@ -335,6 +350,20 @@ mod tests {
                  una pasada (reglas: name:Blocked, domain:x.example); el envío las rechaza igual"
             ),
             "{text}"
+        );
+    }
+
+    #[test]
+    fn a_copy_that_could_not_be_refreshed_gets_a_line_that_says_not_to_attach_it() {
+        let line = copy_failure_line(&CopyFailure {
+            job_key: "ashby:7".into(),
+            file: std::path::PathBuf::from("data/cv/adjuntos/ashby_7/cv_ana_gomez_Engineer.pdf"),
+            reason: "access denied".into(),
+        });
+        assert_eq!(
+            line,
+            "No se pudo actualizar la copia data/cv/adjuntos/ashby_7/cv_ana_gomez_Engineer.pdf de \
+             ashby:7: access denied; todavía tiene el CV anterior, no la adjuntes"
         );
     }
 
