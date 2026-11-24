@@ -68,7 +68,7 @@ tracing-core = "0.1.36"
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "std"] }
 # Unicode TR39 confusable skeletons: an excluded name spelled with look-alike letters still matches.
 unicode-security = "0.1.2"
-url = "2.5.8"
+url = "2.5.9"
 wiremock = "0.6.5"
 
 [workspace.lints.rust]
